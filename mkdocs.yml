@@ -71,28 +71,6 @@ plugins:
             separate_signature: true
             show_signature_annotations: true
             members_order: source
-  - llmstxt:
-      full_output: llms-full.txt
-      sections:
-        Home:
-          - index.md
-        Get Started:
-          - usage/installation.md
-          - usage/quickstart.md
-        Architecture:
-          - architecture/overview.md
-        Guides:
-          - usage/index.md
-          - usage/cli.md
-          - usage/admin.md
-          - usage/remote.md
-          - usage/irc.md
-        API Reference:
-          - api/index.md
-        Examples:
-          - examples/index.md
-        Changelog:
-          - changelog.md
 
 markdown_extensions:
   - admonition
