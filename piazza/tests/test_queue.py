@@ -65,6 +65,27 @@ class TestClaim:
         assert result.claimed_by == "worker-1"
         assert result.claimed_at  # non-empty ISO string
 
+    def test_claim_result_includes_lease_until(self, bus):
+        bus.publish("jobs", "admin", "task", "payload", queue=True)
+        result = bus.claim("jobs", "worker-1", lease_seconds=60)
+        assert result is not None
+        assert result.lease_until is not None
+        # lease_until should be a valid ISO timestamp after claimed_at
+        from datetime import datetime
+
+        claimed = datetime.fromisoformat(result.claimed_at)
+        lease = datetime.fromisoformat(result.lease_until)
+        delta = (lease - claimed).total_seconds()
+        assert 59 <= delta <= 61  # ~60 seconds lease
+
+    def test_ack_result_has_no_lease_until(self, bus):
+        bus.publish("jobs", "admin", "task", "payload", queue=True)
+        result = bus.claim("jobs", "worker-1")
+        assert result is not None
+        acked = bus.ack(result.message.id, "worker-1")
+        assert acked is not None
+        assert acked.lease_until is None  # ack doesn't set lease
+
     def test_claim_atomic_two_threads(self, bus):
         for i in range(10):
             bus.publish("jobs", "admin", "task", f"task-{i}", queue=True)
