@@ -224,6 +224,7 @@ class MemoryBackend:
                         status="claimed",
                         claimed_by=claimed_by,
                         claimed_at=claimed_at,
+                        lease_until=lease_until,
                     )
         return None
 
