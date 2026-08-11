@@ -130,7 +130,13 @@ class TokenStore:
         Returns:
             Dict with all fields including the plaintext ``token``
             (shown this once only).
+
+        Raises:
+            ValueError: If *agent_id* is an empty string (use ``None``
+                explicitly for supertokens).
         """
+        if isinstance(agent_id, str) and not agent_id.strip():
+            raise ValueError("agent_id must be a non-empty string or None")
         token = _generate_token()
         token_hash = _hash_token(token)
         token_prefix = token[:_DISPLAY_PREFIX_LEN]

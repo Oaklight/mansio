@@ -511,8 +511,14 @@ class AdminServer:
                     "message": "Token store not configured",
                 }, 503
             data = request.json() if request.body else {}
+            agent_id = data.get("agent_id")
+            if not agent_id or not isinstance(agent_id, str) or not agent_id.strip():
+                return {
+                    "error": "Bad Request",
+                    "message": "agent_id must be a non-empty string",
+                }, 400
             entry = token_store.create_token(
-                agent_id=data.get("agent_id"), label=data.get("label", "")
+                agent_id=agent_id.strip(), label=data.get("label", "")
             )
             return {"ok": True, "token": entry}, 201
 
