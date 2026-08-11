@@ -517,9 +517,7 @@ class AdminServer:
                     "error": "Bad Request",
                     "message": "agent_id must be a non-empty string",
                 }, 400
-            entry = token_store.create_token(
-                agent_id=agent_id.strip(), label=data.get("label", "")
-            )
+            entry = token_store.create_token(agent_id=agent_id.strip(), label=data.get("label", ""))
             return {"ok": True, "token": entry}, 201
 
         @self._app.delete("/api/tokens/<token_id>")
