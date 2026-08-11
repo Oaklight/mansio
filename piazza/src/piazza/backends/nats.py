@@ -269,9 +269,7 @@ class NATSBackend:
             return False
         if sender and msg.sender != sender:
             return False
-        if msg_type and msg.msg_type != msg_type:
-            return False
-        return True
+        return not (msg_type and msg.msg_type != msg_type)
 
     def query(
         self,
