@@ -21,11 +21,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import threading
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from piazza.types import Message
+from piazza.types import AgentPresence, ClaimResult, Message
 
 try:
     import nats
@@ -41,24 +43,7 @@ try:
 except ImportError as exc:
     raise ImportError("NATS backend requires 'nats-py'. Install with: pip install nats-py") from exc
 
-
-def _ensure_loop() -> asyncio.AbstractEventLoop:
-    """Get or create an event loop for sync-to-async bridging."""
-    try:
-        loop = asyncio.get_running_loop()
-        return loop
-    except RuntimeError:
-        pass
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        return loop
+logger = logging.getLogger(__name__)
 
 
 class NATSBackend:
@@ -109,18 +94,24 @@ class NATSBackend:
         self._loop_thread: threading.Thread | None = None
         self._connected = False
 
+        # In-memory presence store (not persisted to NATS)
+        self._presence: dict[str, dict] = {}
+
     def _subject(self, channel: str) -> str:
-        """Map a piazza channel name to a NATS subject."""
-        # Replace dots in channel names to avoid NATS subject collisions
-        safe_channel = channel.replace(".", "_dot_").replace(" ", "_")
+        """Map a piazza channel name to a NATS subject.
+
+        Uses percent-encoding for lossless round-tripping.
+        Characters that conflict with NATS subject hierarchy
+        (``.``, ``>``, ``*``, `` ``) are percent-encoded.
+        """
+        safe_channel = urllib.parse.quote(channel, safe="-_~")
         return f"{self._subject_prefix}.{safe_channel}"
 
     def _channel_from_subject(self, subject: str) -> str:
         """Extract piazza channel name from a NATS subject."""
         prefix = f"{self._subject_prefix}."
         if subject.startswith(prefix):
-            channel = subject[len(prefix) :]
-            return channel.replace("_dot_", ".").replace("_", " ")
+            return urllib.parse.unquote(subject[len(prefix) :])
         return subject
 
     def _msg_to_nats_payload(self, message: Message) -> bytes:
@@ -202,11 +193,12 @@ class NATSBackend:
         self._run_async(self._async_connect())
         self._connected = True
 
-    def store(self, message: Message) -> None:
+    def store(self, message: Message, *, queue: bool = False) -> None:
         """Publish a message to NATS JetStream.
 
         Args:
             message: Message to store.
+            queue: If True, mark as queue message (stored in metadata).
         """
         if not self._connected:
             self.connect()
@@ -220,39 +212,57 @@ class NATSBackend:
 
         self._run_async(_pub())
 
-    async def _consume_filtered(
+    async def _fetch_all(
         self,
         subject: str,
         *,
-        limit: int = 100,
+        limit: int = 0,
         after: str | None = None,
         sender: str | None = None,
         msg_type: str | None = None,
     ) -> list[Message]:
-        """Consume messages from a JetStream subject with optional filters.
+        """Fetch messages from a JetStream subject using pull consumer.
 
-        Shared async helper for query, query_all, and similar read paths.
-        Creates an ephemeral ordered consumer, iterates messages, applies
-        filters, and returns up to ``limit`` matching results.
+        Uses pull_subscribe + fetch(batch) for efficient retrieval
+        without the 1-second subscribe timeout.
         """
         assert self._js is not None
         messages: list[Message] = []
+        fetch_limit = limit if limit > 0 else 1000
 
         try:
-            sub = await self._js.subscribe(subject, ordered_consumer=True)
+            sub = await self._js.pull_subscribe(subject, stream=self._stream_name)
             try:
-                while len(messages) < limit:
+                while True:
                     try:
-                        msg = await asyncio.wait_for(sub.next_msg(), timeout=1.0)
+                        batch = await sub.fetch(
+                            batch=min(fetch_limit, 100),
+                            timeout=0.5,
+                        )
                     except asyncio.TimeoutError:
                         break
-                    piazza_msg = self._nats_payload_to_msg(msg.data)
-                    if self._matches(piazza_msg, after=after, sender=sender, msg_type=msg_type):
-                        messages.append(piazza_msg)
+                    except Exception:
+                        # nats-py raises TimeoutError or nats.errors on empty
+                        break
+
+                    if not batch:
+                        break
+
+                    for msg in batch:
+                        piazza_msg = self._nats_payload_to_msg(msg.data)
+                        if self._matches(
+                            piazza_msg,
+                            after=after,
+                            sender=sender,
+                            msg_type=msg_type,
+                        ):
+                            messages.append(piazza_msg)
+                            if limit and len(messages) >= limit:
+                                return messages
             finally:
                 await sub.unsubscribe()
         except Exception:
-            pass
+            logger.warning("NATS fetch failed for subject %s", subject, exc_info=True)
 
         return messages
 
@@ -279,9 +289,6 @@ class NATSBackend:
     ) -> list[Message]:
         """Retrieve messages from a channel via JetStream.
 
-        Creates an ephemeral ordered consumer, fetches messages,
-        and filters by the ``after`` cursor.
-
         Args:
             channel: Channel to query.
             after: If provided, only return messages with ID > this value.
@@ -294,10 +301,13 @@ class NATSBackend:
             self.connect()
 
         subject = self._subject(channel)
-        return self._run_async(self._consume_filtered(subject, limit=limit, after=after))
+        return self._run_async(self._fetch_all(subject, limit=limit, after=after))
 
     def list_channels(self) -> list[str]:
-        """List all channels by querying JetStream stream subjects.
+        """List all channels using JetStream stream info.
+
+        Uses the stream info API to get subject counts without
+        consuming all messages.
 
         Returns:
             Sorted list of channel names.
@@ -307,35 +317,30 @@ class NATSBackend:
 
         async def _list() -> list[str]:
             assert self._js is not None
-            channels: set[str] = set()
-
+            channels: list[str] = []
             try:
-                sub = await self._js.subscribe(
-                    f"{self._subject_prefix}.>",
-                    ordered_consumer=True,
-                )
-                try:
-                    while True:
-                        try:
-                            msg = await asyncio.wait_for(
-                                sub.next_msg(),
-                                timeout=1.0,
-                            )
-                            piazza_msg = self._nats_payload_to_msg(msg.data)
-                            channels.add(piazza_msg.channel)
-                        except asyncio.TimeoutError:
-                            break
-                finally:
-                    await sub.unsubscribe()
+                stream_info = await self._js.stream_info(self._stream_name)
+                state = stream_info.state
+                # state.subjects is a dict of subject → message count
+                if hasattr(state, "subjects") and state.subjects:
+                    for subj in state.subjects:
+                        channels.append(self._channel_from_subject(subj))
+                else:
+                    # Fallback: scan messages if subjects not available
+                    seen: set[str] = set()
+                    msgs = await self._fetch_all(f"{self._subject_prefix}.>")
+                    for m in msgs:
+                        if m.channel not in seen:
+                            seen.add(m.channel)
+                            channels.append(m.channel)
             except Exception:
-                pass
-
+                logger.warning("Failed to list channels from NATS", exc_info=True)
             return sorted(channels)
 
         return self._run_async(_list())
 
     def count_messages(self, channel: str | None = None) -> int:
-        """Count messages, optionally filtered by channel.
+        """Count messages using JetStream stream info.
 
         Args:
             channel: If provided, count only messages in this channel.
@@ -348,24 +353,24 @@ class NATSBackend:
 
         async def _count() -> int:
             assert self._js is not None
-            count = 0
-
-            subject = self._subject(channel) if channel else f"{self._subject_prefix}.>"
             try:
-                sub = await self._js.subscribe(subject, ordered_consumer=True)
-                try:
-                    while True:
-                        try:
-                            await asyncio.wait_for(sub.next_msg(), timeout=1.0)
-                            count += 1
-                        except asyncio.TimeoutError:
-                            break
-                finally:
-                    await sub.unsubscribe()
-            except Exception:
-                pass
+                stream_info = await self._js.stream_info(self._stream_name)
+                state = stream_info.state
 
-            return count
+                if channel is None:
+                    return state.messages
+
+                # Count for specific channel subject
+                subject = self._subject(channel)
+                if hasattr(state, "subjects") and state.subjects:
+                    return state.subjects.get(subject, 0)
+
+                # Fallback: count by consuming
+                msgs = await self._fetch_all(subject)
+                return len(msgs)
+            except Exception:
+                logger.warning("Failed to count messages from NATS", exc_info=True)
+                return 0
 
         return self._run_async(_count())
 
@@ -394,8 +399,12 @@ class NATSBackend:
 
         subject = self._subject(channel) if channel else f"{self._subject_prefix}.>"
         return self._run_async(
-            self._consume_filtered(
-                subject, limit=limit, after=after, sender=sender, msg_type=msg_type
+            self._fetch_all(
+                subject,
+                limit=limit,
+                after=after,
+                sender=sender,
+                msg_type=msg_type,
             )
         )
 
@@ -414,24 +423,9 @@ class NATSBackend:
 
             all_msgs: list[Message] = []
             try:
-                sub = await self._js.subscribe(
-                    f"{self._subject_prefix}.>",
-                    ordered_consumer=True,
-                )
-                try:
-                    while True:
-                        try:
-                            msg = await asyncio.wait_for(
-                                sub.next_msg(),
-                                timeout=1.0,
-                            )
-                            all_msgs.append(self._nats_payload_to_msg(msg.data))
-                        except asyncio.TimeoutError:
-                            break
-                finally:
-                    await sub.unsubscribe()
+                all_msgs = await self._fetch_all(f"{self._subject_prefix}.>")
             except Exception:
-                pass
+                logger.warning("Failed to fetch messages for stats", exc_info=True)
 
             senders: set[str] = set()
             types: dict[str, int] = {}
@@ -510,7 +504,7 @@ class NATSBackend:
                         try:
                             msg = await asyncio.wait_for(
                                 sub.next_msg(),
-                                timeout=1.0,
+                                timeout=0.5,
                             )
                             piazza_msg = self._nats_payload_to_msg(msg.data)
                             if piazza_msg.timestamp > cutoff:
@@ -520,8 +514,7 @@ class NATSBackend:
                 finally:
                     await sub.unsubscribe()
             except Exception:
-                # Fallback: scan all
-                pass
+                logger.warning("Failed to query recent timestamps from NATS", exc_info=True)
 
             result.sort()
             return result
@@ -548,9 +541,7 @@ class NATSBackend:
                 "connected": True,
             }
             try:
-                stream_info = await self._js.find_stream_info_by_subject(
-                    f"{self._subject_prefix}.>"
-                )
+                stream_info = await self._js.stream_info(self._stream_name)
                 state = stream_info.state
                 info_dict["total_messages"] = state.messages
                 info_dict["total_bytes"] = state.bytes
@@ -558,10 +549,100 @@ class NATSBackend:
                 info_dict["first_seq"] = state.first_seq
                 info_dict["last_seq"] = state.last_seq
             except Exception:
-                pass
+                logger.warning("Failed to get stream info", exc_info=True)
             return info_dict
 
         return self._run_async(_info())
+
+    # ── Queue operations ──────────────────────────────────────
+
+    def claim(
+        self, channel: str, claimed_by: str, *, lease_seconds: int = 300
+    ) -> ClaimResult | None:
+        """Claim the oldest unclaimed queue message.
+
+        Not yet implemented for NATS backend.
+        """
+        raise NotImplementedError(
+            "Queue claim is not yet implemented for NATSBackend. "
+            "Use SQLiteBackend or MemoryBackend for queue operations."
+        )
+
+    def ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
+        """Acknowledge a claimed message.
+
+        Not yet implemented for NATS backend.
+        """
+        raise NotImplementedError(
+            "Queue ack is not yet implemented for NATSBackend. "
+            "Use SQLiteBackend or MemoryBackend for queue operations."
+        )
+
+    def get_queue_stats(self, channel: str | None = None) -> dict:
+        """Return queue status counts.
+
+        Not yet implemented for NATS backend.
+        """
+        raise NotImplementedError(
+            "Queue stats is not yet implemented for NATSBackend. "
+            "Use SQLiteBackend or MemoryBackend for queue operations."
+        )
+
+    def retire_completed(self, max_age_seconds: int = 86400, max_per_channel: int = 1000) -> int:
+        """Remove old completed queue messages.
+
+        Not yet implemented for NATS backend.
+        """
+        raise NotImplementedError(
+            "Queue retire is not yet implemented for NATSBackend. "
+            "Use SQLiteBackend or MemoryBackend for queue operations."
+        )
+
+    # ── Presence ──────────────────────────────────────────────
+
+    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *agent_id*."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._presence[agent_id] = {
+                "last_seen": now,
+                "metadata": metadata,
+            }
+
+    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+        """Return all known agents with computed online/offline status."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
+        result: list[AgentPresence] = []
+        with self._lock:
+            for agent_id, rec in self._presence.items():
+                status = "online" if rec["last_seen"] >= cutoff else "offline"
+                result.append(
+                    AgentPresence(
+                        agent_id=agent_id,
+                        status=status,
+                        last_seen=rec["last_seen"],
+                        metadata=rec["metadata"],
+                    )
+                )
+        result.sort(key=lambda a: a.agent_id)
+        return result
+
+    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
+        """Return presence for a single agent, or ``None`` if unknown."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
+        with self._lock:
+            rec = self._presence.get(agent_id)
+            if rec is None:
+                return None
+            status = "online" if rec["last_seen"] >= cutoff else "offline"
+            return AgentPresence(
+                agent_id=agent_id,
+                status=status,
+                last_seen=rec["last_seen"],
+                metadata=rec["metadata"],
+            )
+
+    # ── Lifecycle ─────────────────────────────────────────────
 
     def close(self) -> None:
         """Close NATS connection and stop background loop."""

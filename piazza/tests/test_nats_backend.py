@@ -284,3 +284,90 @@ class TestNATSBackendUnicode:
         backend.store(msg)
         results = backend.query("test-channel")
         assert results[0].payload == payload
+
+
+class TestNATSBackendChannelEncoding:
+    """Tests for lossless channel name encoding."""
+
+    def test_underscore_channel_roundtrip(self, backend: NATSBackend):
+        """Underscore channels must not be mangled."""
+        msg = _make_msg(channel="dev_piazza")
+        backend.store(msg)
+        results = backend.query("dev_piazza")
+        assert len(results) == 1
+        assert results[0].channel == "dev_piazza"
+
+    def test_dotted_channel_roundtrip(self, backend: NATSBackend):
+        """Dots must be encoded to avoid NATS subject hierarchy."""
+        msg = _make_msg(channel="config.v2.beta")
+        backend.store(msg)
+        results = backend.query("config.v2.beta")
+        assert len(results) == 1
+        assert results[0].channel == "config.v2.beta"
+
+    def test_space_channel_roundtrip(self, backend: NATSBackend):
+        msg = _make_msg(channel="my channel")
+        backend.store(msg)
+        results = backend.query("my channel")
+        assert len(results) == 1
+        assert results[0].channel == "my channel"
+
+    def test_dm_colon_channel_roundtrip(self, backend: NATSBackend):
+        msg = _make_msg(channel="dm:alice:bob")
+        backend.store(msg)
+        results = backend.query("dm:alice:bob")
+        assert len(results) == 1
+        assert results[0].channel == "dm:alice:bob"
+
+
+class TestNATSBackendQueueNotImplemented:
+    """Queue operations should raise NotImplementedError."""
+
+    def test_claim_not_implemented(self, backend: NATSBackend):
+        with pytest.raises(NotImplementedError):
+            backend.claim("test-channel", "worker-1")
+
+    def test_ack_not_implemented(self, backend: NATSBackend):
+        with pytest.raises(NotImplementedError):
+            backend.ack("msg-1", "worker-1")
+
+    def test_queue_stats_not_implemented(self, backend: NATSBackend):
+        with pytest.raises(NotImplementedError):
+            backend.get_queue_stats()
+
+    def test_retire_not_implemented(self, backend: NATSBackend):
+        with pytest.raises(NotImplementedError):
+            backend.retire_completed()
+
+
+class TestNATSBackendPresence:
+    """Tests for presence (heartbeat / roster)."""
+
+    def test_heartbeat_records_agent(self, backend: NATSBackend):
+        backend.heartbeat("agent-a")
+        agents = backend.agents()
+        assert len(agents) == 1
+        assert agents[0].agent_id == "agent-a"
+        assert agents[0].status == "online"
+
+    def test_heartbeat_with_metadata(self, backend: NATSBackend):
+        backend.heartbeat("agent-a", metadata={"name": "Alice"})
+        result = backend.agent_status("agent-a")
+        assert result is not None
+        assert result.metadata == {"name": "Alice"}
+
+    def test_agent_unknown(self, backend: NATSBackend):
+        assert backend.agent_status("nonexistent") is None
+
+    def test_agent_offline_by_timeout(self, backend: NATSBackend):
+        backend.heartbeat("agent-a")
+        result = backend.agent_status("agent-a", timeout_seconds=0)
+        assert result is not None
+        assert result.status == "offline"
+
+    def test_agents_sorted(self, backend: NATSBackend):
+        backend.heartbeat("charlie")
+        backend.heartbeat("alice")
+        backend.heartbeat("bob")
+        agents = backend.agents()
+        assert [a.agent_id for a in agents] == ["alice", "bob", "charlie"]
