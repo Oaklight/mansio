@@ -5,21 +5,19 @@ Covers all three backends (Memory, SQLite, Maildir) and the Bus layer.
 
 from __future__ import annotations
 
+import importlib.util
 import time
 
 import pytest
-
-try:
-    from piazza.backends.maildir import MaildirBackend
-except ImportError:
-    MaildirBackend = None  # type: ignore[assignment,misc]
 
 from piazza.backends.memory import MemoryBackend
 from piazza.backends.sqlite import SQLiteBackend
 from piazza.bus import Bus
 from piazza.types import AgentPresence
 
-_skip_maildir = pytest.mark.skipif(MaildirBackend is None, reason="maildir backend not available")
+_has_maildir = importlib.util.find_spec("piazza.backends.maildir") is not None
+
+_skip_maildir = pytest.mark.skipif(not _has_maildir, reason="maildir backend not available")
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -41,16 +39,18 @@ def sqlite_backend(tmp_path):
 
 @pytest.fixture
 def maildir_backend(tmp_path):
-    if MaildirBackend is None:
+    if not _has_maildir:
         pytest.skip("maildir backend not available")
-    b = MaildirBackend(tmp_path / "maildir-root")
+    from piazza.backends.maildir import MaildirBackend as _MB
+
+    b = _MB(tmp_path / "maildir-root")
     yield b
     b.close()
 
 
 def _backend_params():
     params = ["memory", "sqlite"]
-    if MaildirBackend is not None:
+    if _has_maildir:
         params.append("maildir")
     return params
 
@@ -62,7 +62,9 @@ def backend(request, tmp_path):
     elif request.param == "sqlite":
         b = SQLiteBackend(tmp_path / "test.db")
     else:
-        b = MaildirBackend(tmp_path / "maildir-root")
+        from piazza.backends.maildir import MaildirBackend as _MB
+
+        b = _MB(tmp_path / "maildir-root")
     yield b
     b.close()
 
@@ -189,12 +191,14 @@ class TestPresencePersistence:
 
     @_skip_maildir
     def test_presence_survives_reopen_maildir(self, tmp_path):
+        from piazza.backends.maildir import MaildirBackend as _MB
+
         root = tmp_path / "maildir-root"
-        b1 = MaildirBackend(root)
+        b1 = _MB(root)
         b1.heartbeat("agent-a", metadata={"name": "Alice"})
         b1.close()
 
-        b2 = MaildirBackend(root)
+        b2 = _MB(root)
         result = b2.agent_status("agent-a", timeout_seconds=3600)
         assert result is not None
         assert result.agent_id == "agent-a"
