@@ -11,7 +11,7 @@ from pathlib import Path
 
 from piazza._vendor.retry import retry
 from piazza._vendor.structlog import get_logger
-from piazza.types import ClaimResult, Message
+from piazza.types import AgentPresence, ClaimResult, Message
 
 logger = get_logger(__name__)
 
@@ -27,6 +27,11 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_channel_id ON messages (channel, id);
 CREATE INDEX IF NOT EXISTS idx_channel_ts ON messages (channel, timestamp);
+CREATE TABLE IF NOT EXISTS agent_presence (
+    agent_id TEXT PRIMARY KEY,
+    last_seen TEXT NOT NULL,
+    metadata TEXT
+);
 """
 
 
@@ -429,6 +434,70 @@ class SQLiteBackend:
                 info["wal_size_mb"] = round(os.path.getsize(wal_path) / (1024 * 1024), 2)
 
         return info
+
+    # ── Presence ──────────────────────────────────────────────
+
+    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *agent_id*."""
+        now = datetime.now(timezone.utc).isoformat()
+        meta_json = json.dumps(metadata) if metadata else None
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO agent_presence (agent_id, last_seen, metadata) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT(agent_id) DO UPDATE SET last_seen = excluded.last_seen, "
+                "metadata = excluded.metadata",
+                (agent_id, now, meta_json),
+            )
+            self._conn.commit()
+
+    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+        """Return all known agents with computed online/offline status."""
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
+        ).isoformat()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT agent_id, last_seen, metadata FROM agent_presence "
+                "ORDER BY agent_id"
+            ).fetchall()
+        result: list[AgentPresence] = []
+        for row in rows:
+            status = "online" if row["last_seen"] >= cutoff else "offline"
+            meta = json.loads(row["metadata"]) if row["metadata"] else None
+            result.append(
+                AgentPresence(
+                    agent_id=row["agent_id"],
+                    status=status,
+                    last_seen=row["last_seen"],
+                    metadata=meta,
+                )
+            )
+        return result
+
+    def agent_status(
+        self, agent_id: str, timeout_seconds: int = 120
+    ) -> AgentPresence | None:
+        """Return presence for a single agent, or ``None`` if unknown."""
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
+        ).isoformat()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT agent_id, last_seen, metadata FROM agent_presence "
+                "WHERE agent_id = ?",
+                (agent_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        status = "online" if row["last_seen"] >= cutoff else "offline"
+        meta = json.loads(row["metadata"]) if row["metadata"] else None
+        return AgentPresence(
+            agent_id=row["agent_id"],
+            status=status,
+            last_seen=row["last_seen"],
+            metadata=meta,
+        )
 
     def __repr__(self) -> str:
         return f"SQLiteBackend({self._db_path!r})"

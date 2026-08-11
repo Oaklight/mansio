@@ -6,7 +6,7 @@ import threading
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from piazza.types import ClaimResult, Message
+from piazza.types import AgentPresence, ClaimResult, Message
 
 
 class MemoryBackend:
@@ -21,6 +21,7 @@ class MemoryBackend:
         self._messages: dict[str, list[Message]] = defaultdict(list)
         self._messages_by_id: dict[str, Message] = {}
         self._queue_status: dict[str, dict] = {}
+        self._presence: dict[str, dict] = {}  # agent_id → {last_seen, metadata}
 
     def store(self, message: Message, *, queue: bool = False) -> None:
         """Store a message in memory.
@@ -310,12 +311,63 @@ class MemoryBackend:
             "estimated_size_mb": round(size_bytes / (1024 * 1024), 2),
         }
 
+    # ── Presence ──────────────────────────────────────────────
+
+    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *agent_id*."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._presence[agent_id] = {
+                "last_seen": now,
+                "metadata": metadata,
+            }
+
+    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+        """Return all known agents with computed online/offline status."""
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
+        ).isoformat()
+        result: list[AgentPresence] = []
+        with self._lock:
+            for agent_id, rec in self._presence.items():
+                status = "online" if rec["last_seen"] >= cutoff else "offline"
+                result.append(
+                    AgentPresence(
+                        agent_id=agent_id,
+                        status=status,
+                        last_seen=rec["last_seen"],
+                        metadata=rec["metadata"],
+                    )
+                )
+        result.sort(key=lambda a: a.agent_id)
+        return result
+
+    def agent_status(
+        self, agent_id: str, timeout_seconds: int = 120
+    ) -> AgentPresence | None:
+        """Return presence for a single agent, or ``None`` if unknown."""
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
+        ).isoformat()
+        with self._lock:
+            rec = self._presence.get(agent_id)
+            if rec is None:
+                return None
+            status = "online" if rec["last_seen"] >= cutoff else "offline"
+            return AgentPresence(
+                agent_id=agent_id,
+                status=status,
+                last_seen=rec["last_seen"],
+                metadata=rec["metadata"],
+            )
+
     def close(self) -> None:
         """Clear all stored messages."""
         with self._lock:
             self._messages.clear()
             self._messages_by_id.clear()
             self._queue_status.clear()
+            self._presence.clear()
 
     def __repr__(self) -> str:
         return "MemoryBackend()"

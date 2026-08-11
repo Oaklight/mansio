@@ -387,6 +387,7 @@ class HttpFrontend:
         self._setup_middleware()
         self._setup_api_routes()
         self._setup_queue_routes()
+        self._setup_presence_routes()
         self._setup_sse_route()
 
     def serve_forever(self) -> None:
@@ -596,6 +597,55 @@ class HttpFrontend:
             if result is None:
                 return {"acked": False}
             return {"acked": True, "result": _claim_result_to_dict(result)}
+
+    def _setup_presence_routes(self) -> None:
+        """Register presence (heartbeat / roster) routes."""
+        bus = self._bus
+        assert bus is not None
+
+        @self._app.post("/v1/presence/heartbeat")
+        async def presence_heartbeat(request: Request) -> dict | tuple:
+            body = request.json
+            if not body or not isinstance(body, dict):
+                return {"error": "JSON body required"}, 400
+            agent_id = body.get("agent_id", "").strip()
+            if not agent_id:
+                return {"error": "agent_id required"}, 400
+            metadata = body.get("metadata")
+            await asyncio.to_thread(bus.heartbeat, agent_id, metadata)
+            return {"ok": True}
+
+        @self._app.get("/v1/presence")
+        async def presence_list(request: Request) -> dict:
+            timeout = int((request.query_params.get("timeout") or ["120"])[0])
+            agents = await asyncio.to_thread(bus.agents, timeout)
+            return {
+                "agents": [
+                    {
+                        "agent_id": a.agent_id,
+                        "status": a.status,
+                        "last_seen": a.last_seen,
+                        "metadata": a.metadata,
+                    }
+                    for a in agents
+                ]
+            }
+
+        @self._app.get("/v1/presence/<agent_id>")
+        async def presence_agent(request: Request) -> dict | tuple:
+            agent_id = request.path_params.get("agent_id", "")
+            timeout = int((request.query_params.get("timeout") or ["120"])[0])
+            result = await asyncio.to_thread(
+                bus.agent_status, agent_id, timeout
+            )
+            if result is None:
+                return {"error": "agent not found"}, 404
+            return {
+                "agent_id": result.agent_id,
+                "status": result.status,
+                "last_seen": result.last_seen,
+                "metadata": result.metadata,
+            }
 
     def _setup_sse_route(self) -> None:
         """Register the SSE subscribe route."""

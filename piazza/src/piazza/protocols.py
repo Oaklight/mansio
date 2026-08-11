@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
-from piazza.types import ClaimResult, Message
+from piazza.types import AgentPresence, ClaimResult, Message
 
 
 class Backend(Protocol):
@@ -123,6 +123,28 @@ class Backend(Protocol):
 
     def retire_completed(self, max_age_seconds: int = 86400, max_per_channel: int = 1000) -> int:
         """Remove old completed queue messages. Returns count deleted."""
+        ...
+
+    # ── Presence ──────────────────────────────────────────────
+
+    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *agent_id*.
+
+        Upserts ``last_seen`` to now and stores optional *metadata*
+        (display_name, capabilities, …).
+        """
+        ...
+
+    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+        """Return all known agents with computed online/offline status.
+
+        An agent is ``"online"`` if its last heartbeat is within
+        *timeout_seconds* of now, otherwise ``"offline"``.
+        """
+        ...
+
+    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
+        """Return presence for a single agent, or ``None`` if unknown."""
         ...
 
 
