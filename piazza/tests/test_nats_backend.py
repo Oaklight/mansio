@@ -20,11 +20,10 @@ import time
 
 import pytest
 
-# Skip entire module if nats-py not installed
-nats_py = pytest.importorskip("nats")
+nats_py = pytest.importorskip("nats")  # noqa: E402
 
-from piazza.backends.nats import NATSBackend
-from piazza.types import Message
+from piazza.backends.nats import NATSBackend  # noqa: E402
+from piazza.types import Message  # noqa: E402
 
 NATS_URL = os.environ.get("NATS_URL", "nats://localhost:4222")
 

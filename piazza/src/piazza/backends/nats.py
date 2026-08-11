@@ -19,9 +19,9 @@ Example::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import threading
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -39,9 +39,7 @@ try:
     )
     from nats.js.client import JetStreamContext
 except ImportError as exc:
-    raise ImportError(
-        "NATS backend requires 'nats-py'. Install with: pip install nats-py"
-    ) from exc
+    raise ImportError("NATS backend requires 'nats-py'. Install with: pip install nats-py") from exc
 
 
 def _ensure_loop() -> asyncio.AbstractEventLoop:
@@ -222,6 +220,59 @@ class NATSBackend:
 
         self._run_async(_pub())
 
+    async def _consume_filtered(
+        self,
+        subject: str,
+        *,
+        limit: int = 100,
+        after: str | None = None,
+        sender: str | None = None,
+        msg_type: str | None = None,
+    ) -> list[Message]:
+        """Consume messages from a JetStream subject with optional filters.
+
+        Shared async helper for query, query_all, and similar read paths.
+        Creates an ephemeral ordered consumer, iterates messages, applies
+        filters, and returns up to ``limit`` matching results.
+        """
+        assert self._js is not None
+        messages: list[Message] = []
+
+        try:
+            sub = await self._js.subscribe(subject, ordered_consumer=True)
+            try:
+                while len(messages) < limit:
+                    try:
+                        msg = await asyncio.wait_for(sub.next_msg(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        break
+                    piazza_msg = self._nats_payload_to_msg(msg.data)
+                    if self._matches(piazza_msg, after=after, sender=sender, msg_type=msg_type):
+                        messages.append(piazza_msg)
+            finally:
+                await sub.unsubscribe()
+        except Exception:
+            pass
+
+        return messages
+
+    @staticmethod
+    def _matches(
+        msg: Message,
+        *,
+        after: str | None = None,
+        sender: str | None = None,
+        msg_type: str | None = None,
+    ) -> bool:
+        """Check if a message passes the given filters."""
+        if after and msg.id <= after:
+            return False
+        if sender and msg.sender != sender:
+            return False
+        if msg_type and msg.msg_type != msg_type:
+            return False
+        return True
+
     def query(
         self,
         channel: str,
@@ -245,39 +296,7 @@ class NATSBackend:
             self.connect()
 
         subject = self._subject(channel)
-
-        async def _query() -> list[Message]:
-            assert self._js is not None
-            messages: list[Message] = []
-
-            try:
-                sub = await self._js.subscribe(
-                    subject,
-                    ordered_consumer=True,
-                )
-                # Fetch up to a reasonable batch; we filter client-side
-                fetch_limit = limit * 2 if after else limit
-                try:
-                    while len(messages) < limit:
-                        try:
-                            msg = await asyncio.wait_for(
-                                sub.next_msg(),
-                                timeout=1.0,
-                            )
-                            piazza_msg = self._nats_payload_to_msg(msg.data)
-                            if after and piazza_msg.id <= after:
-                                continue
-                            messages.append(piazza_msg)
-                        except asyncio.TimeoutError:
-                            break
-                finally:
-                    await sub.unsubscribe()
-            except Exception:
-                pass
-
-            return messages
-
-        return self._run_async(_query())
+        return self._run_async(self._consume_filtered(subject, limit=limit, after=after))
 
     def list_channels(self) -> list[str]:
         """List all channels by querying JetStream stream subjects.
@@ -293,11 +312,6 @@ class NATSBackend:
             channels: set[str] = set()
 
             try:
-                # Get stream info to find subjects with messages
-                info = await self._js.find_stream_info_by_subject(
-                    f"{self._subject_prefix}.>"
-                )
-                # Scan messages to find active channels
                 sub = await self._js.subscribe(
                     f"{self._subject_prefix}.>",
                     ordered_consumer=True,
@@ -338,9 +352,7 @@ class NATSBackend:
             assert self._js is not None
             count = 0
 
-            subject = (
-                self._subject(channel) if channel else f"{self._subject_prefix}.>"
-            )
+            subject = self._subject(channel) if channel else f"{self._subject_prefix}.>"
             try:
                 sub = await self._js.subscribe(subject, ordered_consumer=True)
                 try:
@@ -382,41 +394,12 @@ class NATSBackend:
         if not self._connected:
             self.connect()
 
-        subject = (
-            self._subject(channel) if channel else f"{self._subject_prefix}.>"
+        subject = self._subject(channel) if channel else f"{self._subject_prefix}.>"
+        return self._run_async(
+            self._consume_filtered(
+                subject, limit=limit, after=after, sender=sender, msg_type=msg_type
+            )
         )
-
-        async def _query_all() -> list[Message]:
-            assert self._js is not None
-            messages: list[Message] = []
-
-            try:
-                sub = await self._js.subscribe(subject, ordered_consumer=True)
-                try:
-                    while len(messages) < limit:
-                        try:
-                            msg = await asyncio.wait_for(
-                                sub.next_msg(),
-                                timeout=1.0,
-                            )
-                            piazza_msg = self._nats_payload_to_msg(msg.data)
-                            if after and piazza_msg.id <= after:
-                                continue
-                            if sender and piazza_msg.sender != sender:
-                                continue
-                            if msg_type and piazza_msg.msg_type != msg_type:
-                                continue
-                            messages.append(piazza_msg)
-                        except asyncio.TimeoutError:
-                            break
-                finally:
-                    await sub.unsubscribe()
-            except Exception:
-                pass
-
-            return messages
-
-        return self._run_async(_query_all())
 
     def get_stats(self) -> dict:
         """Return aggregate statistics.
@@ -489,9 +472,7 @@ class NATSBackend:
                 ),
                 "msg_type_distribution": [
                     {"msg_type": t, "count": c}
-                    for t, c in sorted(
-                        types.items(), key=lambda x: x[1], reverse=True
-                    )
+                    for t, c in sorted(types.items(), key=lambda x: x[1], reverse=True)
                 ],
             }
 
@@ -509,9 +490,7 @@ class NATSBackend:
         if not self._connected:
             self.connect()
 
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(seconds=seconds)
-        ).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
 
         async def _recent() -> list[str]:
             assert self._js is not None
@@ -519,9 +498,7 @@ class NATSBackend:
 
             try:
                 # Use deliver policy to start from recent time
-                deliver_time = datetime.now(timezone.utc) - timedelta(
-                    seconds=seconds
-                )
+                deliver_time = datetime.now(timezone.utc) - timedelta(seconds=seconds)
                 config = ConsumerConfig(
                     deliver_policy=DeliverPolicy.BY_START_TIME,
                     opt_start_time=deliver_time.isoformat(),
@@ -596,10 +573,8 @@ class NATSBackend:
                 assert self._nc is not None
                 await self._nc.close()
 
-            try:
+            with contextlib.suppress(Exception):
                 self._run_async(_close())
-            except Exception:
-                pass
             self._connected = False
 
         if self._loop is not None and not self._loop.is_closed():
