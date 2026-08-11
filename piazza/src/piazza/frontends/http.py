@@ -59,18 +59,40 @@ _SYSTEM_CHANNEL_RE = re.compile(r"^[\w_][\w:.-]{1,126}[\w]$")
 _auth_result_var: contextvars.ContextVar[Any] = contextvars.ContextVar("auth_result", default=True)
 
 
+_PRIVATE_CHANNEL_PREFIXES = ("notebook:", "memory:")
+
+
+def _is_private_channel(channel: str) -> bool:
+    """Return True if *channel* is a DM or private-prefix channel.
+
+    Private channels are:
+    - ``dm:*``  — direct messages between specific agents
+    - Any channel starting with a ``_PRIVATE_CHANNEL_PREFIXES`` entry
+      (currently ``notebook:`` and ``memory:``).
+
+    Everything else (plain user channels, ``_system:``, ``broadcast:``,
+    and registered-prefix channels) is considered public.
+    """
+    if channel.startswith("dm:"):
+        return True
+    return any(channel.startswith(p) for p in _PRIVATE_CHANNEL_PREFIXES)
+
+
 def _agent_involved(agent_id: str, channel: str, sender: str) -> bool:
     """Check if an agent is involved in a message (sender or channel member).
 
-    Uses exact segment matching on ``:``-delimited channel names to avoid
-    substring false positives (e.g., "bob" must not match "bobby").
+    For **public** channels every authenticated agent is considered
+    involved, so all messages are visible.
+
+    For **private** channels (DMs, notebook, memory) uses exact segment
+    matching on ``:``-delimited channel names to avoid substring false
+    positives (e.g., "bob" must not match "bobby").
     """
+    if not _is_private_channel(channel):
+        return True
     if sender == agent_id:
         return True
     return agent_id in channel.split(":")
-
-
-_PRIVATE_CHANNEL_PREFIXES = ("notebook:", "memory:")
 
 
 def _validate_channel_name(
@@ -683,11 +705,16 @@ class HttpFrontend:
 
 
 def _check_subscribe_access(auth_result: Any, ch_list: list[str]) -> tuple[dict, int] | None:
-    """Validate channel access for scoped tokens. Returns error tuple or None."""
+    """Validate channel access for scoped tokens. Returns error tuple or None.
+
+    Public channels (and ``_system:`` channels) are open to all
+    authenticated agents. Private channels (DMs, notebook, memory)
+    require the agent to appear in the ``:``-delimited segments.
+    """
     if not isinstance(auth_result, str):
         return None
     forbidden = [
-        ch for ch in ch_list if not ch.startswith("_system:") and auth_result not in ch.split(":")
+        ch for ch in ch_list if _is_private_channel(ch) and auth_result not in ch.split(":")
     ]
     if forbidden:
         return {
