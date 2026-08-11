@@ -324,9 +324,7 @@ class MemoryBackend:
 
     def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
         """Return all known agents with computed online/offline status."""
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
-        ).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         result: list[AgentPresence] = []
         with self._lock:
             for agent_id, rec in self._presence.items():
@@ -342,13 +340,9 @@ class MemoryBackend:
         result.sort(key=lambda a: a.agent_id)
         return result
 
-    def agent_status(
-        self, agent_id: str, timeout_seconds: int = 120
-    ) -> AgentPresence | None:
+    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
         """Return presence for a single agent, or ``None`` if unknown."""
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
-        ).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         with self._lock:
             rec = self._presence.get(agent_id)
             if rec is None:

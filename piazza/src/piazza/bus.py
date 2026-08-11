@@ -251,9 +251,7 @@ class Bus:
         """Return all known agents with computed online/offline status."""
         return self._backend.agents(timeout_seconds)
 
-    def agent_status(
-        self, agent_id: str, timeout_seconds: int = 120
-    ) -> AgentPresence | None:
+    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
         """Return presence for a single agent, or ``None`` if unknown."""
         return self._backend.agent_status(agent_id, timeout_seconds)
 

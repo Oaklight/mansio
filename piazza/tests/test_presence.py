@@ -5,18 +5,21 @@ Covers all three backends (Memory, SQLite, Maildir) and the Bus layer.
 
 from __future__ import annotations
 
-import tempfile
 import time
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
-from piazza.backends.maildir import MaildirBackend
+try:
+    from piazza.backends.maildir import MaildirBackend
+except ImportError:
+    MaildirBackend = None  # type: ignore[assignment,misc]
+
 from piazza.backends.memory import MemoryBackend
 from piazza.backends.sqlite import SQLiteBackend
 from piazza.bus import Bus
 from piazza.types import AgentPresence
+
+_skip_maildir = pytest.mark.skipif(MaildirBackend is None, reason="maildir backend not available")
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -38,12 +41,21 @@ def sqlite_backend(tmp_path):
 
 @pytest.fixture
 def maildir_backend(tmp_path):
+    if MaildirBackend is None:
+        pytest.skip("maildir backend not available")
     b = MaildirBackend(tmp_path / "maildir-root")
     yield b
     b.close()
 
 
-@pytest.fixture(params=["memory", "sqlite", "maildir"])
+def _backend_params():
+    params = ["memory", "sqlite"]
+    if MaildirBackend is not None:
+        params.append("maildir")
+    return params
+
+
+@pytest.fixture(params=_backend_params())
 def backend(request, tmp_path):
     if request.param == "memory":
         b = MemoryBackend()
@@ -175,6 +187,7 @@ class TestPresencePersistence:
         assert result.metadata == {"name": "Alice"}
         b2.close()
 
+    @_skip_maildir
     def test_presence_survives_reopen_maildir(self, tmp_path):
         root = tmp_path / "maildir-root"
         b1 = MaildirBackend(root)
@@ -230,16 +243,12 @@ class TestBusPresence:
 
 class TestAgentPresenceType:
     def test_frozen(self):
-        ap = AgentPresence(
-            agent_id="test", status="online", last_seen="2026-01-01T00:00:00+00:00"
-        )
+        ap = AgentPresence(agent_id="test", status="online", last_seen="2026-01-01T00:00:00+00:00")
         with pytest.raises(AttributeError):
             ap.status = "offline"  # type: ignore[misc]
 
     def test_default_metadata_none(self):
-        ap = AgentPresence(
-            agent_id="test", status="online", last_seen="2026-01-01T00:00:00+00:00"
-        )
+        ap = AgentPresence(agent_id="test", status="online", last_seen="2026-01-01T00:00:00+00:00")
         assert ap.metadata is None
 
     def test_with_metadata(self):

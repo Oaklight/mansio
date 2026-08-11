@@ -453,13 +453,10 @@ class SQLiteBackend:
 
     def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
         """Return all known agents with computed online/offline status."""
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
-        ).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         with self._lock:
             rows = self._conn.execute(
-                "SELECT agent_id, last_seen, metadata FROM agent_presence "
-                "ORDER BY agent_id"
+                "SELECT agent_id, last_seen, metadata FROM agent_presence ORDER BY agent_id"
             ).fetchall()
         result: list[AgentPresence] = []
         for row in rows:
@@ -475,17 +472,12 @@ class SQLiteBackend:
             )
         return result
 
-    def agent_status(
-        self, agent_id: str, timeout_seconds: int = 120
-    ) -> AgentPresence | None:
+    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
         """Return presence for a single agent, or ``None`` if unknown."""
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
-        ).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         with self._lock:
             row = self._conn.execute(
-                "SELECT agent_id, last_seen, metadata FROM agent_presence "
-                "WHERE agent_id = ?",
+                "SELECT agent_id, last_seen, metadata FROM agent_presence WHERE agent_id = ?",
                 (agent_id,),
             ).fetchone()
         if row is None:

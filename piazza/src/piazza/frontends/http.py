@@ -635,9 +635,7 @@ class HttpFrontend:
         async def presence_agent(request: Request) -> dict | tuple:
             agent_id = request.path_params.get("agent_id", "")
             timeout = int((request.query_params.get("timeout") or ["120"])[0])
-            result = await asyncio.to_thread(
-                bus.agent_status, agent_id, timeout
-            )
+            result = await asyncio.to_thread(bus.agent_status, agent_id, timeout)
             if result is None:
                 return {"error": "agent not found"}, 404
             return {
