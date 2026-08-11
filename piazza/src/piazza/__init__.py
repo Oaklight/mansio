@@ -9,7 +9,7 @@ from piazza.protocols import Backend, MessageBus, Serializer
 from piazza.serializers import JSONSerializer
 from piazza.server import PiazzaServer
 from piazza.transport_http import HttpTransport, PiazzaAPIError
-from piazza.types import ClaimResult, Message
+from piazza.types import AgentPresence, ClaimResult, Message
 
 # Backward compatibility aliases (deprecated, will be removed)
 SQLiteStorage = SQLiteBackend
@@ -17,6 +17,7 @@ MemoryStorage = MemoryBackend
 StorageBackend = Backend
 
 __all__ = [
+    "AgentPresence",
     "Backend",
     "Bus",
     "ClaimResult",

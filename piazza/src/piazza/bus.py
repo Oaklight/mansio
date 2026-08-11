@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from piazza.backends import SQLiteBackend
 from piazza.protocols import Backend
 from piazza.serializers import JSONSerializer
-from piazza.types import ClaimResult, Message
+from piazza.types import AgentPresence, ClaimResult, Message
 
 if TYPE_CHECKING:
     from piazza.admin.server import AdminInfo
@@ -240,6 +240,22 @@ class Bus:
     def ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
         """Mark a claimed message as completed."""
         return self._backend.ack(message_id, claimed_by)
+
+    # ── Presence ──────────────────────────────────────────────
+
+    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *agent_id*."""
+        self._backend.heartbeat(agent_id, metadata)
+
+    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+        """Return all known agents with computed online/offline status."""
+        return self._backend.agents(timeout_seconds)
+
+    def agent_status(
+        self, agent_id: str, timeout_seconds: int = 120
+    ) -> AgentPresence | None:
+        """Return presence for a single agent, or ``None`` if unknown."""
+        return self._backend.agent_status(agent_id, timeout_seconds)
 
     def close(self) -> None:
         """Release resources held by the backend."""
