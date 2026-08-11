@@ -212,6 +212,44 @@ class NATSBackend:
 
         self._run_async(_pub())
 
+    async def _fetch_batch(self, sub: Any, batch_size: int) -> list[Any] | None:
+        """Fetch a single batch from a pull subscription.
+
+        Returns the batch list, or None to signal end-of-stream.
+        """
+        try:
+            batch = await sub.fetch(batch=batch_size, timeout=0.5)
+        except asyncio.TimeoutError:
+            return None
+        except Exception:
+            # nats-py raises TimeoutError or nats.errors on empty
+            return None
+        return batch if batch else None
+
+    async def _drain_subscription(
+        self,
+        sub: Any,
+        *,
+        limit: int,
+        after: str | None = None,
+        sender: str | None = None,
+        msg_type: str | None = None,
+    ) -> list[Message]:
+        """Pull batches from *sub* until exhausted or *limit* reached."""
+        messages: list[Message] = []
+        batch_size = min(limit, 100)
+        while True:
+            batch = await self._fetch_batch(sub, batch_size)
+            if batch is None:
+                break
+            for msg in batch:
+                piazza_msg = self._nats_payload_to_msg(msg.data)
+                if self._matches(piazza_msg, after=after, sender=sender, msg_type=msg_type):
+                    messages.append(piazza_msg)
+                    if len(messages) >= limit:
+                        return messages
+        return messages
+
     async def _fetch_all(
         self,
         subject: str,
@@ -227,44 +265,20 @@ class NATSBackend:
         without the 1-second subscribe timeout.
         """
         assert self._js is not None
-        messages: list[Message] = []
-        fetch_limit = limit if limit > 0 else 1000
+        effective_limit = limit if limit > 0 else 1000
 
         try:
             sub = await self._js.pull_subscribe(subject, stream=self._stream_name)
             try:
-                while True:
-                    try:
-                        batch = await sub.fetch(
-                            batch=min(fetch_limit, 100),
-                            timeout=0.5,
-                        )
-                    except asyncio.TimeoutError:
-                        break
-                    except Exception:
-                        # nats-py raises TimeoutError or nats.errors on empty
-                        break
-
-                    if not batch:
-                        break
-
-                    for msg in batch:
-                        piazza_msg = self._nats_payload_to_msg(msg.data)
-                        if self._matches(
-                            piazza_msg,
-                            after=after,
-                            sender=sender,
-                            msg_type=msg_type,
-                        ):
-                            messages.append(piazza_msg)
-                            if limit and len(messages) >= limit:
-                                return messages
+                return await self._drain_subscription(
+                    sub, limit=effective_limit, after=after, sender=sender, msg_type=msg_type
+                )
             finally:
                 await sub.unsubscribe()
         except Exception:
             logger.warning("NATS fetch failed for subject %s", subject, exc_info=True)
 
-        return messages
+        return []
 
     @staticmethod
     def _matches(
