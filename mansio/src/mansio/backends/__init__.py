@@ -8,9 +8,10 @@ from mansio.backends.memory import MemoryBackend
 from mansio.backends.sqlite import SQLiteBackend
 
 if TYPE_CHECKING:
+    from mansio.backends.maildir import MaildirBackend
     from mansio.backends.nats import NATSBackend
 
-__all__ = ["MemoryBackend", "NATSBackend", "SQLiteBackend"]
+__all__ = ["MaildirBackend", "MemoryBackend", "NATSBackend", "SQLiteBackend"]
 
 
 def __getattr__(name: str):
@@ -19,4 +20,8 @@ def __getattr__(name: str):
         from mansio.backends.nats import NATSBackend
 
         return NATSBackend
+    if name == "MaildirBackend":
+        from mansio.backends.maildir import MaildirBackend
+
+        return MaildirBackend
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

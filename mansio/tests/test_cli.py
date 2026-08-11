@@ -23,7 +23,7 @@ class TestParseArgsServe:
         """No subcommand defaults to serve."""
         args = parse_args([])
         assert args.command == "serve"
-        assert args.db == "mansio.db"
+        assert args.db is None  # default handled in _create_bus
         assert args.admin_port == 8741
         assert args.http is None
         assert args.remote is False
