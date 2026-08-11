@@ -42,6 +42,7 @@ class ClaimResult:
     status: str
     claimed_by: str
     claimed_at: str
+    lease_until: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

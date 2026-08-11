@@ -319,12 +319,15 @@ def _resolve_claimed_by(data: dict) -> tuple[str, tuple | None]:
 
 def _claim_result_to_dict(result: Any) -> dict[str, Any]:
     """Serialize a ClaimResult to a dict."""
-    return {
+    d: dict[str, Any] = {
         "message": _msg_to_dict(result.message),
         "status": result.status,
         "claimed_by": result.claimed_by,
         "claimed_at": result.claimed_at,
     }
+    if result.lease_until is not None:
+        d["lease_until"] = result.lease_until
+    return d
 
 
 def _msg_to_dict(m: Message) -> dict[str, Any]:

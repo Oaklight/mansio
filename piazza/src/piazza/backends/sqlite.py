@@ -336,6 +336,7 @@ class SQLiteBackend:
                 status="claimed",
                 claimed_by=claimed_by,
                 claimed_at=claimed_at,
+                lease_until=lease_until,
             )
 
     def ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
