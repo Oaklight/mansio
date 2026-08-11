@@ -52,6 +52,9 @@ test = [
 irc = [
     "irc>=20.0",
 ]
+nats = [
+    "nats-py>=2.9.0",
+]
 
 [project.scripts]
 piazza = "piazza.cli:main"
