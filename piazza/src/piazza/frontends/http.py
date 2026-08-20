@@ -210,6 +210,31 @@ def _fmt_bytes(n: int) -> str:
 _PUBLISH_REQUIRED = ("channel", "sender", "msg_type", "payload")
 _MAX_PAYLOAD_BYTES = 256 * 1024  # 256 KB
 _MAX_MSG_TYPE_LEN = 64
+_MAX_METADATA_BYTES = 16384
+
+
+def _validate_metadata(metadata: Any) -> tuple[dict, int] | None:
+    """Validate metadata type and size. Returns error tuple or None if OK."""
+    if metadata is None:
+        return None
+    if not isinstance(metadata, dict):
+        return {
+            "error": "Bad Request",
+            "message": "metadata must be a JSON object or null",
+        }, 400
+    try:
+        meta_json = json.dumps(metadata, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return {
+            "error": "Bad Request",
+            "message": "Metadata must be JSON-serializable",
+        }, 400
+    if len(meta_json.encode()) > _MAX_METADATA_BYTES:
+        return {
+            "error": "Bad Request",
+            "message": f"Metadata exceeds maximum size of {_fmt_bytes(_MAX_METADATA_BYTES)}",
+        }, 400
+    return None
 
 
 def _parse_publish_body(request: Any) -> dict | tuple:
@@ -273,12 +298,9 @@ def _parse_publish_body(request: Any) -> dict | tuple:
             "message": f"msg_type must be at most {_MAX_MSG_TYPE_LEN} characters",
         }, 400
 
-    metadata = data.get("metadata")
-    if metadata is not None and not isinstance(metadata, dict):
-        return {
-            "error": "Bad Request",
-            "message": "metadata must be a JSON object or null",
-        }, 400
+    meta_err = _validate_metadata(data.get("metadata"))
+    if meta_err:
+        return meta_err
 
     if "\x00" in data["channel"]:
         return {
@@ -683,6 +705,9 @@ class HttpFrontend:
             if not agent_id:
                 return {"error": "agent_id required"}, 400
             metadata = body.get("metadata")
+            meta_err = _validate_metadata(metadata)
+            if meta_err:
+                return meta_err
             await asyncio.to_thread(bus.heartbeat, agent_id, metadata)
             return {"ok": True}
 
