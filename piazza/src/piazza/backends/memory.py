@@ -45,6 +45,7 @@ class MemoryBackend:
         channel: str,
         after: str | None = None,
         limit: int = 100,
+        msg_type: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -52,6 +53,7 @@ class MemoryBackend:
             channel: Channel to query.
             after: If provided, only return messages with ID > this value.
             limit: Maximum number of messages to return.
+            msg_type: If provided, only return messages of this type.
 
         Returns:
             Messages in chronological order (oldest first).
@@ -60,6 +62,8 @@ class MemoryBackend:
             msgs = list(self._messages.get(channel, []))
         if after:
             msgs = [m for m in msgs if m.id > after]
+        if msg_type:
+            msgs = [m for m in msgs if m.msg_type == msg_type]
         return msgs[:limit]
 
     def list_channels(self) -> list[str]:

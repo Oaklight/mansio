@@ -376,6 +376,7 @@ def _parse_query_params(request: Any, max_limit: int) -> dict:
         }
 
     after = (request.query_params.get("after") or [None])[0]
+    msg_type = (request.query_params.get("msg_type") or [None])[0]
     limit = _parse_query_limit(
         (request.query_params.get("limit") or [None])[0],
         max_limit,
@@ -383,7 +384,7 @@ def _parse_query_params(request: Any, max_limit: int) -> dict:
     if not isinstance(limit, int):
         return {"error": limit[0]["error"], "message": limit[0]["message"], "_status": 400}
 
-    return {"channel": channel, "after": after, "limit": limit}
+    return {"channel": channel, "after": after, "limit": limit, "msg_type": msg_type}
 
 
 async def _handle_registry_lookup(request: Any, bus: Any) -> dict | tuple:
@@ -649,7 +650,9 @@ class HttpFrontend:
                 return qp, status
             channel, after, limit = qp["channel"], qp["after"], qp["limit"]
 
-            msgs = await asyncio.to_thread(bus.poll, channel, after=after, limit=limit)
+            msgs = await asyncio.to_thread(
+                bus.poll, channel, after=after, limit=limit, msg_type=qp.get("msg_type")
+            )
 
             auth_result = _auth_result_var.get()
             if isinstance(auth_result, str):

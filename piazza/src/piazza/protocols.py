@@ -29,6 +29,7 @@ class Backend(Protocol):
         channel: str,
         after: str | None = None,
         limit: int = 100,
+        msg_type: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -36,6 +37,7 @@ class Backend(Protocol):
             channel: Channel to query.
             after: If provided, only return messages with ID > this value.
             limit: Maximum number of messages to return.
+            msg_type: If provided, only return messages of this type.
 
         Returns:
             Messages in chronological order (oldest first).
@@ -208,6 +210,7 @@ class MessageBus(Protocol):
         channel: str,
         after: str | None = None,
         limit: int = 100,
+        msg_type: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -216,6 +219,7 @@ class MessageBus(Protocol):
             after: If provided, only return messages with ID greater than this.
                 Used as a cursor for incremental polling.
             limit: Maximum number of messages to return.
+            msg_type: If provided, only return messages of this type.
 
         Returns:
             Messages in chronological order (oldest first).
