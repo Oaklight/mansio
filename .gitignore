@@ -27,3 +27,4 @@ admin-messages*.png
 admin-channels*.png
 admin-subscriptions*.png
 .complexipy_cache/
+.venv/

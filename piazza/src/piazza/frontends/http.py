@@ -233,6 +233,11 @@ def _parse_publish_body(request: Any) -> dict | tuple:
             "error": "Bad Request",
             "message": "Payload must be a non-empty string",
         }, 400
+    if "\x00" in payload:
+        return {
+            "error": "Bad Request",
+            "message": "Payload must not contain null bytes",
+        }, 400
 
     msg_type = data["msg_type"]
     if not isinstance(msg_type, str) or not msg_type.strip():
@@ -240,11 +245,23 @@ def _parse_publish_body(request: Any) -> dict | tuple:
             "error": "Bad Request",
             "message": "msg_type must be a non-empty string",
         }, 400
+    if "\x00" in msg_type:
+        return {
+            "error": "Bad Request",
+            "message": "msg_type must not contain null bytes",
+        }, 400
     data["msg_type"] = msg_type.strip()
     if len(data["msg_type"]) > _MAX_MSG_TYPE_LEN:
         return {
             "error": "Bad Request",
             "message": f"msg_type must be at most {_MAX_MSG_TYPE_LEN} characters",
+        }, 400
+
+    channel = data.get("channel", "")
+    if isinstance(channel, str) and "\x00" in channel:
+        return {
+            "error": "Bad Request",
+            "message": "Channel must not contain null bytes",
         }, 400
 
     return data
