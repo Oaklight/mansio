@@ -280,3 +280,68 @@ class TestPayloadSizeLimit:
         )
         assert resp.status_code == 200, f"normal payload: expected 200, got {resp.status_code}"
         http.close()
+
+
+class TestMetadataValidation:
+    """metadata must be a JSON object (dict) or null/absent."""
+
+    def _publish(self, http, url, **extra):
+        body = {
+            "channel": "test-meta",
+            "sender": "tester",
+            "msg_type": "chat",
+            "payload": "hello",
+        }
+        body.update(extra)
+        return http.post(f"{url}/v1/publish", json=body)
+
+    def test_string_metadata_rejected(self, server_url: str) -> None:
+        from piazza._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = self._publish(http, server_url, metadata="not-a-dict")
+        assert resp.status_code == 400, f"string metadata: expected 400, got {resp.status_code}"
+        http.close()
+
+    def test_list_metadata_rejected(self, server_url: str) -> None:
+        from piazza._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = self._publish(http, server_url, metadata=[1, 2, 3])
+        assert resp.status_code == 400, f"list metadata: expected 400, got {resp.status_code}"
+        http.close()
+
+    def test_int_metadata_rejected(self, server_url: str) -> None:
+        from piazza._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = self._publish(http, server_url, metadata=42)
+        assert resp.status_code == 400, f"int metadata: expected 400, got {resp.status_code}"
+        http.close()
+
+    def test_bool_metadata_rejected(self, server_url: str) -> None:
+        from piazza._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = self._publish(http, server_url, metadata=True)
+        assert resp.status_code == 400, f"bool metadata: expected 400, got {resp.status_code}"
+        http.close()
+
+    def test_dict_metadata_accepted(self, server_url: str) -> None:
+        from piazza._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = self._publish(http, server_url, metadata={"key": "val"})
+        assert resp.status_code == 200, f"dict metadata: expected 200, got {resp.status_code}"
+        http.close()
+
+    def test_null_metadata_accepted(self, server_url: str) -> None:
+        from piazza._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = self._publish(http, server_url, metadata=None)
+        assert resp.status_code == 200, f"null metadata: expected 200, got {resp.status_code}"
+        # Also test omitted metadata
+        resp2 = self._publish(http, server_url)
+        assert resp2.status_code == 200, f"omitted metadata: expected 200, got {resp2.status_code}"
+        http.close()
