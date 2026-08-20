@@ -150,6 +150,7 @@ class Bus:
         channel: str,
         after: str | None = None,
         limit: int = 100,
+        msg_type: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -157,11 +158,12 @@ class Bus:
             channel: Channel to read from.
             after: If provided, only return messages with ID greater than this.
             limit: Maximum number of messages to return.
+            msg_type: If provided, only return messages of this type.
 
         Returns:
             Messages in chronological order (oldest first).
         """
-        return self._backend.query(channel, after=after, limit=limit)
+        return self._backend.query(channel, after=after, limit=limit, msg_type=msg_type)
 
     def subscribe(
         self,
