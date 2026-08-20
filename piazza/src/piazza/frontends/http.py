@@ -298,9 +298,32 @@ def _parse_publish_body(request: Any) -> dict | tuple:
             "message": f"msg_type must be at most {_MAX_MSG_TYPE_LEN} characters",
         }, 400
 
-    meta_err = _validate_metadata(data.get("metadata"))
+    metadata = data.get("metadata")
+    meta_err = _validate_metadata(metadata)
     if meta_err:
         return meta_err
+
+    if isinstance(metadata, dict) and "tags" in metadata:
+        tags = metadata["tags"]
+        if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+            return {
+                "error": "Bad Request",
+                "message": "Tags must be a list of strings",
+            }, 400
+        tags = [t.strip() for t in tags]
+        if not all(tags):
+            return {
+                "error": "Bad Request",
+                "message": "Tags must be non-empty strings",
+            }, 400
+        if len(tags) > 20:
+            return {"error": "Bad Request", "message": "Maximum 20 tags allowed"}, 400
+        if any(len(t) > 64 for t in tags):
+            return {
+                "error": "Bad Request",
+                "message": "Each tag must be at most 64 characters",
+            }, 400
+        metadata["tags"] = tags
 
     if "\x00" in data["channel"]:
         return {
