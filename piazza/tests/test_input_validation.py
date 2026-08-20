@@ -226,3 +226,57 @@ class TestLimitValidation:
         resp = http.get(f"{server_url}/v1/query?channel=test-lim&limit=3.5")
         assert resp.status_code == 400
         http.close()
+
+
+class TestPayloadSizeLimit:
+    """Payload must not exceed 256 KB (issue #58)."""
+
+    def test_large_payload_rejected(self, server_url: str) -> None:
+        from piazza._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        oversized = "a" * (256 * 1024 + 1)  # 256 KB + 1 byte
+        resp = http.post(
+            f"{server_url}/v1/publish",
+            json={
+                "channel": "test-size",
+                "sender": "tester",
+                "msg_type": "text",
+                "payload": oversized,
+            },
+        )
+        assert resp.status_code == 400, f"oversized payload: expected 400, got {resp.status_code}"
+        http.close()
+
+    def test_max_payload_accepted(self, server_url: str) -> None:
+        from piazza._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        exact = "a" * (256 * 1024)  # exactly 256 KB
+        resp = http.post(
+            f"{server_url}/v1/publish",
+            json={
+                "channel": "test-size",
+                "sender": "tester",
+                "msg_type": "text",
+                "payload": exact,
+            },
+        )
+        assert resp.status_code == 200, f"exact 256KB payload: expected 200, got {resp.status_code}"
+        http.close()
+
+    def test_normal_payload_accepted(self, server_url: str) -> None:
+        from piazza._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = http.post(
+            f"{server_url}/v1/publish",
+            json={
+                "channel": "test-size",
+                "sender": "tester",
+                "msg_type": "text",
+                "payload": "hello world",
+            },
+        )
+        assert resp.status_code == 200, f"normal payload: expected 200, got {resp.status_code}"
+        http.close()
