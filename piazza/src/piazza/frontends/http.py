@@ -264,6 +264,13 @@ def _parse_publish_body(request: Any) -> dict | tuple:
             "message": f"msg_type must be at most {_MAX_MSG_TYPE_LEN} characters",
         }, 400
 
+    metadata = data.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        return {
+            "error": "Bad Request",
+            "message": "metadata must be a JSON object or null",
+        }, 400
+
     if "\x00" in data["channel"]:
         return {
             "error": "Bad Request",
