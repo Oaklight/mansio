@@ -75,6 +75,22 @@ class TestSupertoken:
         assert result is None
 
 
+class TestRejectEmptyAgentId:
+    """Empty-string agent_id must be rejected (fixes #106)."""
+
+    def test_empty_string_raises(self, store: TokenStore) -> None:
+        with pytest.raises(ValueError, match="non-empty"):
+            store.create_token(agent_id="")
+
+    def test_whitespace_only_raises(self, store: TokenStore) -> None:
+        with pytest.raises(ValueError, match="non-empty"):
+            store.create_token(agent_id="   ")
+
+    def test_none_still_allowed(self, store: TokenStore) -> None:
+        entry = store.create_token(agent_id=None)
+        assert entry["agent_id"] is None
+
+
 class TestDelete:
     """Token deletion."""
 
