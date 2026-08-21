@@ -257,11 +257,17 @@ def _parse_publish_body(request: Any) -> dict | tuple:
             "message": f"msg_type must be at most {_MAX_MSG_TYPE_LEN} characters",
         }, 400
 
-    channel = data.get("channel", "")
-    if isinstance(channel, str) and "\x00" in channel:
+    if "\x00" in data["channel"]:
         return {
             "error": "Bad Request",
             "message": "Channel must not contain null bytes",
+        }, 400
+
+    sender = data["sender"]
+    if not isinstance(sender, str) or "\x00" in sender:
+        return {
+            "error": "Bad Request",
+            "message": "Sender must be a string without null bytes",
         }, 400
 
     return data

@@ -4,6 +4,7 @@ Verifies that null bytes (\x00) are rejected in:
 - payload
 - msg_type
 - channel
+- sender
 """
 
 from __future__ import annotations
@@ -61,6 +62,15 @@ class TestNullByteInPayload:
 
         http = HttpClient()
         resp = self._publish(http, server_url, channel="test\x00channel")
+        assert resp.status_code == 400
+        assert "null bytes" in resp.json()["message"].lower()
+        http.close()
+
+    def test_null_byte_in_sender_rejected(self, server_url: str) -> None:
+        from piazza._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = self._publish(http, server_url, sender="agent\x00evil")
         assert resp.status_code == 400
         assert "null bytes" in resp.json()["message"].lower()
         http.close()
