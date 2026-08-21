@@ -100,8 +100,6 @@ class TestMsgTypeFilterHTTP:
     """msg_type filter via /v1/query HTTP endpoint."""
 
     def _publish(self, http, server_url, channel, sender, msg_type, payload):
-        import json
-
         resp = http.post(
             f"{server_url}/v1/publish",
             json={"channel": channel, "sender": sender, "msg_type": msg_type, "payload": payload},
