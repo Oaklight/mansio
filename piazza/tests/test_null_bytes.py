@@ -8,8 +8,6 @@ Verifies that null bytes (\x00) are rejected in:
 
 from __future__ import annotations
 
-import pytest
-
 
 class TestNullByteInPayload:
     """Null bytes in payload must be rejected with 400."""
