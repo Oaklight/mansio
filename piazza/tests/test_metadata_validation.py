@@ -9,8 +9,6 @@ Verifies:
 
 from __future__ import annotations
 
-import pytest
-
 
 class TestMetadataTypeValidation:
     """Metadata must be a dict if provided."""
