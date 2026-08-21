@@ -198,6 +198,15 @@ def _validate_and_auth_publish(
     return None
 
 
+def _fmt_bytes(n: int) -> str:
+    """Format byte count as human-readable string (e.g. 256KB, 16KB, 1MB)."""
+    if n >= 1024 * 1024 and n % (1024 * 1024) == 0:
+        return f"{n // (1024 * 1024)}MB"
+    if n >= 1024 and n % 1024 == 0:
+        return f"{n // 1024}KB"
+    return f"{n} bytes"
+
+
 _PUBLISH_REQUIRED = ("channel", "sender", "msg_type", "payload")
 _MAX_PAYLOAD_BYTES = 256 * 1024  # 256 KB
 _MAX_MSG_TYPE_LEN = 64
@@ -243,7 +252,7 @@ def _parse_publish_body(request: Any) -> dict | tuple:
     if len(payload.encode("utf-8")) > _MAX_PAYLOAD_BYTES:
         return {
             "error": "Bad Request",
-            "message": f"Payload exceeds maximum size of {_MAX_PAYLOAD_BYTES} bytes",
+            "message": f"Payload exceeds maximum size of {_fmt_bytes(_MAX_PAYLOAD_BYTES)}",
         }, 400
 
     msg_type = data["msg_type"]
