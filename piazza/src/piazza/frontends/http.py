@@ -237,6 +237,83 @@ def _validate_metadata(metadata: Any) -> tuple[dict, int] | None:
     return None
 
 
+def _validate_tags(metadata: dict) -> tuple[dict, int] | None:
+    """Validate and normalise ``metadata["tags"]`` in-place.
+
+    Returns an error tuple or *None* if valid.
+    """
+    tags = metadata["tags"]
+    if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+        return {
+            "error": "Bad Request",
+            "message": "Tags must be a list of strings",
+        }, 400
+    tags = [t.strip() for t in tags]
+    if not all(tags):
+        return {
+            "error": "Bad Request",
+            "message": "Tags must be non-empty strings",
+        }, 400
+    if len(tags) > 20:
+        return {"error": "Bad Request", "message": "Maximum 20 tags allowed"}, 400
+    if any(len(t) > 64 for t in tags):
+        return {
+            "error": "Bad Request",
+            "message": "Each tag must be at most 64 characters",
+        }, 400
+    metadata["tags"] = tags
+    return None
+
+
+def _validate_payload(data: dict) -> tuple[dict, int] | None:
+    """Validate ``data["payload"]``.
+
+    Returns an error tuple or *None* if valid.
+    """
+    payload = data["payload"]
+    if not isinstance(payload, str) or not payload.strip():
+        return {
+            "error": "Bad Request",
+            "message": "Payload must be a non-empty string",
+        }, 400
+    if "\x00" in payload:
+        return {
+            "error": "Bad Request",
+            "message": "Payload must not contain null bytes",
+        }, 400
+    if len(payload.encode("utf-8")) > _MAX_PAYLOAD_BYTES:
+        return {
+            "error": "Bad Request",
+            "message": f"Payload exceeds maximum size of {_fmt_bytes(_MAX_PAYLOAD_BYTES)}",
+        }, 400
+    return None
+
+
+def _validate_msg_type(data: dict) -> tuple[dict, int] | None:
+    """Validate and normalise ``data["msg_type"]`` in-place.
+
+    Returns an error tuple or *None* if valid.
+    """
+    msg_type = data["msg_type"]
+    if not isinstance(msg_type, str) or not msg_type.strip():
+        return {
+            "error": "Bad Request",
+            "message": "msg_type must be a non-empty string",
+        }, 400
+    if "\x00" in msg_type:
+        return {
+            "error": "Bad Request",
+            "message": "msg_type must not contain null bytes",
+        }, 400
+    data["msg_type"] = msg_type.strip()
+    if len(data["msg_type"]) > _MAX_MSG_TYPE_LEN:
+        return {
+            "error": "Bad Request",
+            "message": f"msg_type must be at most {_MAX_MSG_TYPE_LEN} characters",
+        }, 400
+    return None
+
+
 def _parse_publish_body(request: Any) -> dict | tuple:
     """Parse and validate the publish request body.
 
@@ -262,41 +339,13 @@ def _parse_publish_body(request: Any) -> dict | tuple:
             "message": f"Missing: {', '.join(missing)}",
         }, 400
 
-    payload = data["payload"]
-    if not isinstance(payload, str) or not payload.strip():
-        return {
-            "error": "Bad Request",
-            "message": "Payload must be a non-empty string",
-        }, 400
-    if "\x00" in payload:
-        return {
-            "error": "Bad Request",
-            "message": "Payload must not contain null bytes",
-        }, 400
+    payload_err = _validate_payload(data)
+    if payload_err:
+        return payload_err
 
-    if len(payload.encode("utf-8")) > _MAX_PAYLOAD_BYTES:
-        return {
-            "error": "Bad Request",
-            "message": f"Payload exceeds maximum size of {_fmt_bytes(_MAX_PAYLOAD_BYTES)}",
-        }, 400
-
-    msg_type = data["msg_type"]
-    if not isinstance(msg_type, str) or not msg_type.strip():
-        return {
-            "error": "Bad Request",
-            "message": "msg_type must be a non-empty string",
-        }, 400
-    if "\x00" in msg_type:
-        return {
-            "error": "Bad Request",
-            "message": "msg_type must not contain null bytes",
-        }, 400
-    data["msg_type"] = msg_type.strip()
-    if len(data["msg_type"]) > _MAX_MSG_TYPE_LEN:
-        return {
-            "error": "Bad Request",
-            "message": f"msg_type must be at most {_MAX_MSG_TYPE_LEN} characters",
-        }, 400
+    msg_type_err = _validate_msg_type(data)
+    if msg_type_err:
+        return msg_type_err
 
     metadata = data.get("metadata")
     meta_err = _validate_metadata(metadata)
@@ -304,26 +353,9 @@ def _parse_publish_body(request: Any) -> dict | tuple:
         return meta_err
 
     if isinstance(metadata, dict) and "tags" in metadata:
-        tags = metadata["tags"]
-        if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
-            return {
-                "error": "Bad Request",
-                "message": "Tags must be a list of strings",
-            }, 400
-        tags = [t.strip() for t in tags]
-        if not all(tags):
-            return {
-                "error": "Bad Request",
-                "message": "Tags must be non-empty strings",
-            }, 400
-        if len(tags) > 20:
-            return {"error": "Bad Request", "message": "Maximum 20 tags allowed"}, 400
-        if any(len(t) > 64 for t in tags):
-            return {
-                "error": "Bad Request",
-                "message": "Each tag must be at most 64 characters",
-            }, 400
-        metadata["tags"] = tags
+        tags_err = _validate_tags(metadata)
+        if tags_err:
+            return tags_err
 
     if "\x00" in data["channel"]:
         return {
