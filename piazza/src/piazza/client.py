@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import secrets
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -581,6 +582,11 @@ class PiazzaClient:
     def dm_send(self, to_agent: str, content: str) -> str:
         """Send a direct message to another agent.
 
+        If the target agent has never registered (no heartbeat on
+        record), a :class:`UserWarning` is emitted.  The message is
+        still delivered so that pre-provisioned agents can receive it
+        once they come online.
+
         Args:
             to_agent: Recipient agent ID.
             content: Message content.
@@ -588,6 +594,17 @@ class PiazzaClient:
         Returns:
             The message ID.
         """
+        # Warn when the recipient has never been seen (local transport only;
+        # the HTTP server returns a warning field in the response).
+        if isinstance(self._transport, LocalTransport):
+            bus = self._transport._bus  # noqa: SLF001
+            if bus.agent_status(to_agent) is None:
+                warnings.warn(
+                    f"target agent '{to_agent}' is not registered; "
+                    f"message stored but may never be read",
+                    UserWarning,
+                    stacklevel=2,
+                )
         channel = self._dm_channel(self._agent_id, to_agent)
         return self.channel_send(channel, content, msg_type="chat")
 
