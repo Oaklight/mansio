@@ -421,7 +421,8 @@ class AdminServer:
                 {"channel": ch, "subscription_ids": ids, "count": len(ids)}
                 for ch, ids in counts.items()
             ]
-            return {"total": sum(c["count"] for c in ch_list), "channels": ch_list}
+            total = sum(int(c["count"]) for c in ch_list)
+            return {"total": total, "channels": ch_list}
 
     def _setup_system_routes(self) -> None:
         """System/backend info route."""
