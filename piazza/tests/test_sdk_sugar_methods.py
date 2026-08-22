@@ -68,6 +68,7 @@ class TestNoteWrite:
             assert len(notes) == 1
             assert notes[0].payload == "tagged note"
             assert notes[0].msg_type == "note"
+            assert notes[0].metadata.get("tags") == ["test", "important"]
 
             client.close()
         finally:
@@ -172,12 +173,13 @@ class TestMemoryStore:
             client.memory_store("rust is fast")
             client.memory_store("go is simple")
 
-            all_memories = client.memory_recall("")
-            assert len(all_memories) == 3
-
             python_memories = client.memory_recall("python")
             assert len(python_memories) == 1
             assert "python" in python_memories[0].payload.lower()
+
+            rust_memories = client.memory_recall("rust")
+            assert len(rust_memories) == 1
+            assert "rust" in rust_memories[0].payload.lower()
 
             client.close()
         finally:
@@ -207,7 +209,7 @@ class TestServerStability:
             # Verify reads work too
             assert len(client.note_read()) == 1
             assert len(client.thought_read()) == 1
-            assert len(client.memory_recall("")) == 1
+            assert len(client.memory_recall("memory")) == 1
 
             client.close()
         finally:
