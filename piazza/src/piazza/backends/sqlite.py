@@ -497,5 +497,66 @@ class SQLiteBackend:
             metadata=meta,
         )
 
+    def compact(
+        self,
+        channel: str,
+        *,
+        max_messages: int | None = None,
+        keep_latest_per_sender: bool = False,
+    ) -> int:
+        """Compact a channel by removing old messages.
+
+        Args:
+            channel: Channel to compact.
+            max_messages: If set, keep only the latest *max_messages*
+                messages (after per-sender dedup if enabled).
+            keep_latest_per_sender: If True, keep only the latest
+                message per sender, removing older duplicates.
+
+        Returns:
+            Number of messages removed.
+        """
+        with self._lock:
+            total_removed = 0
+
+            if keep_latest_per_sender:
+                # Delete all but the latest message per sender in this channel.
+                cursor = self._conn.execute(
+                    """
+                    DELETE FROM messages
+                    WHERE channel = ? AND id NOT IN (
+                        SELECT id FROM (
+                            SELECT id, ROW_NUMBER() OVER (
+                                PARTITION BY sender ORDER BY id DESC
+                            ) AS rn
+                            FROM messages WHERE channel = ?
+                        ) WHERE rn = 1
+                    )
+                    """,
+                    (channel, channel),
+                )
+                total_removed += cursor.rowcount
+
+            if max_messages is not None:
+                # Keep only the latest max_messages.
+                cursor = self._conn.execute(
+                    """
+                    DELETE FROM messages
+                    WHERE channel = ? AND id NOT IN (
+                        SELECT id FROM messages
+                        WHERE channel = ?
+                        ORDER BY id DESC
+                        LIMIT ?
+                    )
+                    """,
+                    (channel, channel, max_messages),
+                )
+                total_removed += cursor.rowcount
+
+            if total_removed:
+                self._conn.commit()
+
+            return total_removed
+
     def __repr__(self) -> str:
         return f"SQLiteBackend({self._db_path!r})"

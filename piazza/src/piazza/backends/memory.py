@@ -295,6 +295,60 @@ class MemoryBackend:
             self._messages_by_id.pop(mid, None)
         return deleted
 
+    def compact(
+        self,
+        channel: str,
+        *,
+        max_messages: int | None = None,
+        keep_latest_per_sender: bool = False,
+    ) -> int:
+        """Compact a channel by removing old messages.
+
+        Args:
+            channel: Channel to compact.
+            max_messages: If set, keep only the latest *max_messages*
+                messages (after per-sender dedup if enabled).
+            keep_latest_per_sender: If True, keep only the latest
+                message per sender, removing older duplicates.
+
+        Returns:
+            Number of messages removed.
+        """
+        with self._lock:
+            msgs = self._messages.get(channel)
+            if not msgs:
+                return 0
+
+            original_count = len(msgs)
+
+            if keep_latest_per_sender:
+                # Walk in reverse, keeping only the first (= latest) per sender.
+                seen: set[str] = set()
+                kept: list[Message] = []
+                for m in reversed(msgs):
+                    if m.sender not in seen:
+                        seen.add(m.sender)
+                        kept.append(m)
+                kept.reverse()
+                msgs = kept
+
+            if max_messages is not None and len(msgs) > max_messages:
+                removed_msgs = msgs[:-max_messages]
+                msgs = msgs[-max_messages:]
+                # Clean up index for removed messages.
+                for m in removed_msgs:
+                    self._messages_by_id.pop(m.id, None)
+
+            # Clean up index for per-sender deduped messages.
+            if keep_latest_per_sender:
+                kept_ids = {m.id for m in msgs}
+                for m in self._messages.get(channel, []):
+                    if m.id not in kept_ids:
+                        self._messages_by_id.pop(m.id, None)
+
+            self._messages[channel] = msgs
+            return original_count - len(msgs)
+
     def get_backend_info(self) -> dict:
         """Return backend type and usage info."""
         import sys
