@@ -435,6 +435,20 @@ async def _handle_registry_lookup(request: Any, bus: Any) -> dict | tuple:
     return {"found": False, "agent_id": agent_id}
 
 
+async def _dm_unregistered_warning(bus: Any, channel: str, sender: str) -> str | None:
+    """Return a warning string if a DM targets an unregistered agent."""
+    if not channel.startswith("dm:"):
+        return None
+    parts = channel.split(":")
+    if len(parts) != 3:
+        return None
+    other = parts[1] if parts[2] == sender else parts[2]
+    status = await asyncio.to_thread(bus.agent_status, other)
+    if status is None:
+        return f"target agent '{other}' is not registered; message stored but may never be read"
+    return None
+
+
 def _parse_queue_body(request: Any, required_field: str) -> tuple[dict, tuple | None]:
     """Parse JSON body and validate a required field for queue endpoints."""
     try:
@@ -674,21 +688,9 @@ class HttpFrontend:
             )
             result: dict[str, object] = {"message_id": msg_id}
 
-            # Warn when sending a DM to an unregistered agent.
-            channel = data["channel"]
-            sender = data["sender"]
-            if channel.startswith("dm:"):
-                parts = channel.split(":")
-                if len(parts) == 3:
-                    other = parts[1] if parts[2] == sender else parts[2]
-                    status = await asyncio.to_thread(
-                        bus.agent_status, other
-                    )
-                    if status is None:
-                        result["warning"] = (
-                            f"target agent '{other}' is not registered; "
-                            f"message stored but may never be read"
-                        )
+            warning = await _dm_unregistered_warning(bus, data["channel"], data["sender"])
+            if warning:
+                result["warning"] = warning
 
             return result
 
