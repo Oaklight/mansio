@@ -295,6 +295,33 @@ class MemoryBackend:
             self._messages_by_id.pop(mid, None)
         return deleted
 
+    @staticmethod
+    def _dedup_per_sender(msgs: list[Message]) -> list[Message]:
+        """Keep only the latest message per sender."""
+        seen: set[str] = set()
+        kept: list[Message] = []
+        for m in reversed(msgs):
+            if m.sender not in seen:
+                seen.add(m.sender)
+                kept.append(m)
+        kept.reverse()
+        return kept
+
+    def _trim_to_limit(self, msgs: list[Message], max_messages: int) -> list[Message]:
+        """Trim *msgs* to *max_messages*, cleaning the id index."""
+        if len(msgs) <= max_messages:
+            return msgs
+        for m in msgs[:-max_messages]:
+            self._messages_by_id.pop(m.id, None)
+        return msgs[-max_messages:]
+
+    def _cleanup_deduped_index(self, channel: str, kept_msgs: list[Message]) -> None:
+        """Remove index entries for messages no longer in *kept_msgs*."""
+        kept_ids = {m.id for m in kept_msgs}
+        for m in self._messages.get(channel, []):
+            if m.id not in kept_ids:
+                self._messages_by_id.pop(m.id, None)
+
     def compact(
         self,
         channel: str,
@@ -322,29 +349,13 @@ class MemoryBackend:
             original_count = len(msgs)
 
             if keep_latest_per_sender:
-                # Walk in reverse, keeping only the first (= latest) per sender.
-                seen: set[str] = set()
-                kept: list[Message] = []
-                for m in reversed(msgs):
-                    if m.sender not in seen:
-                        seen.add(m.sender)
-                        kept.append(m)
-                kept.reverse()
-                msgs = kept
+                msgs = self._dedup_per_sender(msgs)
 
-            if max_messages is not None and len(msgs) > max_messages:
-                removed_msgs = msgs[:-max_messages]
-                msgs = msgs[-max_messages:]
-                # Clean up index for removed messages.
-                for m in removed_msgs:
-                    self._messages_by_id.pop(m.id, None)
+            if max_messages is not None:
+                msgs = self._trim_to_limit(msgs, max_messages)
 
-            # Clean up index for per-sender deduped messages.
             if keep_latest_per_sender:
-                kept_ids = {m.id for m in msgs}
-                for m in self._messages.get(channel, []):
-                    if m.id not in kept_ids:
-                        self._messages_by_id.pop(m.id, None)
+                self._cleanup_deduped_index(channel, msgs)
 
             self._messages[channel] = msgs
             return original_count - len(msgs)
