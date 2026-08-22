@@ -341,6 +341,8 @@ class MemoryBackend:
         Returns:
             Number of messages removed.
         """
+        if max_messages is not None and max_messages < 1:
+            raise ValueError("max_messages must be at least 1")
         with self._lock:
             msgs = self._messages.get(channel)
             if not msgs:
