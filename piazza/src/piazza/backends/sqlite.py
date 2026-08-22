@@ -144,7 +144,7 @@ class SQLiteBackend:
             if after:
                 clauses.append("id > ?")
                 params.append(after)
-            if msg_type:
+            if msg_type is not None:
                 clauses.append("msg_type = ?")
                 params.append(msg_type)
             where = " AND ".join(clauses)
@@ -214,7 +214,7 @@ class SQLiteBackend:
         if sender:
             clauses.append("sender = ?")
             params.append(sender)
-        if msg_type:
+        if msg_type is not None:
             clauses.append("msg_type = ?")
             params.append(msg_type)
         if after:

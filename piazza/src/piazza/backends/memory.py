@@ -62,7 +62,7 @@ class MemoryBackend:
             msgs = list(self._messages.get(channel, []))
         if after:
             msgs = [m for m in msgs if m.id > after]
-        if msg_type:
+        if msg_type is not None:
             msgs = [m for m in msgs if m.msg_type == msg_type]
         return msgs[:limit]
 
@@ -131,7 +131,7 @@ class MemoryBackend:
             msgs = [m for m in msgs if m.id > after]
         if sender:
             msgs = [m for m in msgs if m.sender == sender]
-        if msg_type:
+        if msg_type is not None:
             msgs = [m for m in msgs if m.msg_type == msg_type]
         return msgs
 
