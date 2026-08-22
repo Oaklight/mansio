@@ -1,7 +1,14 @@
 """Pluggable message backends for piazza bus."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from piazza.backends.memory import MemoryBackend
 from piazza.backends.sqlite import SQLiteBackend
+
+if TYPE_CHECKING:
+    from piazza.backends.nats import NATSBackend
 
 __all__ = ["MemoryBackend", "NATSBackend", "SQLiteBackend"]
 

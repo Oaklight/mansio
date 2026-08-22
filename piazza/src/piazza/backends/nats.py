@@ -12,8 +12,13 @@ Requires the ``nats-py`` package::
 Example::
 
     backend = NATSBackend("nats://localhost:4222")
-    await backend.connect()
+    backend.connect()
     bus = Bus(backend=backend)
+
+Note:
+    Importing this module directly requires ``nats-py``.  The lazy
+    import in ``piazza.backends.__init__`` guards against this for
+    code that only uses ``from piazza.backends import NATSBackend``.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from piazza.types import AgentPresence, ClaimResult, Message
 
 try:
     import nats
+    import nats.errors
     from nats.aio.client import Client as NATSClient
     from nats.js.api import (
         ConsumerConfig,
@@ -44,6 +50,11 @@ except ImportError as exc:
     raise ImportError("NATS backend requires 'nats-py'. Install with: pip install nats-py") from exc
 
 logger = logging.getLogger(__name__)
+
+# Default cap when callers request "all" messages (limit=0).
+# JetStream has no native "give me everything" fetch, so we use a high
+# but bounded default to avoid unbounded memory growth.
+_DEFAULT_FETCH_CAP = 10_000
 
 
 class NATSBackend:
@@ -64,6 +75,7 @@ class NATSBackend:
         max_bytes: Maximum stream size in bytes (0 = unlimited).
         storage: JetStream storage type ("file" or "memory").
         connect_timeout: Connection timeout in seconds.
+        operation_timeout: Timeout for individual async operations in seconds.
     """
 
     def __init__(
@@ -76,6 +88,7 @@ class NATSBackend:
         max_bytes: int = 0,
         storage: str = "file",
         connect_timeout: float = 5.0,
+        operation_timeout: float = 30.0,
     ) -> None:
         self._url = url
         self._stream_name = stream_name
@@ -84,10 +97,15 @@ class NATSBackend:
         self._max_bytes = max_bytes
         self._storage = StorageType.FILE if storage == "file" else StorageType.MEMORY
         self._connect_timeout = connect_timeout
+        self._operation_timeout = operation_timeout
 
         self._nc: NATSClient | None = None
         self._js: JetStreamContext | None = None
-        self._lock = threading.Lock()
+
+        # Guards the event loop lifecycle (_loop, _loop_thread, _connected).
+        self._loop_lock = threading.Lock()
+        # Guards the in-memory presence store.
+        self._presence_lock = threading.Lock()
 
         # Background event loop for async operations
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -96,6 +114,8 @@ class NATSBackend:
 
         # In-memory presence store (not persisted to NATS)
         self._presence: dict[str, dict] = {}
+
+    # ── Subject encoding ──────────────────────────────────────
 
     def _subject(self, channel: str) -> str:
         """Map a piazza channel name to a NATS subject.
@@ -113,6 +133,8 @@ class NATSBackend:
         if subject.startswith(prefix):
             return urllib.parse.unquote(subject[len(prefix) :])
         return subject
+
+    # ── Serialization ─────────────────────────────────────────
 
     def _msg_to_nats_payload(self, message: Message) -> bytes:
         """Serialize a piazza Message to NATS payload bytes."""
@@ -141,8 +163,13 @@ class NATSBackend:
             metadata=d.get("metadata"),
         )
 
+    # ── Event loop bridge ─────────────────────────────────────
+
     def _start_loop(self) -> None:
-        """Start the background asyncio event loop thread."""
+        """Start the background asyncio event loop thread.
+
+        Caller must hold ``_loop_lock``.
+        """
         if self._loop_thread is not None and self._loop_thread.is_alive():
             return
         self._loop = asyncio.new_event_loop()
@@ -153,13 +180,35 @@ class NATSBackend:
         )
         self._loop_thread.start()
 
-    def _run_async(self, coro: Any) -> Any:
-        """Run an async coroutine from sync context."""
-        if self._loop is None or self._loop.is_closed():
-            self._start_loop()
-        assert self._loop is not None
-        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result(timeout=30)
+    def _run_async(self, coro: Any, *, timeout: float | None = None) -> Any:
+        """Run an async coroutine from sync context.
+
+        Thread-safe: guards the event loop lifecycle with ``_loop_lock``.
+        """
+        with self._loop_lock:
+            if self._loop is None or self._loop.is_closed():
+                self._start_loop()
+            loop = self._loop
+        assert loop is not None
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result(timeout=timeout or self._operation_timeout)
+
+    def _ensure_connected(self) -> None:
+        """Connect if not already connected.
+
+        Auto-connect is a convenience — the first operation triggers
+        connection lazily.  For fail-fast behavior, call ``connect()``
+        explicitly after construction.
+        """
+        with self._loop_lock:
+            if not self._connected:
+                self._start_loop()
+        if not self._connected:
+            self._run_async(self._async_connect())
+            with self._loop_lock:
+                self._connected = True
+
+    # ── Connection ────────────────────────────────────────────
 
     async def _async_connect(self) -> None:
         """Establish NATS connection and ensure JetStream stream exists."""
@@ -180,18 +229,33 @@ class NATSBackend:
         )
         try:
             await self._js.find_stream_info_by_subject(f"{self._subject_prefix}.>")
-            await self._js.update_stream(stream_config)
+            try:
+                await self._js.update_stream(stream_config)
+            except Exception:
+                # update_stream can fail if config changes are incompatible
+                # (e.g. switching storage type).  Log but don't crash — the
+                # existing stream is still usable.
+                logger.warning(
+                    "Failed to update stream %s config; using existing",
+                    self._stream_name,
+                    exc_info=True,
+                )
         except Exception:
             await self._js.add_stream(stream_config)
 
     def connect(self) -> None:
         """Connect to NATS server (sync wrapper).
 
-        Must be called before using the backend.
+        Must be called before using the backend, or operations will
+        auto-connect on first use.
         """
-        self._start_loop()
+        with self._loop_lock:
+            self._start_loop()
         self._run_async(self._async_connect())
-        self._connected = True
+        with self._loop_lock:
+            self._connected = True
+
+    # ── Store ─────────────────────────────────────────────────
 
     def store(self, message: Message, *, queue: bool = False) -> None:
         """Publish a message to NATS JetStream.
@@ -199,9 +263,14 @@ class NATSBackend:
         Args:
             message: Message to store.
             queue: If True, mark as queue message (stored in metadata).
+
+        Raises:
+            Exception: On NATS connection or publish failure.
         """
-        if not self._connected:
-            self.connect()
+        if queue:
+            raise NotImplementedError("Queue store is not yet implemented for NATSBackend.")
+
+        self._ensure_connected()
 
         subject = self._subject(message.channel)
         payload = self._msg_to_nats_payload(message)
@@ -212,6 +281,8 @@ class NATSBackend:
 
         self._run_async(_pub())
 
+    # ── Fetch helpers ─────────────────────────────────────────
+
     async def _fetch_batch(self, sub: Any, batch_size: int) -> list[Any] | None:
         """Fetch a single batch from a pull subscription.
 
@@ -219,10 +290,8 @@ class NATSBackend:
         """
         try:
             batch = await sub.fetch(batch=batch_size, timeout=0.5)
-        except asyncio.TimeoutError:
-            return None
-        except Exception:
-            # nats-py raises TimeoutError or nats.errors on empty
+        except (asyncio.TimeoutError, nats.errors.TimeoutError):
+            # Normal end-of-stream: no more messages to fetch.
             return None
         return batch if batch else None
 
@@ -261,24 +330,26 @@ class NATSBackend:
     ) -> list[Message]:
         """Fetch messages from a JetStream subject using pull consumer.
 
-        Uses pull_subscribe + fetch(batch) for efficient retrieval
-        without the 1-second subscribe timeout.
+        Uses pull_subscribe + fetch(batch) for efficient retrieval.
+
+        When *limit* is 0 (meaning "all"), an internal cap of
+        ``_DEFAULT_FETCH_CAP`` is applied to prevent unbounded memory
+        growth.  Callers needing truly unbounded scans should paginate
+        with ``after`` cursors.
+
+        Raises:
+            Exception: On NATS connection or subscription failure.
         """
         assert self._js is not None
-        effective_limit = limit if limit > 0 else 1000
+        effective_limit = limit if limit > 0 else _DEFAULT_FETCH_CAP
 
+        sub = await self._js.pull_subscribe(subject, stream=self._stream_name)
         try:
-            sub = await self._js.pull_subscribe(subject, stream=self._stream_name)
-            try:
-                return await self._drain_subscription(
-                    sub, limit=effective_limit, after=after, sender=sender, msg_type=msg_type
-                )
-            finally:
-                await sub.unsubscribe()
-        except Exception:
-            logger.warning("NATS fetch failed for subject %s", subject, exc_info=True)
-
-        return []
+            return await self._drain_subscription(
+                sub, limit=effective_limit, after=after, sender=sender, msg_type=msg_type
+            )
+        finally:
+            await sub.unsubscribe()
 
     @staticmethod
     def _matches(
@@ -295,11 +366,14 @@ class NATSBackend:
             return False
         return not (msg_type and msg.msg_type != msg_type)
 
+    # ── Query ─────────────────────────────────────────────────
+
     def query(
         self,
         channel: str,
         after: str | None = None,
         limit: int = 100,
+        msg_type: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel via JetStream.
 
@@ -307,15 +381,19 @@ class NATSBackend:
             channel: Channel to query.
             after: If provided, only return messages with ID > this value.
             limit: Maximum number of messages to return.
+            msg_type: If provided, only return messages of this type.
 
         Returns:
             Messages in chronological order (oldest first).
-        """
-        if not self._connected:
-            self.connect()
 
+        Raises:
+            Exception: On NATS connection or fetch failure.
+        """
+        self._ensure_connected()
         subject = self._subject(channel)
-        return self._run_async(self._fetch_all(subject, limit=limit, after=after))
+        return self._run_async(
+            self._fetch_all(subject, limit=limit, after=after, msg_type=msg_type)
+        )
 
     def list_channels(self) -> list[str]:
         """List all channels using JetStream stream info.
@@ -326,29 +404,29 @@ class NATSBackend:
         Returns:
             Sorted list of channel names.
         """
-        if not self._connected:
-            self.connect()
+        self._ensure_connected()
 
         async def _list() -> list[str]:
             assert self._js is not None
             channels: list[str] = []
-            try:
-                stream_info = await self._js.stream_info(self._stream_name)
-                state = stream_info.state
-                # state.subjects is a dict of subject → message count
-                if hasattr(state, "subjects") and state.subjects:
-                    for subj in state.subjects:
-                        channels.append(self._channel_from_subject(subj))
-                else:
-                    # Fallback: scan messages if subjects not available
-                    seen: set[str] = set()
-                    msgs = await self._fetch_all(f"{self._subject_prefix}.>")
-                    for m in msgs:
-                        if m.channel not in seen:
-                            seen.add(m.channel)
-                            channels.append(m.channel)
-            except Exception:
-                logger.warning("Failed to list channels from NATS", exc_info=True)
+            stream_info = await self._js.stream_info(self._stream_name)
+            state = stream_info.state
+            # state.subjects is a dict of subject → message count
+            if hasattr(state, "subjects") and state.subjects:
+                for subj in state.subjects:
+                    channels.append(self._channel_from_subject(subj))
+            else:
+                # Fallback: scan messages if subjects not available
+                logger.warning(
+                    "stream_info.subjects unavailable for %s, falling back to message scan",
+                    self._stream_name,
+                )
+                seen: set[str] = set()
+                msgs = await self._fetch_all(f"{self._subject_prefix}.>")
+                for m in msgs:
+                    if m.channel not in seen:
+                        seen.add(m.channel)
+                        channels.append(m.channel)
             return sorted(channels)
 
         return self._run_async(_list())
@@ -362,29 +440,24 @@ class NATSBackend:
         Returns:
             Number of messages.
         """
-        if not self._connected:
-            self.connect()
+        self._ensure_connected()
 
         async def _count() -> int:
             assert self._js is not None
-            try:
-                stream_info = await self._js.stream_info(self._stream_name)
-                state = stream_info.state
+            stream_info = await self._js.stream_info(self._stream_name)
+            state = stream_info.state
 
-                if channel is None:
-                    return state.messages
+            if channel is None:
+                return state.messages
 
-                # Count for specific channel subject
-                subject = self._subject(channel)
-                if hasattr(state, "subjects") and state.subjects:
-                    return state.subjects.get(subject, 0)
+            # Count for specific channel subject
+            subject = self._subject(channel)
+            if hasattr(state, "subjects") and state.subjects:
+                return state.subjects.get(subject, 0)
 
-                # Fallback: count by consuming
-                msgs = await self._fetch_all(subject)
-                return len(msgs)
-            except Exception:
-                logger.warning("Failed to count messages from NATS", exc_info=True)
-                return 0
+            # Fallback: count by consuming
+            msgs = await self._fetch_all(subject)
+            return len(msgs)
 
         return self._run_async(_count())
 
@@ -408,9 +481,7 @@ class NATSBackend:
         Returns:
             Messages in chronological order (oldest first).
         """
-        if not self._connected:
-            self.connect()
-
+        self._ensure_connected()
         subject = self._subject(channel) if channel else f"{self._subject_prefix}.>"
         return self._run_async(
             self._fetch_all(
@@ -425,30 +496,41 @@ class NATSBackend:
     def get_stats(self) -> dict:
         """Return aggregate statistics.
 
+        Uses stream info for totals (``total_messages``,
+        ``total_channels``) and falls back to message scanning for
+        per-sender / per-type breakdowns.
+
+        .. note::
+
+            The per-channel/per-sender/per-type breakdowns scan up to
+            ``_DEFAULT_FETCH_CAP`` messages.  For streams larger than
+            that, the breakdowns will be approximate.
+
         Returns:
             Dict with total_messages, total_channels, total_senders,
             channel_breakdown, and msg_type_distribution.
         """
-        if not self._connected:
-            self.connect()
+        self._ensure_connected()
 
         async def _stats() -> dict:
             assert self._js is not None
 
-            all_msgs: list[Message] = []
-            try:
-                all_msgs = await self._fetch_all(f"{self._subject_prefix}.>")
-            except Exception:
-                logger.warning("Failed to fetch messages for stats", exc_info=True)
+            # Use stream info for accurate totals
+            stream_info = await self._js.stream_info(self._stream_name)
+            state = stream_info.state
+            total_messages = state.messages
+            total_channels = state.num_subjects if hasattr(state, "num_subjects") else 0
+
+            # Scan messages for per-sender/per-type breakdowns
+            # NOTE: capped at _DEFAULT_FETCH_CAP messages
+            all_msgs = await self._fetch_all(f"{self._subject_prefix}.>")
 
             senders: set[str] = set()
             types: dict[str, int] = {}
             breakdown: dict[str, dict] = {}
-            channels: set[str] = set()
 
             for m in all_msgs:
                 senders.add(m.sender)
-                channels.add(m.channel)
                 types[m.msg_type] = types.get(m.msg_type, 0) + 1
                 if m.channel not in breakdown:
                     breakdown[m.channel] = {
@@ -468,8 +550,8 @@ class NATSBackend:
                 bd["sender_count"] = len(bd.pop("_senders"))
 
             return {
-                "total_messages": len(all_msgs),
-                "total_channels": len(channels),
+                "total_messages": total_messages,
+                "total_channels": total_channels or len(breakdown),
                 "total_senders": len(senders),
                 "channel_breakdown": sorted(
                     breakdown.values(),
@@ -487,14 +569,16 @@ class NATSBackend:
     def query_recent_timestamps(self, seconds: int = 60) -> list[str]:
         """Return timestamps of messages from the last N seconds.
 
+        Uses a pull consumer with ``DeliverPolicy.BY_START_TIME`` for
+        efficient time-windowed retrieval.
+
         Args:
             seconds: Time window in seconds.
 
         Returns:
             List of ISO 8601 timestamp strings, sorted ascending.
         """
-        if not self._connected:
-            self.connect()
+        self._ensure_connected()
 
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
 
@@ -502,33 +586,27 @@ class NATSBackend:
             assert self._js is not None
             result: list[str] = []
 
+            deliver_time = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+            config = ConsumerConfig(
+                deliver_policy=DeliverPolicy.BY_START_TIME,
+                opt_start_time=deliver_time.isoformat(),
+            )
+            sub = await self._js.pull_subscribe(
+                f"{self._subject_prefix}.>",
+                config=config,
+                stream=self._stream_name,
+            )
             try:
-                # Use deliver policy to start from recent time
-                deliver_time = datetime.now(timezone.utc) - timedelta(seconds=seconds)
-                config = ConsumerConfig(
-                    deliver_policy=DeliverPolicy.BY_START_TIME,
-                    opt_start_time=deliver_time.isoformat(),
-                )
-                sub = await self._js.subscribe(
-                    f"{self._subject_prefix}.>",
-                    config=config,
-                )
-                try:
-                    while True:
-                        try:
-                            msg = await asyncio.wait_for(
-                                sub.next_msg(),
-                                timeout=0.5,
-                            )
-                            piazza_msg = self._nats_payload_to_msg(msg.data)
-                            if piazza_msg.timestamp > cutoff:
-                                result.append(piazza_msg.timestamp)
-                        except asyncio.TimeoutError:
-                            break
-                finally:
-                    await sub.unsubscribe()
-            except Exception:
-                logger.warning("Failed to query recent timestamps from NATS", exc_info=True)
+                while True:
+                    batch = await self._fetch_batch(sub, batch_size=100)
+                    if batch is None:
+                        break
+                    for msg in batch:
+                        piazza_msg = self._nats_payload_to_msg(msg.data)
+                        if piazza_msg.timestamp > cutoff:
+                            result.append(piazza_msg.timestamp)
+            finally:
+                await sub.unsubscribe()
 
             result.sort()
             return result
@@ -554,16 +632,13 @@ class NATSBackend:
                 "subject_prefix": self._subject_prefix,
                 "connected": True,
             }
-            try:
-                stream_info = await self._js.stream_info(self._stream_name)
-                state = stream_info.state
-                info_dict["total_messages"] = state.messages
-                info_dict["total_bytes"] = state.bytes
-                info_dict["total_channels"] = state.num_subjects
-                info_dict["first_seq"] = state.first_seq
-                info_dict["last_seq"] = state.last_seq
-            except Exception:
-                logger.warning("Failed to get stream info", exc_info=True)
+            stream_info = await self._js.stream_info(self._stream_name)
+            state = stream_info.state
+            info_dict["total_messages"] = state.messages
+            info_dict["total_bytes"] = state.bytes
+            info_dict["total_channels"] = state.num_subjects
+            info_dict["first_seq"] = state.first_seq
+            info_dict["last_seq"] = state.last_seq
             return info_dict
 
         return self._run_async(_info())
@@ -617,7 +692,7 @@ class NATSBackend:
     def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
         """Record a heartbeat for *agent_id*."""
         now = datetime.now(timezone.utc).isoformat()
-        with self._lock:
+        with self._presence_lock:
             self._presence[agent_id] = {
                 "last_seen": now,
                 "metadata": metadata,
@@ -627,7 +702,7 @@ class NATSBackend:
         """Return all known agents with computed online/offline status."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         result: list[AgentPresence] = []
-        with self._lock:
+        with self._presence_lock:
             for agent_id, rec in self._presence.items():
                 status = "online" if rec["last_seen"] >= cutoff else "offline"
                 result.append(
@@ -644,7 +719,7 @@ class NATSBackend:
     def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
         """Return presence for a single agent, or ``None`` if unknown."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
-        with self._lock:
+        with self._presence_lock:
             rec = self._presence.get(agent_id)
             if rec is None:
                 return None
@@ -660,23 +735,27 @@ class NATSBackend:
 
     def close(self) -> None:
         """Close NATS connection and stop background loop."""
-        if self._nc is not None and self._connected:
+        with self._loop_lock:
+            if self._nc is None or not self._connected:
+                return
 
-            async def _close() -> None:
-                assert self._nc is not None
-                await self._nc.close()
+        async def _close() -> None:
+            assert self._nc is not None
+            await self._nc.close()
 
-            with contextlib.suppress(Exception):
-                self._run_async(_close())
+        with contextlib.suppress(Exception):
+            self._run_async(_close())
+        with self._loop_lock:
             self._connected = False
 
-        if self._loop is not None and not self._loop.is_closed():
-            self._loop.call_soon_threadsafe(self._loop.stop)
-            if self._loop_thread is not None:
-                self._loop_thread.join(timeout=5)
-            self._loop.close()
-            self._loop = None
-            self._loop_thread = None
+        with self._loop_lock:
+            if self._loop is not None and not self._loop.is_closed():
+                self._loop.call_soon_threadsafe(self._loop.stop)
+                if self._loop_thread is not None:
+                    self._loop_thread.join(timeout=5)
+                self._loop.close()
+                self._loop = None
+                self._loop_thread = None
 
     def __repr__(self) -> str:
         return f"NATSBackend({self._url!r}, stream={self._stream_name!r})"

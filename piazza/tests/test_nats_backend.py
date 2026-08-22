@@ -14,9 +14,10 @@ Or with nats-server directly::
 
 from __future__ import annotations
 
-import asyncio
 import os
+import socket
 import time
+import urllib.parse
 
 import pytest
 
@@ -43,16 +44,20 @@ def _make_backend(stream_suffix: str = "") -> NATSBackend:
 
 
 def _is_nats_available() -> bool:
-    """Check if NATS server is reachable."""
+    """Check if NATS server is reachable via TCP socket probe.
+
+    Uses a plain socket connection instead of ``asyncio.run()`` to avoid
+    creating/destroying an event loop at module collection time, which
+    can interfere with async test fixtures.
+    """
+    parsed = urllib.parse.urlparse(NATS_URL)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 4222
     try:
-
-        async def _check():
-            nc = await nats_py.connect(NATS_URL, connect_timeout=2)
-            await nc.close()
-
-        asyncio.run(_check())
+        sock = socket.create_connection((host, port), timeout=2)
+        sock.close()
         return True
-    except Exception:
+    except OSError:
         return False
 
 
@@ -371,3 +376,56 @@ class TestNATSBackendPresence:
         backend.heartbeat("bob")
         agents = backend.agents()
         assert [a.agent_id for a in agents] == ["alice", "bob", "charlie"]
+
+
+class TestNATSBackendGetStats:
+    """Tests for get_stats."""
+
+    def test_stats_empty_stream(self, backend: NATSBackend):
+        stats = backend.get_stats()
+        assert stats["total_messages"] == 0
+        assert stats["total_senders"] == 0
+        assert stats["channel_breakdown"] == []
+        assert stats["msg_type_distribution"] == []
+
+    def test_stats_with_messages(self, backend: NATSBackend):
+        backend.store(_make_msg(channel="ch1", sender="alice", msg_type="chat", msg_id="s1"))
+        backend.store(_make_msg(channel="ch1", sender="bob", msg_type="chat", msg_id="s2"))
+        backend.store(_make_msg(channel="ch2", sender="alice", msg_type="note", msg_id="s3"))
+
+        stats = backend.get_stats()
+        assert stats["total_messages"] == 3
+        assert stats["total_senders"] == 2
+        assert len(stats["channel_breakdown"]) == 2
+
+        # ch1 has 2 msgs, ch2 has 1 — ch1 should be first (sorted by count desc)
+        assert stats["channel_breakdown"][0]["channel"] == "ch1"
+        assert stats["channel_breakdown"][0]["message_count"] == 2
+        assert stats["channel_breakdown"][0]["sender_count"] == 2
+        assert stats["channel_breakdown"][1]["channel"] == "ch2"
+        assert stats["channel_breakdown"][1]["message_count"] == 1
+
+        # msg_type_distribution
+        type_map = {d["msg_type"]: d["count"] for d in stats["msg_type_distribution"]}
+        assert type_map["chat"] == 2
+        assert type_map["note"] == 1
+
+
+class TestNATSBackendQueryRecentTimestamps:
+    """Tests for query_recent_timestamps."""
+
+    def test_recent_timestamps_returns_current(self, backend: NATSBackend):
+        """Messages stored just now should appear in a 60s window."""
+        backend.store(_make_msg(msg_id="rt1"))
+        backend.store(_make_msg(msg_id="rt2"))
+        time.sleep(0.3)  # allow NATS to persist
+
+        timestamps = backend.query_recent_timestamps(seconds=60)
+        assert len(timestamps) == 2
+        # Timestamps should be sorted ascending
+        assert timestamps == sorted(timestamps)
+
+    def test_recent_timestamps_empty(self, backend: NATSBackend):
+        """Empty stream returns no timestamps."""
+        timestamps = backend.query_recent_timestamps(seconds=60)
+        assert timestamps == []
