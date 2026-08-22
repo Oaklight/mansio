@@ -672,7 +672,25 @@ class HttpFrontend:
                 metadata=data.get("metadata"),
                 queue=bool(data.get("queue")),
             )
-            return {"message_id": msg_id}
+            result: dict[str, object] = {"message_id": msg_id}
+
+            # Warn when sending a DM to an unregistered agent.
+            channel = data["channel"]
+            sender = data["sender"]
+            if channel.startswith("dm:"):
+                parts = channel.split(":")
+                if len(parts) == 3:
+                    other = parts[1] if parts[2] == sender else parts[2]
+                    status = await asyncio.to_thread(
+                        bus.agent_status, other
+                    )
+                    if status is None:
+                        result["warning"] = (
+                            f"target agent '{other}' is not registered; "
+                            f"message stored but may never be read"
+                        )
+
+            return result
 
         @self._app.get("/v1/query")
         async def query(request: Request) -> dict | tuple:
