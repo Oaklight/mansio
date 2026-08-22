@@ -136,7 +136,8 @@ class NATSBackend:
 
     # ── Serialization ─────────────────────────────────────────
 
-    def _msg_to_nats_payload(self, message: Message) -> bytes:
+    @staticmethod
+    def _msg_to_nats_payload(message: Message) -> bytes:
         """Serialize a piazza Message to NATS payload bytes."""
         data = {
             "id": message.id,
@@ -201,12 +202,14 @@ class NATSBackend:
         explicitly after construction.
         """
         with self._loop_lock:
-            if not self._connected:
-                self._start_loop()
-        if not self._connected:
-            self._run_async(self._async_connect())
-            with self._loop_lock:
-                self._connected = True
+            if self._connected:
+                return
+            self._start_loop()
+        # _run_async + connect happen outside the lock to avoid
+        # holding it during network I/O.
+        self._run_async(self._async_connect())
+        with self._loop_lock:
+            self._connected = True
 
     # ── Connection ────────────────────────────────────────────
 
