@@ -37,6 +37,10 @@ class AdminInfo:
     url: str
     password: str | None
 
+    def __repr__(self) -> str:
+        pw = "****" if self.password else "None"
+        return f"AdminInfo(host={self.host!r}, port={self.port!r}, url={self.url!r}, password={pw})"
+
 
 class AdminServer:
     """Admin panel HTTP server.
