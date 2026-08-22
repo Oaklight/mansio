@@ -139,6 +139,14 @@ class Bus:
 
         self._backend.store(msg, queue=queue)
 
+        # Auto-compact system channels to prevent unbounded growth.
+        # _system:registry — one registration per agent is sufficient.
+        # _system:cursors:* — only the latest snapshot matters.
+        if channel == "_system:registry":
+            self._backend.compact(channel, keep_latest_per_sender=True)
+        elif channel.startswith("_system:cursors:"):
+            self._backend.compact(channel, max_messages=1)
+
         # Notify in-process subscribers (snapshot to avoid mutation during iteration)
         for callback in list(self._subs.get(channel, {}).values()):
             callback(msg)

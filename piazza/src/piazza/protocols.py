@@ -149,6 +149,27 @@ class Backend(Protocol):
         """Return presence for a single agent, or ``None`` if unknown."""
         ...
 
+    def compact(
+        self,
+        channel: str,
+        *,
+        max_messages: int | None = None,
+        keep_latest_per_sender: bool = False,
+    ) -> int:
+        """Compact a channel by removing old messages.
+
+        Args:
+            channel: Channel to compact.
+            max_messages: If set, keep only the latest *max_messages*
+                messages (after per-sender dedup if enabled).
+            keep_latest_per_sender: If True, keep only the latest
+                message per sender, removing older duplicates.
+
+        Returns:
+            Number of messages removed.
+        """
+        ...
+
 
 class Serializer(Protocol):
     """Protocol for message payload serialization.
