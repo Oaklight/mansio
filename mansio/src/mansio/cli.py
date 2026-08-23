@@ -359,7 +359,9 @@ def _cmd_serve(args: argparse.Namespace) -> None:
             channels=args.irc_channels or [],
         )
 
-    # Start AdminServer
+    # Start AdminServer (managed independently from Bus)
+    from mansio.admin import AdminServer
+
     admin_kwargs: dict[str, Any] = {
         "host": "0.0.0.0" if args.remote else "127.0.0.1",
         "port": args.admin_port,
@@ -370,7 +372,8 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     if args.token:
         admin_kwargs["auth_password"] = args.token
 
-    info = bus.start_admin(**admin_kwargs)
+    admin = AdminServer(bus, **admin_kwargs)
+    info = admin.start()
     logger.info("Admin panel", url=info.url)
     if info.password:
         logger.info("Admin password", password=_redact_token(info.password))
@@ -389,6 +392,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 
     stop.wait()
     logger.info("Shutting down...")
+    admin.stop()
     if irc_frontend:
         irc_frontend.shutdown()
     if http_frontend:

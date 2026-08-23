@@ -216,16 +216,24 @@ class TestAdminServer:
         assert len(info.password) == 32
         server.stop()
 
-    def test_bus_start_admin(self, bus):
-        info = bus.start_admin(port=0)
-        assert info.url.startswith("http://")
-        bus.stop_admin()
+    def test_admin_constructed_independently(self, bus):
+        from mansio.admin import AdminServer
 
-    def test_bus_close_stops_admin(self):
+        admin = AdminServer(bus, port=0)
+        info = admin.start()
+        assert info.url.startswith("http://")
+        admin.stop()
+
+    def test_bus_close_does_not_manage_admin(self):
+        from mansio.admin import AdminServer
+
         b = SQLiteBus(":memory:")
-        b.start_admin(port=0)
+        admin = AdminServer(b, port=0)
+        admin.start()
         b.close()
-        # Should not raise
+        # Bus.close() only closes the backend, not admin
+        assert admin.is_running()
+        admin.stop()
 
 
 # ============== API Integration Tests ==============
@@ -234,12 +242,16 @@ class TestAdminServer:
 class TestAdminAPI:
     @pytest.fixture
     def server_url(self):
+        from mansio.admin import AdminServer
+
         bus = SQLiteBus(":memory:")
         bus.publish("chat", "alice", "text", "hello")
         bus.publish("chat", "bob", "text", "hi")
         bus.publish("sync", "agent-a", "context_sync", '{"data": true}')
-        info = bus.start_admin(port=0)
+        admin = AdminServer(bus, port=0)
+        info = admin.start()
         yield info.url, bus
+        admin.stop()
         bus.close()
 
     def _get(self, url, path):
@@ -377,8 +389,11 @@ class TestAdminAPI:
             assert e.code == 404
 
     def test_auth_required(self):
+        from mansio.admin import AdminServer
+
         bus = SQLiteBus(":memory:")
-        info = bus.start_admin(port=0, auth_password="secret123")
+        admin = AdminServer(bus, port=0, auth_password="secret123")
+        info = admin.start()
         try:
             # Without session cookie, API should fail
             try:
@@ -412,4 +427,5 @@ class TestAdminAPI:
                 content = resp.read().decode()
                 assert "Mansio" in content
         finally:
+            admin.stop()
             bus.close()
