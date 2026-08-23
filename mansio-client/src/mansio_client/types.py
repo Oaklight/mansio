@@ -42,3 +42,21 @@ class ClaimResult:
     status: str
     claimed_by: str
     claimed_at: str
+    lease_until: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AgentPresence:
+    """Presence record for a single agent.
+
+    Attributes:
+        agent_id: Unique agent identifier.
+        status: ``"online"`` or ``"offline"``.
+        last_seen: ISO 8601 timestamp of last heartbeat.
+        metadata: Optional extra fields (display_name, capabilities, etc.).
+    """
+
+    agent_id: str
+    status: str  # "online" | "offline"
+    last_seen: str
+    metadata: dict | None = field(default=None)
