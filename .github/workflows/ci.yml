@@ -25,6 +25,14 @@ jobs:
       - name: Run pre-commit checks
         uses: pre-commit/action@v3.0.1
 
+  sync-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify mansio-client types.py is in sync
+        run: diff mansio/src/mansio/types.py mansio-client/src/mansio_client/types.py
+
   test:
     runs-on: ubuntu-latest
     steps:
