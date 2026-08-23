@@ -79,6 +79,31 @@ class TestQueueStatus:
         assert data["status"]["claimed_by"] == "worker-1"
         http.close()
 
+    def test_queue_status_completed(self, server_url: str) -> None:
+        http = HttpClient()
+        _publish_queue_msg(http, server_url)
+
+        claim_resp = http.post(
+            f"{server_url}/v1/queue/claim",
+            json={"channel": "jobs", "claimed_by": "worker"},
+        )
+        assert claim_resp.json()["claimed"] is True
+        claimed_id = claim_resp.json()["result"]["message"]["id"]
+
+        ack_resp = http.post(
+            f"{server_url}/v1/queue/ack",
+            json={"message_id": claimed_id, "claimed_by": "worker"},
+        )
+        assert ack_resp.json()["acked"] is True
+
+        resp = http.get(f"{server_url}/v1/queue/status?message_id={claimed_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["found"] is True
+        assert data["status"]["status"] == "completed"
+        assert data["status"]["claimed_by"] == "worker"
+        http.close()
+
     def test_queue_status_not_queue(self, server_url: str) -> None:
         http = HttpClient()
         msg_id = _publish_regular_msg(http, server_url)

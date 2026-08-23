@@ -466,7 +466,7 @@ async def _handle_queue_status(request: Any, bus: Any) -> dict | tuple:
         }, 400
     result = await asyncio.to_thread(bus.queue_status, message_id)
     if result is None:
-        return {"error": "Not Found", "message": "Not a queue message"}, 404
+        return {"error": "Not Found", "message": "No queue status for this message"}, 404
     return {"found": True, "status": result}
 
 
