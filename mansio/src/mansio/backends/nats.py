@@ -32,6 +32,7 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from mansio.protocols import Backend, Compactable, Presenceable
 from mansio.types import AgentPresence, ClaimResult, Message
 
 try:
@@ -57,7 +58,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_FETCH_CAP = 10_000
 
 
-class NATSBackend:
+class NATSBackend(Backend, Presenceable, Compactable):
     """NATS JetStream-backed message backend.
 
     Provides durable, distributed message persistence via NATS JetStream.
@@ -260,19 +261,15 @@ class NATSBackend:
 
     # ── Store ─────────────────────────────────────────────────
 
-    def store(self, message: Message, *, queue: bool = False) -> None:
+    def store(self, message: Message) -> None:
         """Publish a message to NATS JetStream.
 
         Args:
             message: Message to store.
-            queue: If True, mark as queue message (stored in metadata).
 
         Raises:
             Exception: On NATS connection or publish failure.
         """
-        if queue:
-            raise NotImplementedError("Queue store is not yet implemented for NATSBackend.")
-
         self._ensure_connected()
 
         subject = self._subject(message.channel)
@@ -283,6 +280,17 @@ class NATSBackend:
             await self._js.publish(subject, payload)
 
         self._run_async(_pub())
+
+    def store_queue(self, message: Message) -> None:
+        """Store a queue message to NATS JetStream.
+
+        Not yet implemented -- JetStream queue support pending.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        # TODO: implement JetStream-based queue support
+        raise NotImplementedError("Queue store is not yet implemented for NATSBackend.")
 
     # ── Fetch helpers ─────────────────────────────────────────
 
@@ -434,7 +442,7 @@ class NATSBackend:
 
         return self._run_async(_list())
 
-    def count_messages(self, channel: str | None = None) -> int:
+    def message_count(self, channel: str | None = None) -> int:
         """Count messages using JetStream stream info.
 
         Args:
@@ -464,7 +472,7 @@ class NATSBackend:
 
         return self._run_async(_count())
 
-    def query_all(
+    def search(
         self,
         after: str | None = None,
         limit: int = 100,
@@ -496,7 +504,7 @@ class NATSBackend:
             )
         )
 
-    def get_stats(self) -> dict:
+    def stats(self) -> dict:
         """Return aggregate statistics.
 
         Uses stream info for totals (``total_messages``,
@@ -569,7 +577,7 @@ class NATSBackend:
 
         return self._run_async(_stats())
 
-    def query_recent_timestamps(self, seconds: int = 60) -> list[str]:
+    def recent_timestamps(self, seconds: int = 60) -> list[str]:
         """Return timestamps of messages from the last N seconds.
 
         Uses a pull consumer with ``DeliverPolicy.BY_START_TIME`` for
@@ -616,7 +624,7 @@ class NATSBackend:
 
         return self._run_async(_recent())
 
-    def get_backend_info(self) -> dict:
+    def info(self) -> dict:
         """Return backend type and connection info."""
         if not self._connected:
             return {
@@ -648,43 +656,58 @@ class NATSBackend:
 
     # ── Queue operations ──────────────────────────────────────
 
-    def claim(
+    def queue_claim(
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
         """Claim the oldest unclaimed queue message.
 
-        Not yet implemented for NATS backend.
+        Not yet implemented -- JetStream queue support pending.
         """
+        # TODO: implement JetStream-based queue claim
         raise NotImplementedError(
             "Queue claim is not yet implemented for NATSBackend. "
             "Use SQLiteBackend or MemoryBackend for queue operations."
         )
 
-    def ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
+    def queue_ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
         """Acknowledge a claimed message.
 
-        Not yet implemented for NATS backend.
+        Not yet implemented -- JetStream queue support pending.
         """
+        # TODO: implement JetStream-based queue ack
         raise NotImplementedError(
             "Queue ack is not yet implemented for NATSBackend. "
             "Use SQLiteBackend or MemoryBackend for queue operations."
         )
 
-    def get_queue_stats(self, channel: str | None = None) -> dict:
+    def queue_status(self, message_id: str) -> dict | None:
+        """Return queue status for a single message.
+
+        Not yet implemented -- JetStream queue support pending.
+        """
+        # TODO: implement JetStream-based queue status
+        raise NotImplementedError(
+            "Queue status is not yet implemented for NATSBackend. "
+            "Use SQLiteBackend or MemoryBackend for queue operations."
+        )
+
+    def queue_stats(self, channel: str | None = None) -> dict:
         """Return queue status counts.
 
-        Not yet implemented for NATS backend.
+        Not yet implemented -- JetStream queue support pending.
         """
+        # TODO: implement JetStream-based queue stats
         raise NotImplementedError(
             "Queue stats is not yet implemented for NATSBackend. "
             "Use SQLiteBackend or MemoryBackend for queue operations."
         )
 
-    def retire_completed(self, max_age_seconds: int = 86400, max_per_channel: int = 1000) -> int:
+    def queue_retire(self, max_age_seconds: int = 86400, max_per_channel: int = 1000) -> int:
         """Remove old completed queue messages.
 
-        Not yet implemented for NATS backend.
+        Not yet implemented -- JetStream queue support pending.
         """
+        # TODO: implement JetStream-based queue retire
         raise NotImplementedError(
             "Queue retire is not yet implemented for NATSBackend. "
             "Use SQLiteBackend or MemoryBackend for queue operations."
@@ -733,6 +756,25 @@ class NATSBackend:
                 last_seen=rec["last_seen"],
                 metadata=rec["metadata"],
             )
+
+    # ── Compaction ─────────────────────────────────────────────
+
+    def compact(
+        self,
+        channel: str,
+        *,
+        max_messages: int | None = None,
+        keep_latest_per_sender: bool = False,
+    ) -> int:
+        """Compact a channel (no-op for NATS backend).
+
+        NATS JetStream manages its own retention policy. This method
+        returns 0 without modifying the stream.
+
+        Returns:
+            Always 0.
+        """
+        return 0
 
     # ── Lifecycle ─────────────────────────────────────────────
 

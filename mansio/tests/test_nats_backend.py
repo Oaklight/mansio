@@ -197,63 +197,63 @@ class TestNATSBackendListChannels:
 
 
 class TestNATSBackendQueryAll:
-    """Tests for query_all with filters."""
+    """Tests for search with filters."""
 
-    def test_query_all_filter_by_sender(self, backend: NATSBackend):
+    def test_search_filter_by_sender(self, backend: NATSBackend):
         backend.store(_make_msg(sender="alice", msg_id="m1"))
         backend.store(_make_msg(sender="bob", msg_id="m2"))
         backend.store(_make_msg(sender="alice", msg_id="m3"))
 
-        results = backend.query_all(sender="alice")
+        results = backend.search(sender="alice")
         assert len(results) == 2
         assert all(m.sender == "alice" for m in results)
 
-    def test_query_all_filter_by_msg_type(self, backend: NATSBackend):
+    def test_search_filter_by_msg_type(self, backend: NATSBackend):
         backend.store(_make_msg(msg_type="text", msg_id="m1"))
         backend.store(_make_msg(msg_type="notification", msg_id="m2"))
 
-        results = backend.query_all(msg_type="notification")
+        results = backend.search(msg_type="notification")
         assert len(results) == 1
         assert results[0].msg_type == "notification"
 
-    def test_query_all_filter_by_channel(self, backend: NATSBackend):
+    def test_search_filter_by_channel(self, backend: NATSBackend):
         backend.store(_make_msg(channel="ch1", msg_id="m1"))
         backend.store(_make_msg(channel="ch2", msg_id="m2"))
 
-        results = backend.query_all(channel="ch1")
+        results = backend.search(channel="ch1")
         assert len(results) == 1
         assert results[0].channel == "ch1"
 
 
 class TestNATSBackendCountMessages:
-    """Tests for count_messages."""
+    """Tests for message_count."""
 
     def test_count_all(self, backend: NATSBackend):
         backend.store(_make_msg(channel="c1", msg_id="m1"))
         backend.store(_make_msg(channel="c2", msg_id="m2"))
         backend.store(_make_msg(channel="c1", msg_id="m3"))
-        assert backend.count_messages() == 3
+        assert backend.message_count() == 3
 
     def test_count_by_channel(self, backend: NATSBackend):
         backend.store(_make_msg(channel="c1", msg_id="m1"))
         backend.store(_make_msg(channel="c2", msg_id="m2"))
         backend.store(_make_msg(channel="c1", msg_id="m3"))
-        assert backend.count_messages(channel="c1") == 2
-        assert backend.count_messages(channel="c2") == 1
+        assert backend.message_count(channel="c1") == 2
+        assert backend.message_count(channel="c2") == 1
 
 
 class TestNATSBackendInfo:
-    """Tests for get_backend_info."""
+    """Tests for info."""
 
     def test_backend_info_connected(self, backend: NATSBackend):
-        info = backend.get_backend_info()
+        info = backend.info()
         assert info["type"] == "nats"
         assert info["connected"] is True
         assert info["stream"] == backend._stream_name
 
     def test_backend_info_disconnected(self):
         b = _make_backend("_disconnected")
-        info = b.get_backend_info()
+        info = b.info()
         assert info["type"] == "nats"
         assert info["connected"] is False
 
@@ -328,21 +328,21 @@ class TestNATSBackendChannelEncoding:
 class TestNATSBackendQueueNotImplemented:
     """Queue operations should raise NotImplementedError."""
 
-    def test_claim_not_implemented(self, backend: NATSBackend):
+    def test_queue_claim_not_implemented(self, backend: NATSBackend):
         with pytest.raises(NotImplementedError):
-            backend.claim("test-channel", "worker-1")
+            backend.queue_claim("test-channel", "worker-1")
 
-    def test_ack_not_implemented(self, backend: NATSBackend):
+    def test_queue_ack_not_implemented(self, backend: NATSBackend):
         with pytest.raises(NotImplementedError):
-            backend.ack("msg-1", "worker-1")
+            backend.queue_ack("msg-1", "worker-1")
 
     def test_queue_stats_not_implemented(self, backend: NATSBackend):
         with pytest.raises(NotImplementedError):
-            backend.get_queue_stats()
+            backend.queue_stats()
 
-    def test_retire_not_implemented(self, backend: NATSBackend):
+    def test_queue_retire_not_implemented(self, backend: NATSBackend):
         with pytest.raises(NotImplementedError):
-            backend.retire_completed()
+            backend.queue_retire()
 
 
 class TestNATSBackendPresence:
@@ -379,10 +379,10 @@ class TestNATSBackendPresence:
 
 
 class TestNATSBackendGetStats:
-    """Tests for get_stats."""
+    """Tests for stats."""
 
     def test_stats_empty_stream(self, backend: NATSBackend):
-        stats = backend.get_stats()
+        stats = backend.stats()
         assert stats["total_messages"] == 0
         assert stats["total_senders"] == 0
         assert stats["channel_breakdown"] == []
@@ -393,7 +393,7 @@ class TestNATSBackendGetStats:
         backend.store(_make_msg(channel="ch1", sender="bob", msg_type="chat", msg_id="s2"))
         backend.store(_make_msg(channel="ch2", sender="alice", msg_type="note", msg_id="s3"))
 
-        stats = backend.get_stats()
+        stats = backend.stats()
         assert stats["total_messages"] == 3
         assert stats["total_senders"] == 2
         assert len(stats["channel_breakdown"]) == 2
@@ -412,7 +412,7 @@ class TestNATSBackendGetStats:
 
 
 class TestNATSBackendQueryRecentTimestamps:
-    """Tests for query_recent_timestamps."""
+    """Tests for recent_timestamps."""
 
     def test_recent_timestamps_returns_current(self, backend: NATSBackend):
         """Messages stored just now should appear in a 60s window."""
@@ -420,12 +420,12 @@ class TestNATSBackendQueryRecentTimestamps:
         backend.store(_make_msg(msg_id="rt2"))
         time.sleep(0.3)  # allow NATS to persist
 
-        timestamps = backend.query_recent_timestamps(seconds=60)
+        timestamps = backend.recent_timestamps(seconds=60)
         assert len(timestamps) == 2
         # Timestamps should be sorted ascending
         assert timestamps == sorted(timestamps)
 
     def test_recent_timestamps_empty(self, backend: NATSBackend):
         """Empty stream returns no timestamps."""
-        timestamps = backend.query_recent_timestamps(seconds=60)
+        timestamps = backend.recent_timestamps(seconds=60)
         assert timestamps == []

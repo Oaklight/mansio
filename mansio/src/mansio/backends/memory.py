@@ -6,10 +6,11 @@ import threading
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
+from mansio.protocols import Backend, Compactable, Presenceable
 from mansio.types import AgentPresence, ClaimResult, Message
 
 
-class MemoryBackend:
+class MemoryBackend(Backend, Presenceable, Compactable):
     """In-memory message backend for testing.
 
     Messages are stored in plain Python lists, protected by a lock for
@@ -20,25 +21,33 @@ class MemoryBackend:
         self._lock = threading.Lock()
         self._messages: dict[str, list[Message]] = defaultdict(list)
         self._messages_by_id: dict[str, Message] = {}
-        self._queue_status: dict[str, dict] = {}
+        self._queue_status_map: dict[str, dict] = {}
         self._presence: dict[str, dict] = {}  # agent_id → {last_seen, metadata}
 
-    def store(self, message: Message, *, queue: bool = False) -> None:
-        """Store a message in memory.
+    def store(self, message: Message) -> None:
+        """Store a regular message in memory.
 
         Args:
             message: Message to store.
-            queue: If True, mark as claimable.
         """
         with self._lock:
             self._messages[message.channel].append(message)
             self._messages_by_id[message.id] = message
-            if queue:
-                self._queue_status[message.id] = {
-                    "status": "unclaimed",
-                    "claimed_by": None,
-                    "claimed_at": None,
-                }
+
+    def store_queue(self, message: Message) -> None:
+        """Store a message and mark it as claimable.
+
+        Args:
+            message: Message to store as a queue item.
+        """
+        with self._lock:
+            self._messages[message.channel].append(message)
+            self._messages_by_id[message.id] = message
+            self._queue_status_map[message.id] = {
+                "status": "unclaimed",
+                "claimed_by": None,
+                "claimed_at": None,
+            }
 
     def query(
         self,
@@ -75,7 +84,7 @@ class MemoryBackend:
         with self._lock:
             return sorted(ch for ch, msgs in self._messages.items() if msgs)
 
-    def count_messages(self, channel: str | None = None) -> int:
+    def message_count(self, channel: str | None = None) -> int:
         """Count messages, optionally filtered by channel.
 
         Args:
@@ -89,7 +98,7 @@ class MemoryBackend:
                 return len(self._messages.get(channel, []))
             return sum(len(msgs) for msgs in self._messages.values())
 
-    def query_all(
+    def search(
         self,
         after: str | None = None,
         limit: int = 100,
@@ -135,7 +144,7 @@ class MemoryBackend:
             msgs = [m for m in msgs if m.msg_type == msg_type]
         return msgs
 
-    def get_stats(self) -> dict:
+    def stats(self) -> dict:
         """Return aggregate statistics for admin dashboard.
 
         Returns:
@@ -185,7 +194,7 @@ class MemoryBackend:
             ],
         }
 
-    def query_recent_timestamps(self, seconds: int = 60) -> list[str]:
+    def recent_timestamps(self, seconds: int = 60) -> list[str]:
         """Return timestamps of messages from the last N seconds.
 
         Args:
@@ -204,7 +213,7 @@ class MemoryBackend:
         result.sort()
         return result
 
-    def claim(
+    def queue_claim(
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
         now = datetime.now(timezone.utc)
@@ -212,7 +221,7 @@ class MemoryBackend:
         lease_until = (now + timedelta(seconds=lease_seconds)).isoformat()
         with self._lock:
             for msg in self._messages.get(channel, []):
-                qs = self._queue_status.get(msg.id)
+                qs = self._queue_status_map.get(msg.id)
                 if not qs:
                     continue
                 claimable = qs["status"] == "unclaimed" or (
@@ -232,9 +241,9 @@ class MemoryBackend:
                     )
         return None
 
-    def ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
+    def queue_ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
         with self._lock:
-            qs = self._queue_status.get(message_id)
+            qs = self._queue_status_map.get(message_id)
             if not qs or qs["status"] != "claimed" or qs["claimed_by"] != claimed_by:
                 return None
             qs["status"] = "completed"
@@ -248,21 +257,26 @@ class MemoryBackend:
                 claimed_at=qs["claimed_at"],
             )
 
-    def get_queue_stats(self, channel: str | None = None) -> dict:
+    def queue_status(self, message_id: str) -> dict | None:
+        with self._lock:
+            qs = self._queue_status_map.get(message_id)
+            return dict(qs) if qs else None
+
+    def queue_stats(self, channel: str | None = None) -> dict:
         result = {"unclaimed": 0, "claimed": 0, "completed": 0}
         with self._lock:
             if channel:
                 ids = {m.id for m in self._messages.get(channel, [])}
-                for mid, qs in self._queue_status.items():
+                for mid, qs in self._queue_status_map.items():
                     if mid in ids and qs["status"] in result:
                         result[qs["status"]] += 1
             else:
-                for qs in self._queue_status.values():
+                for qs in self._queue_status_map.values():
                     if qs["status"] in result:
                         result[qs["status"]] += 1
         return result
 
-    def retire_completed(self, max_age_seconds: int = 86400, max_per_channel: int = 1000) -> int:
+    def queue_retire(self, max_age_seconds: int = 86400, max_per_channel: int = 1000) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)).isoformat()
         with self._lock:
             to_remove = self._collect_retire_ids(cutoff, max_per_channel)
@@ -270,13 +284,13 @@ class MemoryBackend:
 
     def _collect_retire_ids(self, cutoff: str, max_per_channel: int) -> set[str]:
         to_remove: set[str] = set()
-        for mid, qs in self._queue_status.items():
+        for mid, qs in self._queue_status_map.items():
             if qs["status"] == "completed" and qs["claimed_at"] and qs["claimed_at"] < cutoff:
                 to_remove.add(mid)
         per_channel: dict[str, list[str]] = defaultdict(list)
         for ch, msgs in self._messages.items():
             for msg in msgs:
-                qs = self._queue_status.get(msg.id)
+                qs = self._queue_status_map.get(msg.id)
                 if qs and qs["status"] == "completed" and msg.id not in to_remove:
                     per_channel[ch].append(msg.id)
         for _ch, ids in per_channel.items():
@@ -291,7 +305,7 @@ class MemoryBackend:
             self._messages[ch] = [m for m in self._messages[ch] if m.id not in to_remove]
             deleted += before - len(self._messages[ch])
         for mid in to_remove:
-            self._queue_status.pop(mid, None)
+            self._queue_status_map.pop(mid, None)
             self._messages_by_id.pop(mid, None)
         return deleted
 
@@ -362,7 +376,7 @@ class MemoryBackend:
             self._messages[channel] = msgs
             return original_count - len(msgs)
 
-    def get_backend_info(self) -> dict:
+    def info(self) -> dict:
         """Return backend type and usage info."""
         import sys
 
@@ -432,7 +446,7 @@ class MemoryBackend:
         with self._lock:
             self._messages.clear()
             self._messages_by_id.clear()
-            self._queue_status.clear()
+            self._queue_status_map.clear()
             self._presence.clear()
 
     def __repr__(self) -> str:

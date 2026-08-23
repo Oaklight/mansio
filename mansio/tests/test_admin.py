@@ -12,7 +12,7 @@ from mansio import Bus, MemoryBackend, SQLiteBackend, SQLiteBus
 
 
 class TestBackendExtensions:
-    """Test count_messages, query_all, get_stats, query_recent_timestamps."""
+    """Test message_count, search, stats, recent_timestamps."""
 
     @pytest.fixture(params=["sqlite", "memory"])
     def backend(self, request, tmp_path):
@@ -30,51 +30,51 @@ class TestBackendExtensions:
         bus.publish("sync", "agent-b", "context_sync", '{"key": "value2"}')
         return bus
 
-    def test_count_messages_all(self, bus_with_data):
-        assert bus_with_data.backend.count_messages() == 5
+    def test_message_count_all(self, bus_with_data):
+        assert bus_with_data.backend.message_count() == 5
 
-    def test_count_messages_channel(self, bus_with_data):
-        assert bus_with_data.backend.count_messages("chat") == 3
-        assert bus_with_data.backend.count_messages("sync") == 2
+    def test_message_count_channel(self, bus_with_data):
+        assert bus_with_data.backend.message_count("chat") == 3
+        assert bus_with_data.backend.message_count("sync") == 2
 
-    def test_count_messages_empty_channel(self, bus_with_data):
-        assert bus_with_data.backend.count_messages("nonexistent") == 0
+    def test_message_count_empty_channel(self, bus_with_data):
+        assert bus_with_data.backend.message_count("nonexistent") == 0
 
-    def test_query_all_no_filter(self, bus_with_data):
-        msgs = bus_with_data.backend.query_all(limit=10)
+    def test_search_no_filter(self, bus_with_data):
+        msgs = bus_with_data.backend.search(limit=10)
         assert len(msgs) == 5
 
-    def test_query_all_filter_channel(self, bus_with_data):
-        msgs = bus_with_data.backend.query_all(channel="chat", limit=10)
+    def test_search_filter_channel(self, bus_with_data):
+        msgs = bus_with_data.backend.search(channel="chat", limit=10)
         assert len(msgs) == 3
         assert all(m.channel == "chat" for m in msgs)
 
-    def test_query_all_filter_sender(self, bus_with_data):
-        msgs = bus_with_data.backend.query_all(sender="alice", limit=10)
+    def test_search_filter_sender(self, bus_with_data):
+        msgs = bus_with_data.backend.search(sender="alice", limit=10)
         assert len(msgs) == 2
         assert all(m.sender == "alice" for m in msgs)
 
-    def test_query_all_filter_msg_type(self, bus_with_data):
-        msgs = bus_with_data.backend.query_all(msg_type="context_sync", limit=10)
+    def test_search_filter_msg_type(self, bus_with_data):
+        msgs = bus_with_data.backend.search(msg_type="context_sync", limit=10)
         assert len(msgs) == 2
         assert all(m.msg_type == "context_sync" for m in msgs)
 
-    def test_query_all_combined_filters(self, bus_with_data):
-        msgs = bus_with_data.backend.query_all(channel="chat", sender="alice", limit=10)
+    def test_search_combined_filters(self, bus_with_data):
+        msgs = bus_with_data.backend.search(channel="chat", sender="alice", limit=10)
         assert len(msgs) == 2
 
-    def test_query_all_with_after(self, bus_with_data):
-        all_msgs = bus_with_data.backend.query_all(limit=10)
+    def test_search_with_after(self, bus_with_data):
+        all_msgs = bus_with_data.backend.search(limit=10)
         first_id = all_msgs[0].id
-        after_msgs = bus_with_data.backend.query_all(after=first_id, limit=10)
+        after_msgs = bus_with_data.backend.search(after=first_id, limit=10)
         assert len(after_msgs) == 4
 
-    def test_query_all_limit(self, bus_with_data):
-        msgs = bus_with_data.backend.query_all(limit=2)
+    def test_search_limit(self, bus_with_data):
+        msgs = bus_with_data.backend.search(limit=2)
         assert len(msgs) == 2
 
-    def test_get_stats(self, bus_with_data):
-        stats = bus_with_data.backend.get_stats()
+    def test_stats(self, bus_with_data):
+        stats = bus_with_data.backend.stats()
         assert stats["total_messages"] == 5
         assert stats["total_channels"] == 2
         assert stats["total_senders"] == 4  # alice, bob, agent-a, agent-b
@@ -87,20 +87,20 @@ class TestBackendExtensions:
             >= stats["channel_breakdown"][1]["message_count"]
         )
 
-    def test_get_stats_empty(self, backend):
-        stats = backend.get_stats()
+    def test_stats_empty(self, backend):
+        stats = backend.stats()
         assert stats["total_messages"] == 0
         assert stats["total_channels"] == 0
 
-    def test_query_recent_timestamps(self, bus_with_data):
-        timestamps = bus_with_data.backend.query_recent_timestamps(60)
+    def test_recent_timestamps(self, bus_with_data):
+        timestamps = bus_with_data.backend.recent_timestamps(60)
         assert len(timestamps) == 5
         # Sorted ascending
         assert timestamps == sorted(timestamps)
 
-    def test_query_recent_timestamps_empty_window(self, bus_with_data):
+    def test_recent_timestamps_empty_window(self, bus_with_data):
         # Very short window should still get recent messages (just published)
-        timestamps = bus_with_data.backend.query_recent_timestamps(1)
+        timestamps = bus_with_data.backend.recent_timestamps(1)
         assert len(timestamps) == 5
 
 
@@ -277,7 +277,7 @@ class TestAdminAPI:
             assert "Mansio Admin" in content
             assert resp.headers["Content-Type"] == "text/html"
 
-    def test_get_stats(self, server_url):
+    def test_stats_api(self, server_url):
         url, _ = server_url
         data = self._get(url, "/api/stats")
         assert data["total_messages"] == 3

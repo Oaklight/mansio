@@ -97,9 +97,9 @@ class TestConcurrentStoreAndQuery:
 
 
 class TestConcurrentBackendQueryAll:
-    """query_all on the backend with concurrent writes must remain consistent."""
+    """search on the backend with concurrent writes must remain consistent."""
 
-    def test_concurrent_publish_and_query_all(self):
+    def test_concurrent_publish_and_search(self):
         backend = _make_backend()
         bus = _make_bus(backend)
         stop = threading.Event()
@@ -112,10 +112,10 @@ class TestConcurrentBackendQueryAll:
 
         def reader():
             while not stop.is_set():
-                msgs = backend.query_all(limit=10_000)
+                msgs = backend.search(limit=10_000)
                 ids = [m.id for m in msgs]
                 if len(ids) != len(set(ids)):
-                    errors.append("duplicate ids in query_all")
+                    errors.append("duplicate ids in search")
                     return
 
         writer_t = threading.Thread(target=writer)
@@ -131,7 +131,7 @@ class TestConcurrentBackendQueryAll:
 
 
 class TestConcurrentCountAndList:
-    """channels / count_messages under concurrent writes."""
+    """channels / message_count under concurrent writes."""
 
     def test_concurrent_publish_and_list_channels(self):
         bus = _make_bus()
@@ -173,7 +173,7 @@ class TestConcurrentCountAndList:
         def counter():
             prev = 0
             while not stop.is_set():
-                n = backend.count_messages("ch")
+                n = backend.message_count("ch")
                 if n < prev:
                     errors.append(f"count decreased: {prev} → {n}")
                     return
@@ -187,11 +187,11 @@ class TestConcurrentCountAndList:
         counter_t.join()
 
         assert not errors
-        assert backend.count_messages("ch") == 200
+        assert backend.message_count("ch") == 200
 
 
 class TestConcurrentStats:
-    """get_stats must not crash under concurrent writes."""
+    """stats must not crash under concurrent writes."""
 
     def test_concurrent_publish_and_stats(self):
         backend = _make_backend()
@@ -207,7 +207,7 @@ class TestConcurrentStats:
         def stats_reader():
             while not stop.is_set():
                 try:
-                    stats = backend.get_stats()
+                    stats = backend.stats()
                     assert "total_messages" in stats
                 except Exception as exc:
                     errors.append(str(exc))
@@ -308,7 +308,7 @@ class TestConcurrentQueueOps:
 
 
 class TestConcurrentRetire:
-    """retire_completed under concurrent publish/claim/ack."""
+    """queue_retire under concurrent publish/claim/ack."""
 
     def test_retire_during_publish(self):
         backend = _make_backend()
@@ -333,7 +333,7 @@ class TestConcurrentRetire:
         def retirer():
             while not stop.is_set():
                 try:
-                    backend.retire_completed(max_age_seconds=0)
+                    backend.queue_retire(max_age_seconds=0)
                 except Exception as exc:
                     errors.append(str(exc))
                     return
@@ -366,9 +366,9 @@ class TestConcurrentMixedOps:
             while not stop.is_set():
                 try:
                     bus.poll("ch-0", limit=100)
-                    backend.query_all(limit=100)
+                    backend.search(limit=100)
                     bus.channels()
-                    backend.count_messages()
+                    backend.message_count()
                 except Exception as exc:
                     errors.append(f"querier: {exc}")
                     return
@@ -376,9 +376,9 @@ class TestConcurrentMixedOps:
         def stats_checker():
             while not stop.is_set():
                 try:
-                    backend.get_stats()
-                    backend.get_backend_info()
-                    backend.query_recent_timestamps(seconds=10)
+                    backend.stats()
+                    backend.info()
+                    backend.recent_timestamps(seconds=10)
                 except Exception as exc:
                     errors.append(f"stats: {exc}")
                     return
@@ -408,4 +408,4 @@ class TestConcurrentMixedOps:
             t.join()
 
         assert not errors
-        assert backend.count_messages() == 200
+        assert backend.message_count() == 200

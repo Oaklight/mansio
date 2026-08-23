@@ -170,7 +170,7 @@ class TestQueueStats:
         bus.ack(claimed.message.id, "worker-1")
         bus.claim("jobs", "worker-2")
 
-        stats = bus.backend.get_queue_stats("jobs")
+        stats = bus.backend.queue_stats("jobs")
         assert stats["unclaimed"] == 1
         assert stats["claimed"] == 1
         assert stats["completed"] == 1
@@ -178,7 +178,7 @@ class TestQueueStats:
     def test_stats_global(self, bus):
         bus.publish("ch-a", "admin", "task", "a", queue=True)
         bus.publish("ch-b", "admin", "task", "b", queue=True)
-        stats = bus.backend.get_queue_stats()
+        stats = bus.backend.queue_stats()
         assert stats["unclaimed"] == 2
 
 
@@ -189,10 +189,10 @@ class TestRetireCompleted:
         assert claimed is not None
         bus.ack(claimed.message.id, "worker-1")
 
-        deleted = bus.backend.retire_completed(max_age_seconds=0)
+        deleted = bus.backend.queue_retire(max_age_seconds=0)
         assert deleted == 1
 
-        stats = bus.backend.get_queue_stats("jobs")
+        stats = bus.backend.queue_stats("jobs")
         assert stats["completed"] == 0
 
     def test_retire_by_count(self, bus):
@@ -203,17 +203,17 @@ class TestRetireCompleted:
             assert c is not None
             bus.ack(c.message.id, "worker-1")
 
-        deleted = bus.backend.retire_completed(max_age_seconds=999999, max_per_channel=2)
+        deleted = bus.backend.queue_retire(max_age_seconds=999999, max_per_channel=2)
         assert deleted == 3
 
-        stats = bus.backend.get_queue_stats("jobs")
+        stats = bus.backend.queue_stats("jobs")
         assert stats["completed"] == 2
 
     def test_retire_doesnt_touch_unclaimed(self, bus):
         bus.publish("jobs", "admin", "task", "pending", queue=True)
-        deleted = bus.backend.retire_completed(max_age_seconds=0)
+        deleted = bus.backend.queue_retire(max_age_seconds=0)
         assert deleted == 0
-        stats = bus.backend.get_queue_stats("jobs")
+        stats = bus.backend.queue_stats("jobs")
         assert stats["unclaimed"] == 1
 
 
