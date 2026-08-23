@@ -16,7 +16,6 @@ from mansio.serializers import JSONSerializer
 from mansio.types import AgentPresence, ClaimResult, Message
 
 if TYPE_CHECKING:
-    from mansio.admin.server import AdminInfo
     from mansio.protocols import Serializer
 
 # Thread-safe monotonic sequence for _uuid7 fallback
@@ -211,36 +210,6 @@ class Bus:
         """
         return self._backend.list_channels()
 
-    def subscription_counts(self) -> dict[str, list[str]]:
-        """Return subscription IDs grouped by channel.
-
-        Only channels with active subscriptions are included.
-
-        Returns:
-            Mapping of channel name to list of subscription IDs.
-        """
-        return {channel: list(subs.keys()) for channel, subs in self._subs.items() if subs}
-
-    def start_admin(self, **kwargs) -> AdminInfo:
-        """Start the admin panel HTTP server.
-
-        Accepts all keyword arguments of ``AdminServer.__init__``
-        (except ``bus``, which is ``self``).
-
-        Returns:
-            AdminInfo with server URL and password.
-        """
-        from mansio.admin import AdminServer
-
-        self._admin_server = AdminServer(self, **kwargs)
-        return self._admin_server.start()
-
-    def stop_admin(self) -> None:
-        """Stop the admin panel server if running."""
-        if hasattr(self, "_admin_server") and self._admin_server:
-            self._admin_server.stop()
-            self._admin_server = None
-
     def claim(
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
@@ -267,7 +236,6 @@ class Bus:
 
     def close(self) -> None:
         """Release resources held by the backend."""
-        self.stop_admin()
         self._backend.close()
 
     def __enter__(self) -> Bus:
