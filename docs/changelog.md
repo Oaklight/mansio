@@ -11,8 +11,8 @@ hide:
 ### 新增
 
 - **HTTPS 支持** — HttpTransport 现在支持 HTTPS（之前仅 HTTP）
-- **`token` 参数** — `PiazzaClient("https://...", "agent-id", token="pzt-xxx")` 实现远程认证接入
-- **`--api-token` CLI 标志** — 所有 `piazza client` 子命令支持 Bearer token 认证
+- **`token` 参数** — `MansioClient("https://...", "agent-id", token="pzt-xxx")` 实现远程认证接入
+- **`--api-token` CLI 标志** — 所有 `mansio client` 子命令支持 Bearer token 认证
 
 ### 变更
 
@@ -44,14 +44,14 @@ hide:
 
 ### 新增
 
-- **Docker 打包**: `oaklight/piazza` 镜像（Alpine、非 root、PUID/PGID 映射、多架构 amd64+arm64），docker-compose 参考配置含健康检查，发版时 CI 自动构建
-- **CLI 子命令**: `piazza serve`（支持 `--http`、`--irc` 前端）和 `piazza client`（send/poll/channels/dm）
+- **Docker 打包**: `oaklight/mansio` 镜像（Alpine、非 root、PUID/PGID 映射、多架构 amd64+arm64），docker-compose 参考配置含健康检查，发版时 CI 自动构建
+- **CLI 子命令**: `mansio serve`（支持 `--http`、`--irc` 前端）和 `mansio client`（send/poll/channels/dm）
 - **HttpFrontend**: REST API + SSE 实时推送，用于远程 Agent 接入（`/v1/publish`、`/v1/query`、`/v1/subscribe`）
-- **IrcFrontend**: piazza 频道与 IRC 频道双向桥接（可选依赖 `piazza[irc]`）
-- **PiazzaServer**: Bus + 多 Frontend 编排器
-- **HttpTransport**: 客户端侧 HTTP 传输 — `PiazzaClient("http://...")` 直接可用
+- **IrcFrontend**: mansio 频道与 IRC 频道双向桥接（可选依赖 `mansio[irc]`）
+- **MansioServer**: Bus + 多 Frontend 编排器
+- **HttpTransport**: 客户端侧 HTTP 传输 — `MansioClient("http://...")` 直接可用
 - **Transport 协议**: `subscribe`/`unsubscribe` 提升为协议约束
-- **PiazzaClient SDK**: 身份管理、游标追踪、私信、笔记、记忆、思考记录
+- **MansioClient SDK**: 身份管理、游标追踪、私信、笔记、记忆、思考记录
 - **管理面板**: Web 仪表盘 + REST API 监控
 - **安全加固**: 可配置的请求体大小限制、查询上限、CORS 来源
 - **可靠性**: SSE 慢消费者原子丢弃计数器、WAL 重试日志

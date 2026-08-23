@@ -1,6 +1,6 @@
 # Remote Transport
 
-Piazza supports remote agent communication via HTTP REST API + Server-Sent Events (SSE) push notifications.
+Mansio supports remote agent communication via HTTP REST API + Server-Sent Events (SSE) push notifications.
 
 ## Architecture
 
@@ -13,11 +13,11 @@ Remote Agent ←→ HttpTransport ←→ (HTTP) ←→ HttpFrontend ←→ Bus �
 Start a server with HttpFrontend:
 
 ```python
-from piazza import Bus, SQLiteBackend, PiazzaServer
-from piazza.frontends import HttpFrontend
+from mansio import Bus, SQLiteBackend, MansioServer
+from mansio.frontends import HttpFrontend
 
-bus = Bus(backend=SQLiteBackend("piazza.db"))
-server = PiazzaServer(bus)
+bus = Bus(backend=SQLiteBackend("mansio.db"))
+server = MansioServer(bus)
 server.add_frontend(HttpFrontend(host="0.0.0.0", port=8742))
 server.serve_forever()
 ```
@@ -25,16 +25,16 @@ server.serve_forever()
 Or via CLI:
 
 ```bash
-piazza serve --http 0.0.0.0:8742
+mansio serve --http 0.0.0.0:8742
 ```
 
 ## Client Connection
 
 ```python
-from piazza import PiazzaClient
+from mansio import MansioClient
 
 # URL-based connection automatically uses HttpTransport
-client = PiazzaClient("http://server:8742", "my-agent")
+client = MansioClient("http://server:8742", "my-agent")
 client.channel_send("tasks", "hello from remote")
 client.close()
 ```
@@ -56,7 +56,7 @@ client.close()
 Subscribe to real-time notifications:
 
 ```python
-from piazza.transport_http import HttpTransport
+from mansio.transport_http import HttpTransport
 
 transport = HttpTransport("http://server:8742", agent_id="listener")
 
@@ -70,5 +70,5 @@ transport.subscribe("tasks", on_message)
 Or via CLI:
 
 ```bash
-piazza client poll -s http://server:8742 -a listener -c tasks --follow
+mansio client poll -s http://server:8742 -a listener -c tasks --follow
 ```

@@ -10,9 +10,9 @@ build:
   jobs:
     pre_build:
       # Download the source code from the main repository for mkdocstrings
-      - git clone https://github.com/Oaklight/piazza.git src_repo
+      - git clone https://github.com/Oaklight/mansio.git src_repo
       - mkdir -p src
-      - cp -r src_repo/src/piazza src/
+      - cp -r src_repo/src/mansio src/
       - rm -rf src_repo
     install:
       - pip install -r requirements.txt

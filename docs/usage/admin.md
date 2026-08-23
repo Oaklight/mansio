@@ -5,9 +5,9 @@ The built-in admin panel provides a web dashboard and REST API for monitoring an
 ## Starting the Admin Panel
 
 ```python
-from piazza import SQLiteBus
+from mansio import SQLiteBus
 
-bus = SQLiteBus("piazza.db")
+bus = SQLiteBus("mansio.db")
 info = bus.start_admin(port=8741)
 print(f"Dashboard: {info.url}")
 ```
@@ -15,7 +15,7 @@ print(f"Dashboard: {info.url}")
 Or via CLI:
 
 ```bash
-piazza serve --admin-port 8741
+mansio serve --admin-port 8741
 ```
 
 ## REST API Endpoints
@@ -35,7 +35,7 @@ piazza serve --admin-port 8741
 Enable remote access with authentication:
 
 ```bash
-piazza serve --remote --token my-secret-token
+mansio serve --remote --token my-secret-token
 ```
 
 The admin panel will bind to `0.0.0.0` and require the token for all API requests.

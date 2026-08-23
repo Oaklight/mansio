@@ -2,26 +2,26 @@
 
 ## 核心
 
-::: piazza.Message
-::: piazza.Bus
-::: piazza.SQLiteBus
+::: mansio.Message
+::: mansio.Bus
+::: mansio.SQLiteBus
 
 ## 协议
 
-::: piazza.Backend
-::: piazza.Serializer
-::: piazza.MessageBus
+::: mansio.Backend
+::: mansio.Serializer
+::: mansio.MessageBus
 
 ## 后端
 
-::: piazza.SQLiteBackend
-::: piazza.MemoryBackend
-::: piazza.JSONSerializer
+::: mansio.SQLiteBackend
+::: mansio.MemoryBackend
+::: mansio.JSONSerializer
 
 ## 管理面板
 
-::: piazza.admin.AdminServer
-::: piazza.admin.AdminInfo
+::: mansio.admin.AdminServer
+::: mansio.admin.AdminInfo
 
 ## 已弃用别名
 

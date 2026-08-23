@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Piazza uses a three-layer symmetric architecture:
+Mansio uses a three-layer symmetric architecture:
 
 ```
 Backend (storage) ←→ Bus (routing) ←→ Frontend (access protocol)
@@ -39,15 +39,15 @@ Client-side counterpart to Frontends. Implements the `Transport` protocol.
 
 | Transport | Connects To | Usage |
 |---|---|---|
-| `LocalTransport` | In-process Bus | `PiazzaClient(bus, "agent")` |
-| `HttpTransport` | HttpFrontend | `PiazzaClient("http://...", "agent")` |
+| `LocalTransport` | In-process Bus | `MansioClient(bus, "agent")` |
+| `HttpTransport` | HttpFrontend | `MansioClient("http://...", "agent")` |
 
 ## Orchestration
 
-`PiazzaServer` binds a Bus to one or more Frontends:
+`MansioServer` binds a Bus to one or more Frontends:
 
 ```python
-server = PiazzaServer(bus)
+server = MansioServer(bus)
 server.add_frontend(HttpFrontend(port=8742))
 server.add_frontend(IrcFrontend(irc_host="irc.example.com", channels=["tasks"]))
 server.serve_forever()
@@ -58,7 +58,7 @@ server.serve_forever()
 ```
 Agent A                          Agent B (remote)
    │                                │
-   ├─ PiazzaClient                  ├─ PiazzaClient
+   ├─ MansioClient                  ├─ MansioClient
    │    │                           │    │
    │    ├─ LocalTransport           │    ├─ HttpTransport
    │    │    │                      │    │    │
@@ -69,7 +69,7 @@ Agent A                          Agent B (remote)
    │    │  SQLiteBackend                 │
    │    │    │                           │
    │    │    ▼                           │
-   │    │  piazza.db                     │
+   │    │  mansio.db                     │
    │    │                                │
    │    ├─ AdminServer (port 8741)       │
    │    │    └─ Web Dashboard            │

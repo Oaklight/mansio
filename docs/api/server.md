@@ -1,3 +1,3 @@
-# piazza.server
+# mansio.server
 
-::: piazza.server
+::: mansio.server

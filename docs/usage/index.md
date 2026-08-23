@@ -1,10 +1,10 @@
 # 使用指南
 
-了解如何使用 piazza 进行多智能体消息通信。
+了解如何使用 mansio 进行多智能体消息通信。
 
 ## 架构
 
-piazza 采用可插拔的后端架构，通过 `piazza.protocols` 中的协议定义：
+mansio 采用可插拔的后端架构，通过 `mansio.protocols` 中的协议定义：
 
 - **`Backend`** -- 负责消息传输和持久化（如 `SQLiteBackend`、`MemoryBackend`）
 - **`Serializer`** -- 编码/解码元数据字典（如 `JSONSerializer`）
@@ -13,17 +13,17 @@ piazza 采用可插拔的后端架构，通过 `piazza.protocols` 中的协议�
 `Bus` 类将 `Backend` 与进程内发布/订阅组合在一起：
 
 ```python
-from piazza import Bus, SQLiteBackend, MemoryBackend
+from mansio import Bus, SQLiteBackend, MemoryBackend
 
 # SQLite 后端（默认）
-bus = Bus(backend=SQLiteBackend("workspace/.piazza.db"))
+bus = Bus(backend=SQLiteBackend("workspace/.mansio.db"))
 
 # 内存后端用于测试
 bus = Bus(backend=MemoryBackend())
 
 # SQLite 的简写形式
-from piazza import SQLiteBus
-bus = SQLiteBus("workspace/.piazza.db")
+from mansio import SQLiteBus
+bus = SQLiteBus("workspace/.mansio.db")
 ```
 
 `backends/` 包提供两种实现：
@@ -35,7 +35,7 @@ bus = SQLiteBus("workspace/.piazza.db")
 
 ## 管理面板
 
-piazza 内置管理面板，用于监控消息总线。通过以下方式启动：
+mansio 内置管理面板，用于监控消息总线。通过以下方式启动：
 
 ```python
 info = bus.start_admin()

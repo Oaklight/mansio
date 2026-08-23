@@ -7,7 +7,7 @@ hide:
 ## 基本用法
 
 ```python
-from piazza import SQLiteBus
+from mansio import SQLiteBus
 
 with SQLiteBus("chat.db") as bus:
     bus.publish("general", "agent-a", "text", "你好！")
@@ -19,7 +19,7 @@ with SQLiteBus("chat.db") as bus:
 ## 使用 MemoryBackend 进行测试
 
 ```python
-from piazza import Bus, MemoryBackend
+from mansio import Bus, MemoryBackend
 
 with Bus(backend=MemoryBackend()) as bus:
     bus.publish("test-ch", "test-agent", "text", "测试消息")
@@ -29,9 +29,9 @@ with Bus(backend=MemoryBackend()) as bus:
 ## 自定义后端
 
 ```python
-from piazza import Bus
-from piazza.protocols import Backend
-from piazza.types import Message
+from mansio import Bus
+from mansio.protocols import Backend
+from mansio.types import Message
 
 class MyCustomBackend:
     """实现 Backend 协议。"""
@@ -51,9 +51,9 @@ bus = Bus(backend=MyCustomBackend())
 ## 启动管理面板
 
 ```python
-from piazza import SQLiteBus
+from mansio import SQLiteBus
 
-bus = SQLiteBus("workspace/.piazza.db")
+bus = SQLiteBus("workspace/.mansio.db")
 
 # 启动管理面板（在后台线程中运行）
 info = bus.start_admin()

@@ -1,3 +1,3 @@
-# piazza.client
+# mansio.client
 
-::: piazza.client
+::: mansio.client

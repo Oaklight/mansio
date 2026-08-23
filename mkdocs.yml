@@ -1,9 +1,9 @@
-site_name: Piazza
+site_name: Mansio
 site_description: 面向多智能体协作的消息中枢
 site_author: Peng Ding
-site_url: https://piazza.readthedocs.io/zh-cn/latest
-repo_name: Oaklight/piazza
-repo_url: https://github.com/Oaklight/piazza
+site_url: https://mansio.readthedocs.io/zh-cn/latest
+repo_name: Oaklight/mansio
+repo_url: https://github.com/Oaklight/mansio
 copyright: Copyright &copy; 2026 Peng Ding
 
 theme:
@@ -96,9 +96,9 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/Oaklight/piazza
+      link: https://github.com/Oaklight/mansio
     - icon: fontawesome/brands/python
-      link: https://pypi.org/project/piazza/
+      link: https://pypi.org/project/mansio/
   alternate:
     - name: English
       link: /en/latest/
@@ -126,8 +126,8 @@ nav:
   - API 参考:
       - 概览: api/index.md
       - Bus: api/bus.md
-      - PiazzaClient: api/client.md
-      - PiazzaServer: api/server.md
+      - MansioClient: api/client.md
+      - MansioServer: api/server.md
       - 后端: api/backends.md
       - 前端: api/frontends.md
       - 传输: api/transport.md
