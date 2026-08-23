@@ -210,6 +210,13 @@ class Bus:
         """
         return self._backend.list_channels()
 
+    def subscription_counts(self) -> dict[str, list[str]]:
+        """Active subscription IDs grouped by channel.
+
+        Only channels with active subscriptions are included.
+        """
+        return {ch: list(subs.keys()) for ch, subs in self._subs.items() if subs}
+
     def claim(
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
