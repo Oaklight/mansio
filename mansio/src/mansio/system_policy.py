@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING
 
-CompactionPolicy = Callable[[Any, str], None]
+if TYPE_CHECKING:
+    from mansio.protocols import Backend
+
+CompactionPolicy = Callable[["Backend", str], None]
 
 
-def system_channel_policy(backend: Any, channel: str) -> None:
+def system_channel_policy(backend: Backend, channel: str) -> None:
     """Auto-compact system channels to prevent unbounded growth.
+
+    Called on every publish as an intentional hook point — the default
+    policy early-returns for non-system channels with no overhead.
 
     - ``_system:registry`` — one registration per agent is sufficient.
     - ``_system:cursors:*`` — only the latest snapshot matters.

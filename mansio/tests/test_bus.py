@@ -371,11 +371,11 @@ class TestSQLiteBusInMemory:
             assert msgs[0].sender == "agent-a"
             assert msgs[1].sender == "agent-b"
 
-    def test_poll_empty_channel(self):
+    def test_query_empty_channel(self):
         with SQLiteBus() as bus:
             assert bus.query("nonexistent") == []
 
-    def test_poll_with_cursor(self):
+    def test_query_with_cursor(self):
         with SQLiteBus() as bus:
             id1 = bus.publish("ch", "a", "text", "msg1")
             bus.publish("ch", "a", "text", "msg2")
@@ -385,21 +385,21 @@ class TestSQLiteBusInMemory:
             assert msgs[0].payload == "msg2"
             assert msgs[1].payload == "msg3"
 
-    def test_poll_with_limit(self):
+    def test_query_with_limit(self):
         with SQLiteBus() as bus:
             for i in range(10):
                 bus.publish("ch", "a", "text", f"msg{i}")
             msgs = bus.query("ch", limit=3)
             assert len(msgs) == 3
 
-    def test_poll_channel_isolation(self):
+    def test_query_channel_isolation(self):
         with SQLiteBus() as bus:
             bus.publish("ch1", "a", "text", "in-ch1")
             bus.publish("ch2", "a", "text", "in-ch2")
             assert bus.query("ch1")[0].payload == "in-ch1"
             assert bus.query("ch2")[0].payload == "in-ch2"
 
-    def test_poll_chronological_order(self):
+    def test_query_chronological_order(self):
         with SQLiteBus() as bus:
             for i in range(5):
                 bus.publish("ch", "a", "text", f"msg{i}")

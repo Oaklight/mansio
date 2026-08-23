@@ -89,7 +89,7 @@ client = MansioClient("workspace/.mansio.db", "agent-1")
 │          MansioClient (Client SDK)           │
 │  Identity · Cursor · Channel naming · API    │
 ├──────────────────────────────────────────────┤
-│         Transport (LocalTransport)           │
+│         Transport (Bus (direct))           │
 ├──────────────────────────────────────────────┤
 │               Bus (Orchestrator)             │
 │    Backend + Serializer + in-process pub/sub │

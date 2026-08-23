@@ -70,7 +70,7 @@ Mansio follows a layered architecture inspired by messaging middleware, adapted 
 |-------|-----------|------|
 | **Storage** | `Backend` protocol | Persistent or ephemeral message storage (`SQLiteBackend`, `MemoryBackend`) |
 | **Routing** | `Bus` | Channel management, pub/sub dispatch, UUID generation |
-| **Transport** | `Transport` protocol | Abstraction for local vs. remote bus access (`LocalTransport`) |
+| **Transport** | `Transport` protocol | Abstraction for local vs. remote bus access (Bus directly satisfies Transport) |
 | **Agent API** | `MansioClient` | Identity, cursors, auth, semantic messaging APIs |
 | **Frontend** | `Frontend` protocol | Network-facing servers (REST + SSE) binding to Bus (`HttpFrontend`, `MansioServer`) |
 | **Admin** | `AdminServer` | HTTP dashboard + REST API for monitoring |
