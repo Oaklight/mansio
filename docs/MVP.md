@@ -1,4 +1,4 @@
-# piazza MVP — Implementation Reference
+# mansio MVP — Implementation Reference
 
 **Date:** 2026-04-20 (last updated 2026-06-11)
 **Status:** ✅ Implemented
@@ -7,7 +7,7 @@
 
 ## Overview
 
-piazza MVP provides a minimal, zero-dependency message bus for multi-agent context synchronization. All core layers (Backend → Bus → Client SDK) are implemented and tested.
+mansio MVP provides a minimal, zero-dependency message bus for multi-agent context synchronization. All core layers (Backend → Bus → Client SDK) are implemented and tested.
 
 ### What's Included
 
@@ -18,12 +18,12 @@ piazza MVP provides a minimal, zero-dependency message bus for multi-agent conte
 | **Bus** | `Bus` — orchestrator combining Backend + Serializer + in-process pub/sub | ✅ |
 | **Bus** | `SQLiteBus` — convenience shorthand for `Bus(backend=SQLiteBackend(...))` | ✅ |
 | **Serializer** | `JSONSerializer` — human-readable metadata encoding | ✅ |
-| **Client SDK** | `PiazzaClient` — identity, cursor, channel naming, semantic API | ✅ |
+| **Client SDK** | `MansioClient` — identity, cursor, channel naming, semantic API | ✅ |
 | **Admin** | Admin panel — modular HTTP dashboard with route-based handlers | ✅ |
 
 ### What's Deferred
 
-- Hub-Server architecture (PiazzaServer + RemoteTransport)
+- Hub-Server architecture (MansioServer + RemoteTransport)
 - IRC Frontend (expose Bus via IRC protocol for human observation)
 - Additional Backends (NATS JetStream, Redis Streams, etc.)
 - Typed channel enforcement at Bus layer
@@ -40,12 +40,12 @@ piazza MVP provides a minimal, zero-dependency message bus for multi-agent conte
 ## Quick Start
 
 ```python
-from piazza import Bus, MemoryBackend, PiazzaClient
+from mansio import Bus, MemoryBackend, MansioClient
 
 # In-process: agents share a Bus
 bus = Bus(backend=MemoryBackend())
-alice = PiazzaClient(bus, "alice-agent")
-bob = PiazzaClient(bus, "bob-agent")
+alice = MansioClient(bus, "alice-agent")
+bob = MansioClient(bus, "bob-agent")
 
 # Send a DM
 alice.dm_send("bob-agent", "hello!")
@@ -69,13 +69,13 @@ bus.close()
 
 ```python
 # Bus object (in-process, caller manages lifecycle)
-client = PiazzaClient(bus, "agent-1")
+client = MansioClient(bus, "agent-1")
 
 # :memory: (auto-creates Bus, client owns it)
-client = PiazzaClient(":memory:", "agent-1")
+client = MansioClient(":memory:", "agent-1")
 
 # File path (SQLite persistence, client owns Bus)
-client = PiazzaClient("workspace/.piazza.db", "agent-1")
+client = MansioClient("workspace/.mansio.db", "agent-1")
 
 # Future: redis://, amqp://, http:// → NotImplementedError
 ```
@@ -86,7 +86,7 @@ client = PiazzaClient("workspace/.piazza.db", "agent-1")
 
 ```
 ┌──────────────────────────────────────────────┐
-│          PiazzaClient (Client SDK)           │
+│          MansioClient (Client SDK)           │
 │  Identity · Cursor · Channel naming · API    │
 ├──────────────────────────────────────────────┤
 │         Transport (LocalTransport)           │
@@ -150,21 +150,21 @@ class Bus:
     # Context manager: with Bus(...) as bus: ...
 ```
 
-### PiazzaClient
+### MansioClient
 
 #### Constructor & Lifecycle
 
 ```python
-class PiazzaClient:
+class MansioClient:
     def __init__(target: Bus | str, agent_id: str, *,
                  secret=None, display_name=None)
 
     @classmethod
     def register(target, agent_id, *, display_name=None)
-        -> tuple[PiazzaClient, str]
+        -> tuple[MansioClient, str]
 
     def close() -> None
-    # Context manager: with PiazzaClient(...) as client: ...
+    # Context manager: with MansioClient(...) as client: ...
 ```
 
 #### Core API — Channel Operations
@@ -224,17 +224,17 @@ Format: `^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$` (3-64 chars, lowercase alphanumeric 
 ```python
 # No auth (default) — development / testing
 bus = Bus(require_auth=False)
-client = PiazzaClient(bus, "agent-1")  # just works
+client = MansioClient(bus, "agent-1")  # just works
 
 # Auth required — production / shared environments
 bus = Bus(require_auth=True)
-client, secret = PiazzaClient.register(bus, "agent-1")
+client, secret = MansioClient.register(bus, "agent-1")
 # Store secret, reconnect later:
-client = PiazzaClient(bus, "agent-1", secret=secret)
+client = MansioClient(bus, "agent-1", secret=secret)
 ```
 
 - Secrets are `sk-{48 hex chars}`, stored as `sha256:{hash}` in `_system:registry`
-- Registration via `PiazzaClient.register()` returns `(client, secret)` tuple
+- Registration via `MansioClient.register()` returns `(client, secret)` tuple
 - Cross-session reconnect: same `agent_id` + `secret`
 
 ---
@@ -267,7 +267,7 @@ Two read modes:
 
 Cursors persist across sessions via `_system:cursors:{agent_id}`:
 - `close()` saves cursor snapshot
-- New `PiazzaClient` with same `agent_id` restores from latest snapshot
+- New `MansioClient` with same `agent_id` restores from latest snapshot
 - `channel_poll()` resumes from where the previous session left off
 
 ---
@@ -297,11 +297,11 @@ Multiple processes share the same SQLite file via WAL mode:
 
 ```python
 # Process A
-client_a = PiazzaClient("shared/.piazza.db", "coder-1")
+client_a = MansioClient("shared/.mansio.db", "coder-1")
 client_a.channel_send("sync", '{"commits": ["abc"]}', msg_type="context_sync")
 
 # Process B
-client_b = PiazzaClient("shared/.piazza.db", "reviewer-1")
+client_b = MansioClient("shared/.mansio.db", "reviewer-1")
 new_msgs = client_b.channel_poll("sync")
 ```
 
@@ -316,10 +316,10 @@ new_msgs = client_b.channel_poll("sync")
 2. **Message ID as cursor** — `poll(after=id)` uses UUID v7 (time-ordered), avoids clock skew.
 3. **Sync API only** — Async doubles the surface for no MVP benefit.
 4. **Poll + Subscribe** — Poll works cross-process; subscribe works in-process. Both simple.
-5. **Channel naming at SDK layer** — Bus stays generic; PiazzaClient enforces conventions.
+5. **Channel naming at SDK layer** — Bus stays generic; MansioClient enforces conventions.
 6. **Everything is messages** — Registry, cursors, and presence all stored as messages in `_system:` channels.
 7. **`register()` uses `object.__new__()`** — Bypasses `__init__` auth to write registration before authentication can run.
-8. **Transport abstraction** — Decouples PiazzaClient from in-process vs. network Bus access.
+8. **Transport abstraction** — Decouples MansioClient from in-process vs. network Bus access.
 
 ---
 

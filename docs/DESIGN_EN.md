@@ -2,7 +2,7 @@
 
 ## 1. Project Overview
 
-Piazza is a messaging backbone system designed for LLMs/Agents, providing unified communication infrastructure for multi-agent collaboration. This project serves as the reference implementation of the **Messaging** component (Chapter 9) in the PhD dissertation *"Enabling Agentic AI at Scale through Decoupled Abstractions"*.
+Mansio is a messaging backbone system designed for LLMs/Agents, providing unified communication infrastructure for multi-agent collaboration. This project serves as the reference implementation of the **Messaging** component (Chapter 9) in the PhD dissertation *"Enabling Agentic AI at Scale through Decoupled Abstractions"*.
 
 ### Core Capabilities
 
@@ -36,7 +36,7 @@ Piazza is a messaging backbone system designed for LLMs/Agents, providing unifie
 │   LLMs, humans, scripts)                                   │
 ├─────────────────────────────────────────────────────────────┤
 │                    Client SDK Layer                          │
-│                     PiazzaClient                            │
+│                     MansioClient                            │
 │  (Stateful wrapper: identity, cursors, channel naming,     │
 │   semantic business API)                                    │
 ├─────────────────────────────────────────────────────────────┤
@@ -56,20 +56,20 @@ Piazza is a messaging backbone system designed for LLMs/Agents, providing unifie
 └─────────────────────────────────────────────────────────────┘
 ```
 
-> **🔄 In Progress (`dev/agent-bus`):** The Frontend layer introduces a `Frontend` protocol with `attach(bus)` / `serve_forever()` / `shutdown()` methods. `HttpFrontend` is the first implementation, providing REST endpoints and SSE streaming. `PiazzaServer` is the orchestrator that binds a Bus to one or more Frontends.
+> **🔄 In Progress (`dev/agent-bus`):** The Frontend layer introduces a `Frontend` protocol with `attach(bus)` / `serve_forever()` / `shutdown()` methods. `HttpFrontend` is the first implementation, providing REST endpoints and SSE streaming. `MansioServer` is the orchestrator that binds a Bus to one or more Frontends.
 
 Each layer depends only on the Protocol interface of the layer below, never on concrete implementations.
 
 ### 2.2 Component Relationships
 
 ```
-PiazzaClient(target)
+MansioClient(target)
   │
   ├── target = Bus object  → LocalTransport → Bus → Backend
-  ├── target = "piazza.db" → auto-create Bus(SQLiteBackend) → LocalTransport
+  ├── target = "mansio.db" → auto-create Bus(SQLiteBackend) → LocalTransport
   ├── target = "redis://…" → auto-create Bus(RedisBackend) → LocalTransport
   └── target = "http://…"  → HttpTransport → HttpFrontend → Bus → Backend
-                                               (via PiazzaServer)
+                                               (via MansioServer)
 ```
 
 The Client SDK shields local/remote differences through the Transport abstraction, fully transparent to upper layers.
@@ -157,7 +157,7 @@ class Backend(Protocol):
 
 | Backend | Connection String | Use Case |
 |---------|------------------|----------|
-| SQLiteBackend | `piazza.db` or `:memory:` | Development, testing, single-machine deployment, zero external deps |
+| SQLiteBackend | `mansio.db` or `:memory:` | Development, testing, single-machine deployment, zero external deps |
 | MemoryBackend | `:memory:` (via Bus object) | Unit testing, ephemeral scenarios |
 | RedisBackend | `redis://host:port` | Multi-instance deployment, native pub/sub needed |
 | RabbitMQBackend | `amqp://host:port` | Enterprise-grade, complex routing, durable queues |
@@ -236,27 +236,27 @@ class Bus:
 - ❌ No agent identity management (Client SDK's responsibility)
 - ❌ No cursor state tracking (Client SDK's responsibility)
 
-### 3.5 Client SDK Layer (PiazzaClient)
+### 3.5 Client SDK Layer (MansioClient)
 
-PiazzaClient is the core interface for agents/LLMs, providing stateful message operation wrappers.
+MansioClient is the core interface for agents/LLMs, providing stateful message operation wrappers.
 
 #### 3.5.1 Connection Model
 
-PiazzaClient's constructor accepts either a `Bus` object or a connection string, automatically selecting the appropriate Transport:
+MansioClient's constructor accepts either a `Bus` object or a connection string, automatically selecting the appropriate Transport:
 
 ```python
 # Mode 1: Pass Bus object (orchestrator pattern)
 bus = Bus(backend=SQLiteBackend("data.db"))
-client = PiazzaClient(bus, "coder-1")
+client = MansioClient(bus, "coder-1")
 
 # Mode 2: Pass connection string (auto-creates Bus)
-client = PiazzaClient("piazza.db", "coder-1")
-client = PiazzaClient(":memory:", "coder-1")
-client = PiazzaClient("redis://localhost:6379", "coder-1")
-client = PiazzaClient("amqp://localhost", "coder-1")
+client = MansioClient("mansio.db", "coder-1")
+client = MansioClient(":memory:", "coder-1")
+client = MansioClient("redis://localhost:6379", "coder-1")
+client = MansioClient("amqp://localhost", "coder-1")
 
-# Mode 3: Connect to remote PiazzaServer
-client = PiazzaClient("http://piazza:8741", "coder-1", secret="sk-xxx")
+# Mode 3: Connect to remote MansioServer
+client = MansioClient("http://mansio:8741", "coder-1", secret="sk-xxx")
 ```
 
 Internal routing via Transport abstraction:
@@ -279,7 +279,7 @@ Transport is a purely internal abstraction; users never interact with it directl
 ```
 agent_id      Unique system identifier, user-chosen, format-constrained
               (lowercase alphanumeric, hyphens, underscores, dots; 3-64 chars)
-secret        Piazza-generated credential, stored as SHA256 hash
+secret        Mansio-generated credential, stored as SHA256 hash
 display_name  Optional display name, can duplicate, defaults to agent_id
 ```
 
@@ -289,16 +289,16 @@ Analogy: agent_id ≈ WeChat ID (unique), display_name ≈ nickname (can duplica
 
 ```python
 # First-time registration
-client, secret = PiazzaClient.register(target, "coder-1", display_name="Code Bot")
+client, secret = MansioClient.register(target, "coder-1", display_name="Code Bot")
 # → Generates secret, writes to _system:registry channel
 # → Caller saves secret (env var / config)
 
 # Reconnect with secret (cross-session recovery)
-client = PiazzaClient(target, "coder-1", secret="sk-xxx")
+client = MansioClient(target, "coder-1", secret="sk-xxx")
 # → Validates secret → restores cursors → resumes
 
 # No-auth mode (when Bus require_auth=False)
-client = PiazzaClient(target, "coder-1")
+client = MansioClient(target, "coder-1")
 # → Skips authentication, direct use
 ```
 
@@ -420,7 +420,7 @@ The Frontend layer validates message payloads on publish:
 
 #### 3.5.4 API Design
 
-PiazzaClient adopts a **resource\_action** naming style (e.g., `channel_send`, `note_write`), balancing SDK readability with intuitive exposure as MCP/CLI tools.
+MansioClient adopts a **resource\_action** naming style (e.g., `channel_send`, `note_write`), balancing SDK readability with intuitive exposure as MCP/CLI tools.
 
 ##### Core API: Channel Operations
 
@@ -504,7 +504,7 @@ dm_send(to_agent, content)
 
 #### 3.5.5 Cursor Management
 
-PiazzaClient maintains per-channel cursors for incremental message reading.
+MansioClient maintains per-channel cursors for incremental message reading.
 
 ##### Two Read Modes
 
@@ -533,13 +533,13 @@ channel_send(
 ```
 Agent dies
   → Respawn
-  → Create PiazzaClient with same agent_id + secret
+  → Create MansioClient with same agent_id + secret
   → _announce() writes new register message
   → _restore_cursors() reads latest snapshot from _system:cursors:{agent_id}
   → channel_poll() resumes from the breakpoint
 ```
 
-### 3.6 Frontend Layer & PiazzaServer
+### 3.6 Frontend Layer & MansioServer
 
 > 🔄 **In Progress** — implemented on `dev/agent-bus`, pending merge to master.
 
@@ -568,12 +568,12 @@ The first Frontend implementation, providing:
 - **REST API** — publish, poll, list channels
 - **SSE (Server-Sent Events)** — real-time message streaming via `subscribe`
 
-#### PiazzaServer
+#### MansioServer
 
 The orchestrator that binds a Bus to one or more Frontends:
 
 ```python
-server = PiazzaServer(bus)
+server = MansioServer(bus)
 server.add_frontend(HttpFrontend(host="0.0.0.0", port=8741))
 server.serve_forever()
 ```
@@ -583,8 +583,8 @@ server.serve_forever()
 Client-side counterpart to HttpFrontend, implementing the Transport protocol over HTTP:
 
 ```python
-# Client connects to remote PiazzaServer
-client = PiazzaClient("http://piazza:8741", "agent-1", secret="sk-xxx")
+# Client connects to remote MansioServer
+client = MansioClient("http://mansio:8741", "agent-1", secret="sk-xxx")
 # → Uses HttpTransport internally
 ```
 
@@ -614,7 +614,7 @@ The Delivery Layer exposes Client SDK capabilities to external consumers.
 
 ```
 ┌────────────────────────────────────────────────────┐
-│                 PiazzaClient SDK                   │
+│                 MansioClient SDK                   │
 ├───────────┬───────────┬───────────┬────────────────┤
 │    MCP    │ REST API  │   CLI     │   OpenAPI      │
 │  Server   │  Server   │ (Tier 2)  │   Schema       │
@@ -628,12 +628,12 @@ The Delivery Layer exposes Client SDK capabilities to external consumers.
 
 | Tier | Target User | Functions |
 |------|------------|-----------|
-| **Tier 1: Operations** | DevOps | `piazza serve`, `piazza status`, `piazza admin` |
-| **Tier 2: SDK-over-CLI** | LLMs (via bash tool) | SDK methods mapped to CLI commands, e.g., `piazza channel send ...` |
+| **Tier 1: Operations** | DevOps | `mansio serve`, `mansio status`, `mansio admin` |
+| **Tier 2: SDK-over-CLI** | LLMs (via bash tool) | SDK methods mapped to CLI commands, e.g., `mansio channel send ...` |
 
 #### Delivery Channels
 
-PiazzaClient methods can be uniformly exposed as MCP tools, REST APIs, and CLI commands via toolregistry-server, without writing separate adapter code for each protocol.
+MansioClient methods can be uniformly exposed as MCP tools, REST APIs, and CLI commands via toolregistry-server, without writing separate adapter code for each protocol.
 
 ---
 
@@ -709,8 +709,8 @@ All agents run in the same process, sharing a Bus object.
 
 ```python
 bus = Bus(backend=SQLiteBackend("data.db"))
-client_a = PiazzaClient(bus, "coder-1")
-client_b = PiazzaClient(bus, "reviewer-1")
+client_a = MansioClient(bus, "coder-1")
+client_b = MansioClient(bus, "reviewer-1")
 ```
 
 - Simplest, zero network overhead
@@ -723,27 +723,27 @@ Each process independently creates a Client pointing to the same storage.
 
 ```python
 # Process A
-client_a = PiazzaClient("shared/piazza.db", "coder-1")
+client_a = MansioClient("shared/mansio.db", "coder-1")
 
 # Process B
-client_b = PiazzaClient("shared/piazza.db", "reviewer-1")
+client_b = MansioClient("shared/mansio.db", "reviewer-1")
 ```
 
 - Concurrent read/write supported via SQLite WAL mode
 - Subscribe only works in-process; cross-process uses `channel_poll()`
 - Suitable for single-machine multi-process scenarios
 
-### 6.3 Persistent Service (PiazzaServer)
+### 6.3 Persistent Service (MansioServer)
 
 Centralized service with Clients connecting via network API.
 
 ```python
 # Server side
 bus = Bus(backend=SQLiteBackend("data.db"), require_auth=True)
-server = PiazzaServer(bus, host="0.0.0.0", port=8741)
+server = MansioServer(bus, host="0.0.0.0", port=8741)
 
 # Client side (any machine)
-client = PiazzaClient("http://piazza:8741", "coder-1", secret="sk-xxx")
+client = MansioClient("http://mansio:8741", "coder-1", secret="sk-xxx")
 ```
 
 - Suitable for multi-machine deployment, cloud environments
@@ -759,19 +759,19 @@ client = PiazzaClient("http://piazza:8741", "coder-1", secret="sk-xxx")
 The Client SDK selects backends via connection strings, integrating configuration into code:
 
 ```python
-PiazzaClient("piazza.db", agent_id)           # SQLite
-PiazzaClient(":memory:", agent_id)             # Memory
-PiazzaClient("redis://host:6379", agent_id)    # Redis
-PiazzaClient("amqp://host:5672", agent_id)     # RabbitMQ
-PiazzaClient("http://host:8741", agent_id)     # Remote service
+MansioClient("mansio.db", agent_id)           # SQLite
+MansioClient(":memory:", agent_id)             # Memory
+MansioClient("redis://host:6379", agent_id)    # Redis
+MansioClient("amqp://host:5672", agent_id)     # RabbitMQ
+MansioClient("http://host:8741", agent_id)     # Remote service
 ```
 
-### 7.2 Configuration File (Future, for PiazzaServer deployment)
+### 7.2 Configuration File (Future, for MansioServer deployment)
 
 Server-side deployment will support YAML/TOML configuration files:
 
 ```yaml
-# piazza.yaml (reserved design, not yet implemented)
+# mansio.yaml (reserved design, not yet implemented)
 server:
   host: 0.0.0.0
   port: 8741
@@ -838,7 +838,7 @@ Configuration files ultimately resolve to connection strings + constructor param
 
 ### D3: Identity Authentication via agent_id + secret
 
-**Decision**: agent_id is user-chosen (format-constrained), secret is Piazza-generated, and authentication enforcement is controlled via Bus configuration.
+**Decision**: agent_id is user-chosen (format-constrained), secret is Mansio-generated, and authentication enforcement is controlled via Bus configuration.
 
 **Rationale**: Simple, mature credential pattern supporting cross-session recovery (reconnect with same agent_id + secret). No-auth mode lowers the development/testing barrier.
 
@@ -856,7 +856,7 @@ Configuration files ultimately resolve to connection strings + constructor param
 
 ### D6: Connection String Driven Deployment
 
-**Decision**: PiazzaClient constructor accepts `Bus | str`, automatically selecting backend and transport based on URL scheme.
+**Decision**: MansioClient constructor accepts `Bus | str`, automatically selecting backend and transport based on URL scheme.
 
 **Rationale**: Decouples deployment decisions (which backend, local vs. remote) from architectural design. The same Client code adapts to different deployment environments without modification.
 

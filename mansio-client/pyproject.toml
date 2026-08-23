@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mansio-client"
+dynamic = ["version"]
+authors = [{ name = "Peng Ding", email = "oaklight.cn@gmail.com" }]
+description = "Lightweight agent SDK for mansio message bus — zero dependencies"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications",
+    "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://github.com/Oaklight/mansio"
+Repository = "https://github.com/Oaklight/mansio"
+Issues = "https://github.com/Oaklight/mansio/issues"
+
+[project.scripts]
+mansio-client = "mansio_client.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "mansio_client.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+extend-exclude = ["src/mansio_client/_vendor/"]

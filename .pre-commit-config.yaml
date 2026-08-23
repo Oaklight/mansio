@@ -11,7 +11,7 @@ repos:
       - id: ty
         name: ty check
         description: Type check src/ with ty.
-        entry: ty check --project piazza --exit-zero-on-warning
+        entry: ty check --project mansio --exit-zero-on-warning
         language: system
         pass_filenames: false
         require_serial: true
@@ -21,6 +21,6 @@ repos:
     rev: v5.1.0
     hooks:
       - id: complexipy
-        files: ^piazza/src/piazza/
-        exclude: ^piazza/src/piazza/_vendor/
+        files: ^mansio/src/mansio/
+        exclude: ^mansio/src/mansio/_vendor/
         args: [-mx, "20"]

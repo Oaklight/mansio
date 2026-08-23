@@ -23,9 +23,9 @@ RUN apk add --no-cache su-exec
 
 # Copy only the dist/ directory for local wheels (never copy the full tree —
 # even with .dockerignore, a broad COPY risks leaking secrets into layers).
-COPY piazza/dist/ /tmp/dist/
+COPY mansio/dist/ /tmp/dist/
 
-# Install piazza: local wheel > specific version > latest from PyPI
+# Install mansio: local wheel > specific version > latest from PyPI
 #
 # PIP_ARGS is built once to avoid repeating the PYPI_MIRROR conditional.
 # After install, pip and setuptools are removed — this is a locked-down
@@ -36,11 +36,11 @@ RUN PIP_ARGS="--no-cache-dir"; \
         echo "Installing from local wheel: $LOCAL_WHEEL"; \
         pip install $PIP_ARGS "/tmp/dist/${LOCAL_WHEEL}"; \
     elif [ -n "$PACKAGE_VERSION" ]; then \
-        echo "Installing piazza version: $PACKAGE_VERSION"; \
-        pip install $PIP_ARGS "piazza==$PACKAGE_VERSION"; \
+        echo "Installing mansio version: $PACKAGE_VERSION"; \
+        pip install $PIP_ARGS "mansio==$PACKAGE_VERSION"; \
     else \
-        echo "Installing latest piazza from PyPI"; \
-        pip install $PIP_ARGS "piazza"; \
+        echo "Installing latest mansio from PyPI"; \
+        pip install $PIP_ARGS "mansio"; \
     fi && \
     pip uninstall -y pip setuptools 2>/dev/null || true && \
     rm -rf /tmp/dist/
@@ -57,4 +57,4 @@ RUN chmod +x /entrypoint.sh
 EXPOSE 8741 8742
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["piazza", "serve", "--db", "/data/piazza.db", "--http", "0.0.0.0:8742", "--remote", "--admin-port", "8741"]
+CMD ["mansio", "serve", "--db", "/data/mansio.db", "--http", "0.0.0.0:8742", "--remote", "--admin-port", "8741"]

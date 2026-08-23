@@ -2,7 +2,7 @@
 
 ## 1. 项目概述
 
-Piazza 是一个面向 LLM/Agent 的消息中枢系统，为多智能体协作提供统一的通信基础设施。本项目是博士论文 *"Enabling Agentic AI at Scale through Decoupled Abstractions"* 中 Messaging 组件（第 9 章）的参考实现。
+Mansio 是一个面向 LLM/Agent 的消息中枢系统，为多智能体协作提供统一的通信基础设施。本项目是博士论文 *"Enabling Agentic AI at Scale through Decoupled Abstractions"* 中 Messaging 组件（第 9 章）的参考实现。
 
 ### 核心能力
 
@@ -35,7 +35,7 @@ Piazza 是一个面向 LLM/Agent 的消息中枢系统，为多智能体协作�
 │  （将 Client SDK 能力暴露给外部消费者：LLM、人类、脚本）       │
 ├─────────────────────────────────────────────────────────────┤
 │                    Client SDK Layer                          │
-│                     PiazzaClient                            │
+│                     MansioClient                            │
 │  （有状态封装：身份、游标、channel 命名、业务语义 API）         │
 ├─────────────────────────────────────────────────────────────┤
 │                    Frontend Layer  🔄                        │
@@ -52,20 +52,20 @@ Piazza 是一个面向 LLM/Agent 的消息中枢系统，为多智能体协作�
 └─────────────────────────────────────────────────────────────┘
 ```
 
-> **🔄 开发中（`dev/agent-bus`）：** Frontend 层引入了 `Frontend` 协议，提供 `attach(bus)` / `serve_forever()` / `shutdown()` 方法。`HttpFrontend` 是首个实现，提供 REST 端点和 SSE 实时流。`PiazzaServer` 是将 Bus 绑定到一个或多个 Frontend 的编排器。
+> **🔄 开发中（`dev/agent-bus`）：** Frontend 层引入了 `Frontend` 协议，提供 `attach(bus)` / `serve_forever()` / `shutdown()` 方法。`HttpFrontend` 是首个实现，提供 REST 端点和 SSE 实时流。`MansioServer` 是将 Bus 绑定到一个或多个 Frontend 的编排器。
 
 每一层只依赖其下一层的 Protocol 接口，不依赖具体实现。
 
 ### 2.2 组件关系
 
 ```
-PiazzaClient(target)
+MansioClient(target)
   │
   ├── target = Bus 对象 → LocalTransport → Bus → Backend
-  ├── target = "piazza.db"  → 自建 Bus(SQLiteBackend) → LocalTransport
+  ├── target = "mansio.db"  → 自建 Bus(SQLiteBackend) → LocalTransport
   ├── target = "redis://..." → 自建 Bus(RedisBackend) → LocalTransport
   └── target = "http://..."  → HttpTransport → HttpFrontend → Bus → Backend
-                                                (通过 PiazzaServer)
+                                                (通过 MansioServer)
 ```
 
 Client SDK 通过 Transport 抽象屏蔽本地/远程差异，对上层完全透明。
@@ -153,7 +153,7 @@ class Backend(Protocol):
 
 | Backend | Connection String | 适用场景 |
 |---------|------------------|----------|
-| SQLiteBackend | `piazza.db` 或 `:memory:` | 开发、测试、单机部署、零外部依赖 |
+| SQLiteBackend | `mansio.db` 或 `:memory:` | 开发、测试、单机部署、零外部依赖 |
 | MemoryBackend | `:memory:`（通过 Bus 对象传入） | 单元测试、临时场景 |
 | RedisBackend | `redis://host:port` | 多实例部署、需要原生 pub/sub |
 | RabbitMQBackend | `amqp://host:port` | 企业级、复杂路由、持久队列 |
@@ -237,27 +237,27 @@ class Bus:
 - ❌ 不管理 agent 身份（由 Client SDK 负责）
 - ❌ 不追踪 cursor 状态（由 Client SDK 负责）
 
-### 3.5 Client SDK 层（PiazzaClient）
+### 3.5 Client SDK 层（MansioClient）
 
-PiazzaClient 是面向 agent/LLM 的核心接口，提供有状态的消息操作封装。
+MansioClient 是面向 agent/LLM 的核心接口，提供有状态的消息操作封装。
 
 #### 3.5.1 连接模型
 
-PiazzaClient 的构造函数接受 `Bus` 对象或 connection string，自动选择 Transport：
+MansioClient 的构造函数接受 `Bus` 对象或 connection string，自动选择 Transport：
 
 ```python
 # 方式 1：传入 Bus 对象（orchestrator 编排模式）
 bus = Bus(backend=SQLiteBackend("data.db"))
-client = PiazzaClient(bus, "coder-1")
+client = MansioClient(bus, "coder-1")
 
 # 方式 2：传入 connection string（自动创建 Bus）
-client = PiazzaClient("piazza.db", "coder-1")
-client = PiazzaClient(":memory:", "coder-1")
-client = PiazzaClient("redis://localhost:6379", "coder-1")
-client = PiazzaClient("amqp://localhost", "coder-1")
+client = MansioClient("mansio.db", "coder-1")
+client = MansioClient(":memory:", "coder-1")
+client = MansioClient("redis://localhost:6379", "coder-1")
+client = MansioClient("amqp://localhost", "coder-1")
 
-# 方式 3：连接远程 PiazzaServer
-client = PiazzaClient("http://piazza:8741", "coder-1", secret="sk-xxx")
+# 方式 3：连接远程 MansioServer
+client = MansioClient("http://mansio:8741", "coder-1", secret="sk-xxx")
 ```
 
 内部通过 Transport 抽象屏蔽差异：
@@ -279,7 +279,7 @@ Transport 是纯内部抽象，用户不直接接触。
 
 ```
 agent_id      唯一系统标识，用户自选，格式约束（小写字母+数字+连字符，3-64 字符）
-secret        Piazza 生成的凭证，SHA256 哈希存储
+secret        Mansio 生成的凭证，SHA256 哈希存储
 display_name  可选显示名，可重复，默认等于 agent_id
 ```
 
@@ -289,16 +289,16 @@ display_name  可选显示名，可重复，默认等于 agent_id
 
 ```python
 # 首次注册
-client, secret = PiazzaClient.register(target, "coder-1", display_name="Code Bot")
+client, secret = MansioClient.register(target, "coder-1", display_name="Code Bot")
 # → 生成 secret，写入 _system:registry channel
 # → 调用方自行保存 secret（env var / config）
 
 # 凭 secret 重连（cross-session 恢复）
-client = PiazzaClient(target, "coder-1", secret="sk-xxx")
+client = MansioClient(target, "coder-1", secret="sk-xxx")
 # → 验证 secret → 恢复 cursor → 继续工作
 
 # 无认证模式（Bus require_auth=False 时）
-client = PiazzaClient(target, "coder-1")
+client = MansioClient(target, "coder-1")
 # → 跳过认证，直接使用
 ```
 
@@ -423,7 +423,7 @@ Channel 命名规则在**服务端（Bus/Frontend 层）强制执行**，Client 
 
 #### 3.5.4 API 设计
 
-PiazzaClient 采用 **资源\_动作** 命名风格（`resource_action`），兼顾 SDK 调用的可读性和作为 MCP/CLI tool 暴露时的直观性。
+MansioClient 采用 **资源\_动作** 命名风格（`resource_action`），兼顾 SDK 调用的可读性和作为 MCP/CLI tool 暴露时的直观性。
 
 ##### 核心 API：Channel 操作
 
@@ -506,7 +506,7 @@ dm_send(to_agent, content)
 
 #### 3.5.5 Cursor 管理
 
-PiazzaClient 维护 per-channel cursor，支持增量消息读取。
+MansioClient 维护 per-channel cursor，支持增量消息读取。
 
 ##### 两种读取模式
 
@@ -535,13 +535,13 @@ channel_send(
 ```
 Agent 死亡
   → 重新 spawn
-  → 用同一个 agent_id + secret 创建 PiazzaClient
+  → 用同一个 agent_id + secret 创建 MansioClient
   → _announce() 写入新的 register 消息
   → _restore_cursors() 从 _system:cursors:{agent_id} 读取最新快照
   → channel_poll() 从断点继续
 ```
 
-### 3.6 Frontend 层与 PiazzaServer
+### 3.6 Frontend 层与 MansioServer
 
 > 🔄 **开发中** — 已在 `dev/agent-bus` 分支实现，待合入 master。
 
@@ -570,12 +570,12 @@ class Frontend(Protocol):
 - **REST API** — 发布、轮询、列出通道
 - **SSE（Server-Sent Events）** — 通过 `subscribe` 实现实时消息流
 
-#### PiazzaServer
+#### MansioServer
 
 将 Bus 绑定到一个或多个 Frontend 的编排器：
 
 ```python
-server = PiazzaServer(bus)
+server = MansioServer(bus)
 server.add_frontend(HttpFrontend(host="0.0.0.0", port=8741))
 server.serve_forever()
 ```
@@ -585,8 +585,8 @@ server.serve_forever()
 HttpFrontend 的客户端对应物，通过 HTTP 实现 Transport 协议：
 
 ```python
-# 客户端连接远程 PiazzaServer
-client = PiazzaClient("http://piazza:8741", "agent-1", secret="sk-xxx")
+# 客户端连接远程 MansioServer
+client = MansioClient("http://mansio:8741", "agent-1", secret="sk-xxx")
 # → 内部使用 HttpTransport
 ```
 
@@ -616,7 +616,7 @@ Delivery 层将 Client SDK 的能力暴露给外部消费者。
 
 ```
 ┌────────────────────────────────────────────────────┐
-│                 PiazzaClient SDK                   │
+│                 MansioClient SDK                   │
 ├───────────┬───────────┬───────────┬────────────────┤
 │    MCP    │ REST API  │   CLI     │   OpenAPI      │
 │  Server   │  Server   │ (Tier 2)  │   Schema       │
@@ -630,12 +630,12 @@ Delivery 层将 Client SDK 的能力暴露给外部消费者。
 
 | 层级 | 目标用户 | 功能 |
 |------|---------|------|
-| **Tier 1：运维管理** | 运维人员 | `piazza serve`, `piazza status`, `piazza admin` |
-| **Tier 2：SDK-over-CLI** | LLM（通过 bash tool） | 将 SDK 方法映射为 CLI 命令，如 `piazza channel send ...` |
+| **Tier 1：运维管理** | 运维人员 | `mansio serve`, `mansio status`, `mansio admin` |
+| **Tier 2：SDK-over-CLI** | LLM（通过 bash tool） | 将 SDK 方法映射为 CLI 命令，如 `mansio channel send ...` |
 
 #### Delivery 通道
 
-PiazzaClient 的方法可以通过 toolregistry-server 统一暴露为 MCP tool、REST API 和 CLI 命令，无需为每种协议单独编写适配代码。
+MansioClient 的方法可以通过 toolregistry-server 统一暴露为 MCP tool、REST API 和 CLI 命令，无需为每种协议单独编写适配代码。
 
 ---
 
@@ -711,8 +711,8 @@ thought_record(
 
 ```python
 bus = Bus(backend=SQLiteBackend("data.db"))
-client_a = PiazzaClient(bus, "coder-1")
-client_b = PiazzaClient(bus, "reviewer-1")
+client_a = MansioClient(bus, "coder-1")
+client_b = MansioClient(bus, "reviewer-1")
 ```
 
 - 最简单，零网络开销
@@ -725,27 +725,27 @@ client_b = PiazzaClient(bus, "reviewer-1")
 
 ```python
 # 进程 A
-client_a = PiazzaClient("shared/piazza.db", "coder-1")
+client_a = MansioClient("shared/mansio.db", "coder-1")
 
 # 进程 B
-client_b = PiazzaClient("shared/piazza.db", "reviewer-1")
+client_b = MansioClient("shared/mansio.db", "reviewer-1")
 ```
 
 - 通过 SQLite WAL 模式支持并发读写
 - subscribe 只在进程内生效，跨进程用 `channel_poll()`
 - 适合单机多进程场景
 
-### 6.3 持久服务（PiazzaServer）
+### 6.3 持久服务（MansioServer）
 
 中心化服务，Client 通过网络 API 接入。
 
 ```python
 # Server 端
 bus = Bus(backend=SQLiteBackend("data.db"), require_auth=True)
-server = PiazzaServer(bus, host="0.0.0.0", port=8741)
+server = MansioServer(bus, host="0.0.0.0", port=8741)
 
 # Client 端（任意机器）
-client = PiazzaClient("http://piazza:8741", "coder-1", secret="sk-xxx")
+client = MansioClient("http://mansio:8741", "coder-1", secret="sk-xxx")
 ```
 
 - 适合多机部署、云环境
@@ -761,19 +761,19 @@ client = PiazzaClient("http://piazza:8741", "coder-1", secret="sk-xxx")
 Client SDK 通过 connection string 选择 backend，配置与代码融为一体：
 
 ```python
-PiazzaClient("piazza.db", agent_id)           # SQLite
-PiazzaClient(":memory:", agent_id)             # 内存
-PiazzaClient("redis://host:6379", agent_id)    # Redis
-PiazzaClient("amqp://host:5672", agent_id)     # RabbitMQ
-PiazzaClient("http://host:8741", agent_id)     # 远程服务
+MansioClient("mansio.db", agent_id)           # SQLite
+MansioClient(":memory:", agent_id)             # 内存
+MansioClient("redis://host:6379", agent_id)    # Redis
+MansioClient("amqp://host:5672", agent_id)     # RabbitMQ
+MansioClient("http://host:8741", agent_id)     # 远程服务
 ```
 
-### 7.2 配置文件（未来，PiazzaServer 部署时）
+### 7.2 配置文件（未来，MansioServer 部署时）
 
 服务端部署时将支持 YAML/TOML 配置文件：
 
 ```yaml
-# piazza.yaml（预留设计，尚未实现）
+# mansio.yaml（预留设计，尚未实现）
 server:
   host: 0.0.0.0
   port: 8741
@@ -855,7 +855,7 @@ Bus 层对所有写入操作执行以下验证，不合规的请求返回 HTTP 4
 
 ### D3: 身份认证采用 agent_id + secret
 
-**决策**：agent_id 用户自选（格式约束），secret 由 Piazza 生成，通过 Bus 配置控制是否强制认证。
+**决策**：agent_id 用户自选（格式约束），secret 由 Mansio 生成，通过 Bus 配置控制是否强制认证。
 
 **理由**：简单成熟的凭证模式，支持 cross-session 恢复（同 agent_id + secret 重连）。无认证模式降低开发/测试门槛。
 
@@ -873,7 +873,7 @@ Bus 层对所有写入操作执行以下验证，不合规的请求返回 HTTP 4
 
 ### D6: Connection String 驱动部署
 
-**决策**：PiazzaClient 构造函数接受 `Bus | str`，通过 URL scheme 自动选择 backend 和 transport。
+**决策**：MansioClient 构造函数接受 `Bus | str`，通过 URL scheme 自动选择 backend 和 transport。
 
 **理由**：将部署决策（用什么 backend、本地还是远程）与架构设计解耦。同一份 Client 代码无需修改即可适配不同部署环境。
 

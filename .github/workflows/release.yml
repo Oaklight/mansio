@@ -22,7 +22,7 @@ jobs:
 
       - name: Verify version matches package
         run: |
-          PKG_VER=$(python -c "import re; m=re.search(r'__version__\s*=\s*\"(.+?)\"', open('piazza/src/piazza/__init__.py').read()); print(m.group(1))")
+          PKG_VER=$(python -c "import re; m=re.search(r'__version__\s*=\s*\"(.+?)\"', open('mansio/src/mansio/__init__.py').read()); print(m.group(1))")
           echo "Package version: $PKG_VER"
           echo "Requested version: ${{ inputs.version }}"
           [ "$PKG_VER" = "${{ inputs.version }}" ] || \
@@ -52,18 +52,18 @@ jobs:
       - name: Build wheel + sdist
         run: |
           pip install --upgrade pip build
-          python -m build piazza/
+          python -m build mansio/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: piazza/dist/
+          packages-dir: mansio/dist/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: piazza/dist/*
+          path: mansio/dist/*
           retention-days: 7
 
   docker:

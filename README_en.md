@@ -1,17 +1,17 @@
-# Piazza
+# Mansio
 
-[![CI](https://github.com/Oaklight/piazza/actions/workflows/ci.yml/badge.svg)](https://github.com/Oaklight/piazza/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/piazza?color=%23800020&label=PyPI)](https://pypi.org/project/piazza/)
-[![Release](https://img.shields.io/github/v/release/Oaklight/piazza?color=%23800020&label=Release)](https://github.com/Oaklight/piazza/releases/latest)
+[![CI](https://github.com/Oaklight/mansio/actions/workflows/ci.yml/badge.svg)](https://github.com/Oaklight/mansio/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/mansio?color=%23800020&label=PyPI)](https://pypi.org/project/mansio/)
+[![Release](https://img.shields.io/github/v/release/Oaklight/mansio?color=%23800020&label=Release)](https://github.com/Oaklight/mansio/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
 English Version | [中文版](README_zh.md)
 
-A lightweight message bus for multi-agent AI collaboration — the town square (广场) where agents meet.
+A lightweight message bus for multi-agent AI collaboration — the relay station (驿站) where agents meet.
 
 ## Overview
 
-Piazza provides structured, persistent communication channels for AI agents. Instead of point-to-point RPC or shared memory, agents interact through named channels with pub/sub semantics, cursor-based polling, and built-in identity management.
+Mansio provides structured, persistent communication channels for AI agents. Instead of point-to-point RPC or shared memory, agents interact through named channels with pub/sub semantics, cursor-based polling, and built-in identity management.
 
 ```
 Backend (storage)  →  Bus (routing)  →  Client SDK (agent API)
@@ -25,7 +25,7 @@ Backend (storage)  →  Bus (routing)  →  Client SDK (agent API)
 - **Server-side validation** — channel names, message payloads, and query parameters are validated at the Frontend layer; malformed input is rejected before reaching the Bus
 - **Access control** — system channels (`_system:*`), private channels (`notebook:X`, `memory:X`), and broadcast channels enforce per-agent write restrictions; supertokens grant elevated access
 - **Pluggable storage** — `SQLiteBackend` (persistent, WAL mode) and `MemoryBackend` (ephemeral, testing); protocol-based, easy to extend
-- **Client SDK** — `PiazzaClient` with agent identity, cursor persistence across sessions, and token-based authentication (per-agent secrets and supertokens)
+- **Client SDK** — `MansioClient` with agent identity, cursor persistence across sessions, and token-based authentication (per-agent secrets and supertokens)
 - **Semantic APIs** — DMs, broadcast channels, notes (with tags), thoughts (chain-of-thought logging), memory (store/recall), notifications
 - **Admin panel** — built-in HTTP dashboard with REST API for stats, channel browsing, message inspection, and throughput monitoring; modular `admin/routes/` subpackage with dict-based dispatch
 - **Flexible connection** — connect via Bus object, file path (SQLite), or `:memory:` string; URL schemes (`http://`, `redis://`) reserved for future transports
@@ -34,25 +34,25 @@ Backend (storage)  →  Bus (routing)  →  Client SDK (agent API)
 ## Quick Start
 
 ```python
-from piazza import PiazzaClient
+from mansio import MansioClient
 
 # In-memory bus (for testing)
-with PiazzaClient(":memory:", "agent-alpha") as alice:
+with MansioClient(":memory:", "agent-alpha") as alice:
     alice.channel_send("general", "hello everyone!")
     alice.note_write("remember to check logs", tags=["ops"])
     alice.thought_record("planning", "next steps", "need to coordinate with bob")
 
 # SQLite-backed (persistent)
-with PiazzaClient("/tmp/piazza.db", "agent-alpha") as alice:
+with MansioClient("/tmp/mansio.db", "agent-alpha") as alice:
     alice.dm_send("agent-beta", "ready to sync?")
 
 # Multi-agent collaboration
-from piazza import Bus, MemoryBackend
+from mansio import Bus, MemoryBackend
 
 bus = Bus(backend=MemoryBackend())
 
-alice = PiazzaClient(bus, "agent-alice")
-bob = PiazzaClient(bus, "agent-bob")
+alice = MansioClient(bus, "agent-alice")
+bob = MansioClient(bus, "agent-bob")
 
 alice.dm_send("agent-bob", "PR is ready for review")
 messages = bob.dm_read("agent-alice")  # ["PR is ready for review"]
@@ -64,15 +64,15 @@ bus.close()
 
 ## Architecture
 
-Piazza follows a layered architecture inspired by messaging middleware, adapted for AI agent workflows:
+Mansio follows a layered architecture inspired by messaging middleware, adapted for AI agent workflows:
 
 | Layer | Component | Role |
 |-------|-----------|------|
 | **Storage** | `Backend` protocol | Persistent or ephemeral message storage (`SQLiteBackend`, `MemoryBackend`) |
 | **Routing** | `Bus` | Channel management, pub/sub dispatch, UUID generation |
 | **Transport** | `Transport` protocol | Abstraction for local vs. remote bus access (`LocalTransport`) |
-| **Agent API** | `PiazzaClient` | Identity, cursors, auth, semantic messaging APIs |
-| **Frontend** | `Frontend` protocol | Network-facing servers (REST + SSE) binding to Bus (`HttpFrontend`, `PiazzaServer`) |
+| **Agent API** | `MansioClient` | Identity, cursors, auth, semantic messaging APIs |
+| **Frontend** | `Frontend` protocol | Network-facing servers (REST + SSE) binding to Bus (`HttpFrontend`, `MansioServer`) |
 | **Admin** | `AdminServer` | HTTP dashboard + REST API for monitoring |
 
 For detailed design rationale, see [DESIGN_EN.md](docs/DESIGN_EN.md).
@@ -82,14 +82,14 @@ For detailed design rationale, see [DESIGN_EN.md](docs/DESIGN_EN.md).
 Requires **Python >= 3.10**.
 
 ```bash
-pip install piazza
+pip install mansio
 ```
 
 Or from source:
 
 ```bash
-git clone https://github.com/Oaklight/piazza.git
-cd piazza
+git clone https://github.com/Oaklight/mansio.git
+cd mansio
 pip install -e ".[dev]"
 ```
 
@@ -123,18 +123,18 @@ pip install -e ".[dev]"
 
 ```python
 # Register new agent (returns client + secret)
-client, secret = PiazzaClient.register(bus, "agent-id")
+client, secret = MansioClient.register(bus, "agent-id")
 
 # Reconnect with secret
-client = PiazzaClient(bus, "agent-id", secret=saved_secret)
+client = MansioClient(bus, "agent-id", secret=saved_secret)
 ```
 
 ### Admin Panel
 
 ```python
-from piazza import SQLiteBus
+from mansio import SQLiteBus
 
-bus = SQLiteBus("piazza.db")
+bus = SQLiteBus("mansio.db")
 info = bus.start_admin(port=8741)
 print(f"Dashboard: {info.url}")
 # Visit http://localhost:8741 for the web UI
@@ -142,18 +142,18 @@ print(f"Dashboard: {info.url}")
 
 ## Roadmap
 
-- [x] **RemoteTransport** — `HttpFrontend`, `PiazzaServer`, `HttpTransport` shipped
+- [x] **RemoteTransport** — `HttpFrontend`, `MansioServer`, `HttpTransport` shipped
 - [x] **IRC Frontend** — shipped as optional `irc` extra
 - [ ] **Message TTL** — automatic expiry and cleanup
 - [x] **Channel ACL** — system, private, and broadcast channel write restrictions enforced server-side
 - [ ] **Async API** — native async/await support
 - [ ] **Semantic memory recall** — vector embedding search
 - [ ] **Redis/AMQP backends** — distributed storage
-- [ ] **Federation** — cross-instance communication ([#4](https://github.com/Oaklight/piazza/issues/4))
+- [ ] **Federation** — cross-instance communication ([#4](https://github.com/Oaklight/mansio/issues/4))
 
 ## Academic Context
 
-Piazza is the reference implementation for Chapter 9 of a dissertation on enabling agentic AI at scale through decoupled abstractions. The design emphasizes protocol-based interfaces, pluggable components, and a clear separation between transport, storage, and agent-level semantics.
+Mansio is the reference implementation for Chapter 9 of a dissertation on enabling agentic AI at scale through decoupled abstractions. The design emphasizes protocol-based interfaces, pluggable components, and a clear separation between transport, storage, and agent-level semantics.
 
 ## License
 
