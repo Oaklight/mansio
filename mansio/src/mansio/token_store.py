@@ -8,7 +8,8 @@ Manages agent tokens (create, validate, rotate, delete) with:
 - Thread-local connection pool — one SQLite connection per thread,
   reused across calls to avoid per-request connection overhead
 
-Token format: ``pzt-{48 hex chars}`` (mansio token).
+Token format: ``mst-{48 hex chars}`` (mansio token).
+Tokens with the legacy ``pzt-`` prefix are still accepted for validation.
 """
 
 from __future__ import annotations
@@ -21,7 +22,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-_TOKEN_PREFIX = "pzt-"
+_TOKEN_PREFIX = "mst-"
+_LEGACY_TOKEN_PREFIX = "pzt-"
 _TOKEN_HEX_LEN = 48  # 24 bytes = 48 hex chars
 _DISPLAY_PREFIX_LEN = 8  # chars of token shown in listings
 
@@ -54,7 +56,7 @@ def _hash_token(token: str) -> str:
 
 
 def _generate_token() -> str:
-    """Generate a new token with ``pzt-`` prefix."""
+    """Generate a new token with ``mst-`` prefix."""
     return f"{_TOKEN_PREFIX}{secrets.token_hex(_TOKEN_HEX_LEN // 2)}"
 
 
@@ -222,7 +224,9 @@ class TokenStore:
             - ``None``: valid supertoken (wildcard, any agent)
             - ``False``: invalid token
         """
-        if not token_str or not token_str.startswith(_TOKEN_PREFIX):
+        if not token_str or not (
+            token_str.startswith(_TOKEN_PREFIX) or token_str.startswith(_LEGACY_TOKEN_PREFIX)
+        ):
             return False
 
         provided_hash = _hash_token(token_str)

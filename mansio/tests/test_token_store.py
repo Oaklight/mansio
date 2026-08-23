@@ -20,7 +20,7 @@ class TestCreateAndValidate:
 
     def test_create_returns_plaintext(self, store: TokenStore) -> None:
         entry = store.create_token("agent-alice", "Alice's bot")
-        assert entry["token"].startswith("pzt-")
+        assert entry["token"].startswith("mst-")
         assert entry["agent_id"] == "agent-alice"
         assert entry["label"] == "Alice's bot"
         assert entry["id"]
@@ -34,13 +34,29 @@ class TestCreateAndValidate:
 
     def test_validate_wrong_token(self, store: TokenStore) -> None:
         store.create_token("agent-alice")
-        assert store.validate("pzt-wrong") is False
+        assert store.validate("mst-wrong") is False
 
     def test_validate_empty_string(self, store: TokenStore) -> None:
         assert store.validate("") is False
 
     def test_validate_no_prefix(self, store: TokenStore) -> None:
-        assert store.validate("not-a-pzt-token") is False
+        assert store.validate("not-a-valid-token") is False
+
+    def test_validate_legacy_prefix(self, store: TokenStore) -> None:
+        """Legacy pzt- tokens created before the rename are still accepted."""
+        import hashlib
+        import secrets
+
+        token = f"pzt-{secrets.token_hex(24)}"
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        conn = store._conn()
+        conn.execute(
+            "INSERT INTO tokens (id, token_hash, token_prefix, agent_id, label, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("legacy01", token_hash, token[:8], "agent-legacy", "old token", "2024-01-01"),
+        )
+        conn.commit()
+        assert store.validate(token) == "agent-legacy"
 
     def test_validate_updates_last_used_at(self, store: TokenStore) -> None:
         entry = store.create_token("agent-alice")
@@ -118,7 +134,7 @@ class TestRotate:
         result = store.rotate_token(entry["id"])
         assert result is not None
         assert result["token"] != old_token
-        assert result["token"].startswith("pzt-")
+        assert result["token"].startswith("mst-")
         # Metadata preserved
         assert result["agent_id"] == "agent-alice"
         assert result["label"] == "bot"

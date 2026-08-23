@@ -57,7 +57,7 @@ class MansioClient:
         secret: Authentication secret. Required when bus has
             require_auth=True.
         display_name: Human-readable name. Defaults to agent_id.
-        token: API token for HttpFrontend authentication (``pzt-...``).
+        token: API token for HttpFrontend authentication (``mst-...``).
             Only used when target is an HTTP URL.
 
     Example:
@@ -68,7 +68,7 @@ class MansioClient:
         >>> client.close()
 
         # Remote with token auth:
-        >>> client = MansioClient("http://server:8742", "agent-alice", token="pzt-xxx")
+        >>> client = MansioClient("http://server:8742", "agent-alice", token="mst-xxx")
     """
 
     def __init__(

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import sys
 import threading
@@ -17,6 +18,9 @@ import urllib.error
 from typing import Any
 
 from mansio import SQLiteBus, __version__
+
+_LEGACY_DB = "piazza.db"
+_DEFAULT_DB = "mansio.db"
 
 
 def _redact_token(token: str, head: int = 8, tail: int = 4) -> str:
@@ -195,7 +199,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _client_common.add_argument(
         "--api-token",
         default=None,
-        help="Bearer token for API auth (pzt-...)",
+        help="Bearer token for API auth (mst-...)",
     )
 
     # client send
@@ -255,6 +259,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # ── Subcommand Handlers ───────────────────────────────────────────
 
 
+def _migrate_legacy_db(db_path: str, logger) -> str:
+    """Auto-rename piazza.db to mansio.db when using the default path."""
+    if db_path == _DEFAULT_DB and not os.path.exists(_DEFAULT_DB) and os.path.exists(_LEGACY_DB):
+        os.rename(_LEGACY_DB, _DEFAULT_DB)
+        logger.info("Migrated database", old=_LEGACY_DB, new=_DEFAULT_DB)
+    return db_path
+
+
 def _cmd_serve(args: argparse.Namespace) -> None:
     """Handle the ``serve`` subcommand.
 
@@ -277,7 +289,8 @@ def _cmd_serve(args: argparse.Namespace) -> None:
         logger.error("--no-auth cannot be used with --remote (would expose unauthenticated API)")
         sys.exit(1)
 
-    bus = SQLiteBus(args.db)
+    db_path = _migrate_legacy_db(args.db, logger)
+    bus = SQLiteBus(db_path)
     logger.info("Bus started", db=args.db)
 
     # Set up token store (unless --no-auth)
