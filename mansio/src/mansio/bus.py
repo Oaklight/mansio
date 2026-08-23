@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mansio.backends import SQLiteBackend
-from mansio.protocols import Backend, Compactable, Presenceable
+from mansio.protocols import Backend, Presenceable
 from mansio.serializers import JSONSerializer
+from mansio.system_policy import CompactionPolicy, system_channel_policy
 from mansio.types import AgentPresence, ClaimResult, Message
 
 if TYPE_CHECKING:
@@ -67,6 +68,9 @@ class Bus:
             Defaults to JSON.
         require_auth: If True, MansioClient must authenticate with
             a registered secret. Defaults to False.
+        compaction_policy: Callable invoked after each publish with
+            ``(backend, channel)``. Defaults to
+            :func:`system_channel_policy`.
 
     Example:
         >>> bus = Bus()  # in-memory SQLite + JSON
@@ -80,10 +84,12 @@ class Bus:
         serializer: Serializer | None = None,
         *,
         require_auth: bool = False,
+        compaction_policy: CompactionPolicy | None = None,
     ) -> None:
         self._backend = backend or SQLiteBackend()
         self._serializer = serializer or JSONSerializer()
         self._require_auth = require_auth
+        self._compaction_policy = compaction_policy or system_channel_policy
         self._subs: dict[str, dict[str, Callable[[Message], None]]] = defaultdict(dict)
 
     @property
@@ -141,14 +147,7 @@ class Bus:
         else:
             self._backend.store(msg)
 
-        # Auto-compact system channels to prevent unbounded growth.
-        # _system:registry — one registration per agent is sufficient.
-        # _system:cursors:* — only the latest snapshot matters.
-        if isinstance(self._backend, Compactable):
-            if channel == "_system:registry":
-                self._backend.compact(channel, keep_latest_per_sender=True)
-            elif channel.startswith("_system:cursors:"):
-                self._backend.compact(channel, max_messages=1)
+        self._compaction_policy(self._backend, channel)
 
         # Notify in-process subscribers (snapshot to avoid mutation during iteration)
         for callback in list(self._subs.get(channel, {}).values()):
@@ -156,7 +155,7 @@ class Bus:
 
         return msg_id
 
-    def poll(
+    def query(
         self,
         channel: str,
         after: str | None = None,
@@ -184,7 +183,7 @@ class Bus:
         """Register an in-process callback for new messages on a channel.
 
         The callback is invoked synchronously during publish() within the
-        same process. For cross-process notification, use poll() instead.
+        same process. For cross-process notification, use query() instead.
 
         Args:
             channel: Channel to watch.
@@ -221,15 +220,24 @@ class Bus:
         """
         return {ch: list(subs.keys()) for ch, subs in self._subs.items() if subs}
 
-    def claim(
+    def queue_claim(
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
         """Atomically claim the oldest unclaimed/lease-expired message."""
         return self._backend.queue_claim(channel, claimed_by, lease_seconds=lease_seconds)
 
-    def ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
+    def queue_ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
         """Mark a claimed message as completed."""
         return self._backend.queue_ack(message_id, claimed_by)
+
+    def queue_status(self, message_id: str) -> dict | None:
+        """Return the queue status dict for a single message.
+
+        Returns:
+            Dict with 'status', 'claimed_by', 'claimed_at', etc.,
+            or None if the message has no queue status.
+        """
+        return self._backend.queue_status(message_id)
 
     # ── Presence (optional — Presenceable backends only) ─────
 
@@ -280,7 +288,7 @@ class SQLiteBus(Bus):
     Example:
         >>> bus = SQLiteBus("workspace/.mansio.db")
         >>> msg_id = bus.publish("sync", "agent-a", "context_sync", '{"commits": ["abc"]}')
-        >>> messages = bus.poll("sync")
+        >>> messages = bus.query("sync")
     """
 
     def __init__(self, db_path: str | Path = ":memory:") -> None:
