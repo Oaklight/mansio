@@ -10,10 +10,17 @@ API Endpoints:
     POST /v1/publish         — publish a message
     GET  /v1/query           — query messages from a channel
     GET  /v1/channels        — list channels
+    POST /v1/queue/claim     — claim oldest unclaimed queue message
+    POST /v1/queue/ack       — acknowledge a claimed queue message
+    GET  /v1/queue/status    — query queue status of a message
     GET  /v1/subscribe       — SSE stream for real-time notifications
     GET  /v1/auth/check      — validate agent credentials
     GET  /v1/registry/lookup — look up agent registration
     GET  /health             — health check
+
+Deprecated (backward-compatible aliases):
+    POST /v1/claim           — alias for /v1/queue/claim
+    POST /v1/ack             — alias for /v1/queue/ack
 
 Authentication:
     When a TokenStore is configured, all /v1/* endpoints (except
@@ -449,6 +456,20 @@ async def _dm_unregistered_warning(bus: Any, channel: str, sender: str) -> str |
     return None
 
 
+async def _handle_queue_status(request: Any, bus: Any) -> dict | tuple:
+    """Handle /v1/queue/status requests."""
+    message_id = (request.query_params.get("message_id") or [None])[0]
+    if not message_id:
+        return {
+            "error": "Bad Request",
+            "message": "Query param 'message_id' required",
+        }, 400
+    result = await asyncio.to_thread(bus.queue_status, message_id)
+    if result is None:
+        return {"error": "Not Found", "message": "Not a queue message"}, 404
+    return {"found": True, "status": result}
+
+
 def _parse_queue_body(request: Any, required_field: str) -> tuple[dict, tuple | None]:
     """Parse JSON body and validate a required field for queue endpoints."""
     try:
@@ -742,12 +763,13 @@ class HttpFrontend:
             return await _handle_registry_lookup(request, bus)
 
     def _setup_queue_routes(self) -> None:
-        """Register queue (claim/ack) routes."""
+        """Register queue (claim/ack/status) routes."""
         bus = self._bus
         assert bus is not None
 
-        @self._app.post("/v1/claim")
-        async def claim(request: Request) -> dict | tuple:
+        # ── Shared handlers ───────────────────────────────────────
+
+        async def _handle_claim(request: Request) -> dict | tuple:
             data, err = _parse_queue_body(request, "channel")
             if err:
                 return err
@@ -763,8 +785,7 @@ class HttpFrontend:
                 return {"claimed": False}
             return {"claimed": True, "result": _claim_result_to_dict(result)}
 
-        @self._app.post("/v1/ack")
-        async def ack(request: Request) -> dict | tuple:
+        async def _handle_ack(request: Request) -> dict | tuple:
             data, err = _parse_queue_body(request, "message_id")
             if err:
                 return err
@@ -776,6 +797,30 @@ class HttpFrontend:
             if result is None:
                 return {"acked": False}
             return {"acked": True, "result": _claim_result_to_dict(result)}
+
+        # ── Canonical paths (/v1/queue/*) ─────────────────────────
+
+        @self._app.post("/v1/queue/claim")
+        async def queue_claim(request: Request) -> dict | tuple:
+            return await _handle_claim(request)
+
+        @self._app.post("/v1/queue/ack")
+        async def queue_ack(request: Request) -> dict | tuple:
+            return await _handle_ack(request)
+
+        @self._app.get("/v1/queue/status")
+        async def queue_status(request: Request) -> dict | tuple:
+            return await _handle_queue_status(request, bus)
+
+        # ── Deprecated aliases (backward compat) ─────────────────
+
+        @self._app.post("/v1/claim")
+        async def claim(request: Request) -> dict | tuple:
+            return await _handle_claim(request)
+
+        @self._app.post("/v1/ack")
+        async def ack(request: Request) -> dict | tuple:
+            return await _handle_ack(request)
 
     def _setup_presence_routes(self) -> None:
         """Register presence (heartbeat / roster) routes."""
