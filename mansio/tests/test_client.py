@@ -41,7 +41,7 @@ class TestLocalTransport:
         msg_id = transport.publish("ch", "sender", "text", "hello")
         assert isinstance(msg_id, str)
         # Verify message landed in bus
-        msgs = bus.poll("ch")
+        msgs = bus.query("ch")
         assert len(msgs) == 1
         assert msgs[0].payload == "hello"
         bus.close()
@@ -86,7 +86,7 @@ class TestLocalTransport:
         bus.publish("ch", "s", "text", "hello")
         transport.close()
         # Bus still works after transport close
-        msgs = bus.poll("ch")
+        msgs = bus.query("ch")
         assert len(msgs) == 1
         bus.close()
 
@@ -210,7 +210,7 @@ class TestMansioClientConstructor:
         client.close()
         # Bus still usable after client close
         bus.publish("ch", "s", "text", "still alive")
-        assert len(bus.poll("ch")) > 0
+        assert len(bus.query("ch")) > 0
         bus.close()
 
     def test_memory_string_creates_bus(self):
@@ -306,7 +306,7 @@ class TestMansioClientLifecycle:
         client.channel_poll("ch")
         client.close()
         # Cursor snapshot should be in system channel
-        cursor_msgs = bus.poll("_system:cursors:test-agent")
+        cursor_msgs = bus.query("_system:cursors:test-agent")
         assert len(cursor_msgs) > 0
         assert cursor_msgs[-1].msg_type == "cursor_snapshot"
         bus.close()
@@ -333,7 +333,7 @@ class TestMansioClientLifecycle:
         client.close()
         # Bus should still work
         bus.publish("ch", "s", "text", "after close")
-        msgs = bus.poll("ch")
+        msgs = bus.query("ch")
         assert any(m.payload == "after close" for m in msgs)
         bus.close()
 
@@ -359,7 +359,7 @@ class TestChannelSend:
         bus = _make_bus()
         client = _make_client(bus)
         client.channel_send("ch", "hello")
-        msgs = bus.poll("ch")
+        msgs = bus.query("ch")
         assert msgs[0].msg_type == "chat"
         client.close()
         bus.close()
@@ -368,7 +368,7 @@ class TestChannelSend:
         bus = _make_bus()
         client = _make_client(bus)
         client.channel_send("ch", "hello", msg_type="notification")
-        msgs = bus.poll("ch")
+        msgs = bus.query("ch")
         assert msgs[0].msg_type == "notification"
         client.close()
         bus.close()
@@ -377,7 +377,7 @@ class TestChannelSend:
         bus = _make_bus()
         client = _make_client(bus)
         client.channel_send("ch", "hello", metadata={"priority": "high"})
-        msgs = bus.poll("ch")
+        msgs = bus.query("ch")
         assert msgs[0].metadata == {"priority": "high"}
         client.close()
         bus.close()
@@ -386,7 +386,7 @@ class TestChannelSend:
         bus = _make_bus()
         client = _make_client(bus, agent_id="my-agent")
         client.channel_send("ch", "hello")
-        msgs = bus.poll("ch")
+        msgs = bus.query("ch")
         assert msgs[0].sender == "my-agent"
         client.close()
         bus.close()
@@ -835,7 +835,7 @@ class TestCursorPersistence:
         client.channel_poll("ch")
         client.close()
         # Verify cursor snapshot exists
-        cursor_msgs = bus.poll("_system:cursors:test-agent")
+        cursor_msgs = bus.query("_system:cursors:test-agent")
         snapshots = [m for m in cursor_msgs if m.msg_type == "cursor_snapshot"]
         assert len(snapshots) > 0
         saved = json.loads(snapshots[-1].payload)
@@ -866,7 +866,7 @@ class TestCursorPersistence:
         client = MansioClient(bus, "test-agent")
         # Don't poll anything, so cursors remain empty
         client.close()
-        cursor_msgs = bus.poll("_system:cursors:test-agent")
+        cursor_msgs = bus.query("_system:cursors:test-agent")
         snapshots = [m for m in cursor_msgs if m.msg_type == "cursor_snapshot"]
         assert len(snapshots) == 0
         bus.close()
@@ -972,7 +972,7 @@ class TestSoftRegistration:
     def test_announce_writes_to_system_agents(self):
         bus = _make_bus()
         client = MansioClient(bus, "test-agent")
-        msgs = bus.poll("_system:agents")
+        msgs = bus.query("_system:agents")
         assert len(msgs) >= 1
         presence_msgs = [m for m in msgs if m.sender == "test-agent"]
         assert len(presence_msgs) >= 1
@@ -983,7 +983,7 @@ class TestSoftRegistration:
     def test_announce_includes_display_name(self):
         bus = _make_bus()
         client = MansioClient(bus, "test-agent", display_name="Test Bot")
-        msgs = bus.poll("_system:agents")
+        msgs = bus.query("_system:agents")
         presence_msgs = [m for m in msgs if m.sender == "test-agent"]
         assert presence_msgs[0].metadata is not None
         assert presence_msgs[0].metadata["display_name"] == "Test Bot"

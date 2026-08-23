@@ -151,7 +151,7 @@ class TestIrcToMansio:
         bot.on_pubmsg(connection, event)
 
         # Verify message was published to bus
-        msgs = bus.poll("tasks")
+        msgs = bus.query("tasks")
         assert len(msgs) == 1
         assert msgs[0].sender == "alice"
         assert msgs[0].payload == "hello world"
@@ -178,7 +178,7 @@ class TestIrcToMansio:
 
         bot.on_pubmsg(connection, event)
 
-        msgs = bus.poll("tasks")
+        msgs = bus.query("tasks")
         assert len(msgs) == 0
 
     def test_pubmsg_ignores_unmapped_channel(self) -> None:
@@ -200,8 +200,8 @@ class TestIrcToMansio:
         bot.on_pubmsg(connection, event)
 
         # Should not publish to any channel
-        assert bus.poll("random") == []
-        assert bus.poll("tasks") == []
+        assert bus.query("random") == []
+        assert bus.query("tasks") == []
 
 
 # ── mansio → IRC Bridging Tests ──────────────────────────────────

@@ -27,12 +27,12 @@ class TestQueuePublish:
 
     def test_regular_publish_not_claimable(self, bus):
         bus.publish("jobs", "admin", "task", "regular msg")
-        result = bus.claim("jobs", "worker-1")
+        result = bus.queue_claim("jobs", "worker-1")
         assert result is None
 
     def test_queue_publish_is_claimable(self, bus):
         bus.publish("jobs", "admin", "task", "queue msg", queue=True)
-        result = bus.claim("jobs", "worker-1")
+        result = bus.queue_claim("jobs", "worker-1")
         assert result is not None
         assert result.message.payload == "queue msg"
 
@@ -41,24 +41,24 @@ class TestClaim:
     def test_claim_returns_oldest_unclaimed(self, bus):
         bus.publish("jobs", "admin", "task", "first", queue=True)
         bus.publish("jobs", "admin", "task", "second", queue=True)
-        r1 = bus.claim("jobs", "worker-1")
+        r1 = bus.queue_claim("jobs", "worker-1")
         assert r1 is not None
         assert r1.message.payload == "first"
-        r2 = bus.claim("jobs", "worker-2")
+        r2 = bus.queue_claim("jobs", "worker-2")
         assert r2 is not None
         assert r2.message.payload == "second"
 
     def test_claim_empty_channel_returns_none(self, bus):
-        assert bus.claim("empty-channel", "worker-1") is None
+        assert bus.queue_claim("empty-channel", "worker-1") is None
 
     def test_claim_all_claimed_returns_none(self, bus):
         bus.publish("jobs", "admin", "task", "only one", queue=True)
-        bus.claim("jobs", "worker-1")
-        assert bus.claim("jobs", "worker-2") is None
+        bus.queue_claim("jobs", "worker-1")
+        assert bus.queue_claim("jobs", "worker-2") is None
 
     def test_claim_result_fields(self, bus):
         bus.publish("jobs", "admin", "task", "payload", queue=True)
-        result = bus.claim("jobs", "worker-1")
+        result = bus.queue_claim("jobs", "worker-1")
         assert isinstance(result, ClaimResult)
         assert isinstance(result.message, Message)
         assert result.status == "claimed"
@@ -67,7 +67,7 @@ class TestClaim:
 
     def test_claim_result_includes_lease_until(self, bus):
         bus.publish("jobs", "admin", "task", "payload", queue=True)
-        result = bus.claim("jobs", "worker-1", lease_seconds=60)
+        result = bus.queue_claim("jobs", "worker-1", lease_seconds=60)
         assert result is not None
         assert result.lease_until is not None
         # lease_until should be a valid ISO timestamp after claimed_at
@@ -80,9 +80,9 @@ class TestClaim:
 
     def test_ack_result_has_no_lease_until(self, bus):
         bus.publish("jobs", "admin", "task", "payload", queue=True)
-        result = bus.claim("jobs", "worker-1")
+        result = bus.queue_claim("jobs", "worker-1")
         assert result is not None
-        acked = bus.ack(result.message.id, "worker-1")
+        acked = bus.queue_ack(result.message.id, "worker-1")
         assert acked is not None
         assert acked.lease_until is None  # ack doesn't set lease
 
@@ -95,7 +95,7 @@ class TestClaim:
 
         def claim_all(worker_id):
             while True:
-                r = bus.claim("jobs", worker_id)
+                r = bus.queue_claim("jobs", worker_id)
                 if r is None:
                     break
                 with lock:
@@ -116,32 +116,32 @@ class TestClaim:
 class TestAck:
     def test_ack_marks_completed(self, bus):
         bus.publish("jobs", "admin", "task", "do it", queue=True)
-        claimed = bus.claim("jobs", "worker-1")
+        claimed = bus.queue_claim("jobs", "worker-1")
         assert claimed is not None
-        acked = bus.ack(claimed.message.id, "worker-1")
+        acked = bus.queue_ack(claimed.message.id, "worker-1")
         assert acked is not None
         assert acked.status == "completed"
 
     def test_ack_wrong_agent_returns_none(self, bus):
         bus.publish("jobs", "admin", "task", "do it", queue=True)
-        claimed = bus.claim("jobs", "worker-1")
+        claimed = bus.queue_claim("jobs", "worker-1")
         assert claimed is not None
-        assert bus.ack(claimed.message.id, "worker-2") is None
+        assert bus.queue_ack(claimed.message.id, "worker-2") is None
 
     def test_ack_unclaimed_returns_none(self, bus):
         bus.publish("jobs", "admin", "task", "unclaimed", queue=True)
-        msgs = bus.poll("jobs")
-        assert bus.ack(msgs[0].id, "worker-1") is None
+        msgs = bus.query("jobs")
+        assert bus.queue_ack(msgs[0].id, "worker-1") is None
 
     def test_ack_nonexistent_returns_none(self, bus):
-        assert bus.ack("nonexistent-id", "worker-1") is None
+        assert bus.queue_ack("nonexistent-id", "worker-1") is None
 
     def test_double_ack_returns_none(self, bus):
         bus.publish("jobs", "admin", "task", "do it", queue=True)
-        claimed = bus.claim("jobs", "worker-1")
+        claimed = bus.queue_claim("jobs", "worker-1")
         assert claimed is not None
-        bus.ack(claimed.message.id, "worker-1")
-        assert bus.ack(claimed.message.id, "worker-1") is None
+        bus.queue_ack(claimed.message.id, "worker-1")
+        assert bus.queue_ack(claimed.message.id, "worker-1") is None
 
 
 class TestQueryBackwardCompat:
@@ -150,12 +150,12 @@ class TestQueryBackwardCompat:
         bus.publish("jobs", "admin", "task", "queued", queue=True)
         bus.publish("jobs", "admin", "task", "claimed-then-done", queue=True)
 
-        bus.claim("jobs", "worker-1")
-        claimed = bus.claim("jobs", "worker-1")
+        bus.queue_claim("jobs", "worker-1")
+        claimed = bus.queue_claim("jobs", "worker-1")
         if claimed:
-            bus.ack(claimed.message.id, "worker-1")
+            bus.queue_ack(claimed.message.id, "worker-1")
 
-        msgs = bus.poll("jobs")
+        msgs = bus.query("jobs")
         assert len(msgs) == 3
 
 
@@ -165,10 +165,10 @@ class TestQueueStats:
         bus.publish("jobs", "admin", "task", "t2", queue=True)
         bus.publish("jobs", "admin", "task", "t3", queue=True)
 
-        claimed = bus.claim("jobs", "worker-1")
+        claimed = bus.queue_claim("jobs", "worker-1")
         assert claimed is not None
-        bus.ack(claimed.message.id, "worker-1")
-        bus.claim("jobs", "worker-2")
+        bus.queue_ack(claimed.message.id, "worker-1")
+        bus.queue_claim("jobs", "worker-2")
 
         stats = bus.backend.queue_stats("jobs")
         assert stats["unclaimed"] == 1
@@ -185,9 +185,9 @@ class TestQueueStats:
 class TestRetireCompleted:
     def test_retire_by_ttl(self, bus):
         bus.publish("jobs", "admin", "task", "old", queue=True)
-        claimed = bus.claim("jobs", "worker-1")
+        claimed = bus.queue_claim("jobs", "worker-1")
         assert claimed is not None
-        bus.ack(claimed.message.id, "worker-1")
+        bus.queue_ack(claimed.message.id, "worker-1")
 
         deleted = bus.backend.queue_retire(max_age_seconds=0)
         assert deleted == 1
@@ -199,9 +199,9 @@ class TestRetireCompleted:
         for i in range(5):
             bus.publish("jobs", "admin", "task", f"t-{i}", queue=True)
         for _ in range(5):
-            c = bus.claim("jobs", "worker-1")
+            c = bus.queue_claim("jobs", "worker-1")
             assert c is not None
-            bus.ack(c.message.id, "worker-1")
+            bus.queue_ack(c.message.id, "worker-1")
 
         deleted = bus.backend.queue_retire(max_age_seconds=999999, max_per_channel=2)
         assert deleted == 3
@@ -220,34 +220,34 @@ class TestRetireCompleted:
 class TestLeaseTimeout:
     def test_expired_lease_reclaimable(self, bus):
         bus.publish("jobs", "admin", "task", "leased", queue=True)
-        r1 = bus.claim("jobs", "worker-1", lease_seconds=0)
+        r1 = bus.queue_claim("jobs", "worker-1", lease_seconds=0)
         assert r1 is not None
         assert r1.claimed_by == "worker-1"
 
-        r2 = bus.claim("jobs", "worker-2", lease_seconds=300)
+        r2 = bus.queue_claim("jobs", "worker-2", lease_seconds=300)
         assert r2 is not None
         assert r2.claimed_by == "worker-2"
         assert r2.message.id == r1.message.id
 
     def test_active_lease_not_reclaimable(self, bus):
         bus.publish("jobs", "admin", "task", "leased", queue=True)
-        bus.claim("jobs", "worker-1", lease_seconds=300)
-        assert bus.claim("jobs", "worker-2") is None
+        bus.queue_claim("jobs", "worker-1", lease_seconds=300)
+        assert bus.queue_claim("jobs", "worker-2") is None
 
     def test_ack_after_lease_expired_still_works(self, bus):
         bus.publish("jobs", "admin", "task", "leased", queue=True)
-        r1 = bus.claim("jobs", "worker-1", lease_seconds=0)
+        r1 = bus.queue_claim("jobs", "worker-1", lease_seconds=0)
         assert r1 is not None
-        acked = bus.ack(r1.message.id, "worker-1")
+        acked = bus.queue_ack(r1.message.id, "worker-1")
         assert acked is not None
         assert acked.status == "completed"
 
     def test_reclaimed_message_original_cant_ack(self, bus):
         bus.publish("jobs", "admin", "task", "leased", queue=True)
-        r1 = bus.claim("jobs", "worker-1", lease_seconds=0)
+        r1 = bus.queue_claim("jobs", "worker-1", lease_seconds=0)
         assert r1 is not None
-        bus.claim("jobs", "worker-2", lease_seconds=300)
-        assert bus.ack(r1.message.id, "worker-1") is None
+        bus.queue_claim("jobs", "worker-2", lease_seconds=300)
+        assert bus.queue_ack(r1.message.id, "worker-1") is None
 
 
 class TestClientQueueAPI:

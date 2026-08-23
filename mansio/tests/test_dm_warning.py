@@ -57,7 +57,7 @@ class TestDMWarningLocal:
             sender.dm_send("phantom", "test payload")
 
         # The message should exist in the DM channel.
-        msgs = bus.poll("dm:alice:phantom", limit=10)
+        msgs = bus.query("dm:alice:phantom", limit=10)
         assert len(msgs) == 1
         assert msgs[0].payload == "test payload"
 

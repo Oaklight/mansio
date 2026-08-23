@@ -40,7 +40,7 @@ class TestConcurrentStoreAndQuery:
         for t in threads:
             t.join()
 
-        msgs = bus.poll("shared", limit=10_000)
+        msgs = bus.query("shared", limit=10_000)
         assert len(msgs) == n_per_thread * n_threads
 
     def test_concurrent_publish_different_channels(self):
@@ -62,7 +62,7 @@ class TestConcurrentStoreAndQuery:
         channels = bus.channels()
         assert len(channels) == n_threads
         for t in range(n_threads):
-            assert len(bus.poll(f"ch-{t}", limit=10_000)) == n_per_thread
+            assert len(bus.query(f"ch-{t}", limit=10_000)) == n_per_thread
 
     def test_concurrent_publish_and_query(self):
         """Readers must not see partial or corrupted state."""
@@ -77,7 +77,7 @@ class TestConcurrentStoreAndQuery:
 
         def reader():
             while not stop.is_set():
-                msgs = bus.poll("data", limit=10_000)
+                msgs = bus.query("data", limit=10_000)
                 ids = [m.id for m in msgs]
                 if len(ids) != len(set(ids)):
                     errors.append("duplicate message ids in poll result")
@@ -93,7 +93,7 @@ class TestConcurrentStoreAndQuery:
             t.join()
 
         assert not errors
-        assert len(bus.poll("data", limit=10_000)) == 500
+        assert len(bus.query("data", limit=10_000)) == 500
 
 
 class TestConcurrentBackendQueryAll:
@@ -291,7 +291,7 @@ class TestConcurrentQueueOps:
 
         def claimer(worker_id: str):
             while True:
-                result = bus.claim("jobs", worker_id)
+                result = bus.queue_claim("jobs", worker_id)
                 if result is None:
                     break
                 with lock:
@@ -319,9 +319,9 @@ class TestConcurrentRetire:
         for i in range(20):
             bus.publish("q", "p", "task", f"old-{i}", queue=True)
         for _ in range(20):
-            r = bus.claim("q", "worker")
+            r = bus.queue_claim("q", "worker")
             if r:
-                bus.ack(r.message.id, "worker")
+                bus.queue_ack(r.message.id, "worker")
 
         stop = threading.Event()
 
@@ -365,7 +365,7 @@ class TestConcurrentMixedOps:
         def querier():
             while not stop.is_set():
                 try:
-                    bus.poll("ch-0", limit=100)
+                    bus.query("ch-0", limit=100)
                     backend.search(limit=100)
                     bus.channels()
                     backend.message_count()
