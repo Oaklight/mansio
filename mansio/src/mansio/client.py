@@ -19,8 +19,10 @@ from mansio.backends import SQLiteBackend
 from mansio.bus import Bus
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mansio.transport import Transport
-    from mansio.types import ClaimResult, Message
+    from mansio.types import AgentPresence, ClaimResult, Message
 
 # agent_id regex: lowercase alphanumeric + hyphens, 3-64 chars,
 # must start and end with alphanumeric
@@ -701,6 +703,79 @@ class MansioClient:
             ClaimResult with status "completed", or None.
         """
         return self._transport.queue_ack(message_id, self._agent_id)
+
+    def queue_status(self, message_id: str) -> dict | None:
+        """Return the queue status for a message.
+
+        Args:
+            message_id: ID of the message to check.
+
+        Returns:
+            Dict with 'status', 'claimed_by', 'claimed_at', etc.,
+            or None if the message has no queue status.
+        """
+        return self._transport.queue_status(message_id)
+
+    # ── Presence ──────────────────────────────────────────────────
+
+    def heartbeat(self, metadata: dict | None = None) -> None:
+        """Send a heartbeat for this agent.
+
+        Args:
+            metadata: Optional extra fields (display_name, capabilities, etc.).
+        """
+        self._transport.heartbeat(self._agent_id, metadata)
+
+    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+        """Return all known agents with computed online/offline status.
+
+        Args:
+            timeout_seconds: Seconds since last heartbeat before an
+                agent is considered offline.
+
+        Returns:
+            List of AgentPresence records sorted by agent_id.
+        """
+        return self._transport.agents(timeout_seconds)
+
+    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
+        """Return presence for a single agent.
+
+        Args:
+            agent_id: Agent to look up.
+            timeout_seconds: Seconds since last heartbeat before an
+                agent is considered offline.
+
+        Returns:
+            AgentPresence record, or None if the agent is unknown.
+        """
+        return self._transport.agent_status(agent_id, timeout_seconds)
+
+    # ── Subscribe / Unsubscribe ───────────────────────────────────
+
+    def subscribe(
+        self,
+        channel: str,
+        callback: Callable[[Message], None],
+    ) -> str:
+        """Subscribe to real-time notifications on a channel.
+
+        Args:
+            channel: Channel to subscribe to.
+            callback: Called with each new Message.
+
+        Returns:
+            Subscription ID for use with :meth:`unsubscribe`.
+        """
+        return self._transport.subscribe(channel, callback)
+
+    def unsubscribe(self, subscription_id: str) -> None:
+        """Remove a subscription.
+
+        Args:
+            subscription_id: ID returned by :meth:`subscribe`.
+        """
+        self._transport.unsubscribe(subscription_id)
 
     # ── Sugar API: Notifications ──────────────────────────────────
 
