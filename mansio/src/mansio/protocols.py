@@ -367,7 +367,7 @@ class MessageBus(Protocol):
         """
         ...
 
-    def poll(
+    def query(
         self,
         channel: str,
         after: str | None = None,
@@ -396,7 +396,7 @@ class MessageBus(Protocol):
         """Register an in-process callback for new messages on a channel.
 
         The callback is invoked synchronously during publish() within the
-        same process. For cross-process notification, use poll() instead.
+        same process. For cross-process notification, use query() instead.
 
         Args:
             channel: Channel to watch.
