@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mansio.backends import SQLiteBackend
-from mansio.protocols import Backend
+from mansio.protocols import Backend, Compactable
 from mansio.serializers import JSONSerializer
 from mansio.types import AgentPresence, ClaimResult, Message
 
@@ -136,15 +136,19 @@ class Bus:
             metadata=metadata,
         )
 
-        self._backend.store(msg, queue=queue)
+        if queue:
+            self._backend.store_queue(msg)
+        else:
+            self._backend.store(msg)
 
         # Auto-compact system channels to prevent unbounded growth.
         # _system:registry — one registration per agent is sufficient.
         # _system:cursors:* — only the latest snapshot matters.
-        if channel == "_system:registry":
-            self._backend.compact(channel, keep_latest_per_sender=True)
-        elif channel.startswith("_system:cursors:"):
-            self._backend.compact(channel, max_messages=1)
+        if isinstance(self._backend, Compactable):
+            if channel == "_system:registry":
+                self._backend.compact(channel, keep_latest_per_sender=True)
+            elif channel.startswith("_system:cursors:"):
+                self._backend.compact(channel, max_messages=1)
 
         # Notify in-process subscribers (snapshot to avoid mutation during iteration)
         for callback in list(self._subs.get(channel, {}).values()):
@@ -221,11 +225,11 @@ class Bus:
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
         """Atomically claim the oldest unclaimed/lease-expired message."""
-        return self._backend.claim(channel, claimed_by, lease_seconds=lease_seconds)
+        return self._backend.queue_claim(channel, claimed_by, lease_seconds=lease_seconds)
 
     def ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
         """Mark a claimed message as completed."""
-        return self._backend.ack(message_id, claimed_by)
+        return self._backend.queue_ack(message_id, claimed_by)
 
     # ── Presence ──────────────────────────────────────────────
 

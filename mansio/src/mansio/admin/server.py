@@ -312,16 +312,16 @@ class AdminServer:
 
         @self._app.get("/api/stats")
         def stats(request: Any) -> dict:
-            s = bus.backend.get_stats()
+            s = bus.backend.stats()
             s["active_subscriptions"] = sum(
-                len(v) for v in self._bus.subscription_counts().values()
+                len(v) for v in bus.subscription_counts().values()
             )
             return s
 
         @self._app.get("/api/stats/throughput")
         def throughput(request: Any) -> dict:
             window = 60
-            timestamps = bus.backend.query_recent_timestamps(window)
+            timestamps = bus.backend.recent_timestamps(window)
             now = datetime.now(timezone.utc)
             buckets = []
             for i in range(window):
@@ -388,7 +388,7 @@ class AdminServer:
             msg_type = (request.query_params.get("msg_type") or [None])[0]
             limit = int((request.query_params.get("limit") or ["100"])[0])
 
-            msgs = bus.backend.query_all(
+            msgs = bus.backend.search(
                 channel=channel, sender=sender, msg_type=msg_type, limit=limit
             )
             return {
@@ -439,11 +439,7 @@ class AdminServer:
                 "backend": {},
                 "tokens": {"configured": 0},
             }
-            get_info = getattr(bus.backend, "get_backend_info", None)
-            if get_info:
-                info["backend"] = get_info()
-            else:
-                info["backend"] = {"type": type(bus.backend).__name__}
+            info["backend"] = bus.backend.info()
             if token_store:
                 info["tokens"]["configured"] = len(token_store.list_tokens())
             return info

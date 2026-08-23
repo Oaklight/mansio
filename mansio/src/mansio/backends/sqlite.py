@@ -11,6 +11,7 @@ from pathlib import Path
 
 from mansio._vendor.retry import retry
 from mansio._vendor.structlog import get_logger
+from mansio.protocols import Backend, Compactable, Presenceable
 from mansio.types import AgentPresence, ClaimResult, Message
 
 logger = get_logger(__name__)
@@ -35,7 +36,7 @@ CREATE TABLE IF NOT EXISTS agent_presence (
 """
 
 
-class SQLiteBackend:
+class SQLiteBackend(Backend, Presenceable, Compactable):
     """SQLite-backed message backend.
 
     Supports cross-process sharing via WAL mode.
@@ -50,15 +51,7 @@ class SQLiteBackend:
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        # Set busy_timeout BEFORE any other PRAGMA so subsequent
-        # statements wait for locks instead of failing immediately.
         self._conn.execute("PRAGMA busy_timeout=5000")
-        # Switching to WAL journal_mode requires an exclusive lock.
-        # SQLite's busy handler does NOT cover PRAGMA journal_mode
-        # mutations -- the lock contention surfaces as an immediate
-        # OperationalError("database is locked"). Retry with backoff
-        # so multiple processes can cold-start the same DB without
-        # racing each other.
         self._enable_wal()
         self._conn.executescript(_SCHEMA)
         self._ensure_queue_columns()
@@ -94,14 +87,13 @@ class SQLiteBackend:
             "CREATE INDEX IF NOT EXISTS idx_channel_status ON messages (channel, status, id)"
         )
 
-    def store(self, message: Message, *, queue: bool = False) -> None:
-        """Persist a message to SQLite.
+    def store(self, message: Message) -> None:
+        """Persist a regular message to SQLite.
 
         Args:
             message: Message to store.
         """
         meta_json = json.dumps(message.metadata) if message.metadata else None
-        status = "unclaimed" if queue else None
         with self._lock:
             self._conn.execute(
                 "INSERT INTO messages "
@@ -115,7 +107,32 @@ class SQLiteBackend:
                     message.payload,
                     message.timestamp,
                     meta_json,
-                    status,
+                    None,
+                ),
+            )
+            self._conn.commit()
+
+    def store_queue(self, message: Message) -> None:
+        """Persist a message as a claimable queue item.
+
+        Args:
+            message: Message to store as a queue item.
+        """
+        meta_json = json.dumps(message.metadata) if message.metadata else None
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO messages "
+                "(id, channel, sender, msg_type, payload, timestamp, metadata, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    message.id,
+                    message.channel,
+                    message.sender,
+                    message.msg_type,
+                    message.payload,
+                    message.timestamp,
+                    meta_json,
+                    "unclaimed",
                 ),
             )
             self._conn.commit()
@@ -168,7 +185,7 @@ class SQLiteBackend:
         """Close the SQLite database connection."""
         self._conn.close()
 
-    def count_messages(self, channel: str | None = None) -> int:
+    def message_count(self, channel: str | None = None) -> int:
         """Count messages, optionally filtered by channel.
 
         Args:
@@ -186,7 +203,7 @@ class SQLiteBackend:
                 row = self._conn.execute("SELECT COUNT(*) FROM messages").fetchone()
             return row[0]
 
-    def query_all(
+    def search(
         self,
         after: str | None = None,
         limit: int = 100,
@@ -230,7 +247,7 @@ class SQLiteBackend:
             )
             return [self._row_to_message(row) for row in cursor.fetchall()]
 
-    def get_stats(self) -> dict:
+    def stats(self) -> dict:
         """Return aggregate statistics for admin dashboard.
 
         Returns:
@@ -275,7 +292,7 @@ class SQLiteBackend:
                 "msg_type_distribution": types,
             }
 
-    def query_recent_timestamps(self, seconds: int = 60) -> list[str]:
+    def recent_timestamps(self, seconds: int = 60) -> list[str]:
         """Return timestamps of messages from the last N seconds.
 
         Args:
@@ -314,7 +331,7 @@ class SQLiteBackend:
             metadata=metadata,
         )
 
-    def claim(
+    def queue_claim(
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
         now = datetime.now(timezone.utc)
@@ -344,7 +361,7 @@ class SQLiteBackend:
                 lease_until=lease_until,
             )
 
-    def ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
+    def queue_ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
         with self._lock:
             cursor = self._conn.execute(
                 "UPDATE messages SET status = 'completed' "
@@ -363,7 +380,23 @@ class SQLiteBackend:
                 claimed_at=row["claimed_at"],
             )
 
-    def get_queue_stats(self, channel: str | None = None) -> dict:
+    def queue_status(self, message_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT status, claimed_by, claimed_at, lease_until "
+                "FROM messages WHERE id = ? AND status IS NOT NULL",
+                (message_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return {
+                "status": row["status"],
+                "claimed_by": row["claimed_by"],
+                "claimed_at": row["claimed_at"],
+                "lease_until": row["lease_until"],
+            }
+
+    def queue_stats(self, channel: str | None = None) -> dict:
         with self._lock:
             if channel:
                 rows = self._conn.execute(
@@ -382,7 +415,7 @@ class SQLiteBackend:
                 result[row[0]] = row[1]
         return result
 
-    def retire_completed(self, max_age_seconds: int = 86400, max_per_channel: int = 1000) -> int:
+    def queue_retire(self, max_age_seconds: int = 86400, max_per_channel: int = 1000) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)).isoformat()
         with self._lock:
             cur = self._conn.execute(
@@ -407,39 +440,38 @@ class SQLiteBackend:
             self._conn.commit()
         return deleted
 
-    def get_backend_info(self) -> dict:
+    def info(self) -> dict:
         """Return backend type, config, and usage info."""
         import os
 
-        info: dict = {
+        info_dict: dict = {
             "type": "sqlite",
             "db_path": self._db_path,
             "journal_mode": "WAL",
         }
         with self._lock:
-            info["total_messages"] = self._conn.execute("SELECT COUNT(*) FROM messages").fetchone()[
-                0
-            ]
-            info["total_channels"] = self._conn.execute(
+            info_dict["total_messages"] = self._conn.execute(
+                "SELECT COUNT(*) FROM messages"
+            ).fetchone()[0]
+            info_dict["total_channels"] = self._conn.execute(
                 "SELECT COUNT(DISTINCT channel) FROM messages"
             ).fetchone()[0]
-            # SQLite page info
             page_count = self._conn.execute("PRAGMA page_count").fetchone()[0]
             page_size = self._conn.execute("PRAGMA page_size").fetchone()[0]
-            info["db_size_bytes"] = page_count * page_size
-            info["db_size_mb"] = round(page_count * page_size / (1024 * 1024), 2)
+            info_dict["db_size_bytes"] = page_count * page_size
+            info_dict["db_size_mb"] = round(page_count * page_size / (1024 * 1024), 2)
             freelist = self._conn.execute("PRAGMA freelist_count").fetchone()[0]
-            info["freelist_pages"] = freelist
+            info_dict["freelist_pages"] = freelist
 
         if self._db_path != ":memory:" and os.path.exists(self._db_path):
-            info["file_size_bytes"] = os.path.getsize(self._db_path)
-            info["file_size_mb"] = round(os.path.getsize(self._db_path) / (1024 * 1024), 2)
+            info_dict["file_size_bytes"] = os.path.getsize(self._db_path)
+            info_dict["file_size_mb"] = round(os.path.getsize(self._db_path) / (1024 * 1024), 2)
             wal_path = self._db_path + "-wal"
             if os.path.exists(wal_path):
-                info["wal_size_bytes"] = os.path.getsize(wal_path)
-                info["wal_size_mb"] = round(os.path.getsize(wal_path) / (1024 * 1024), 2)
+                info_dict["wal_size_bytes"] = os.path.getsize(wal_path)
+                info_dict["wal_size_mb"] = round(os.path.getsize(wal_path) / (1024 * 1024), 2)
 
-        return info
+        return info_dict
 
     # ── Presence ──────────────────────────────────────────────
 
@@ -522,7 +554,6 @@ class SQLiteBackend:
             total_removed = 0
 
             if keep_latest_per_sender:
-                # Delete all but the latest message per sender in this channel.
                 cursor = self._conn.execute(
                     """
                     DELETE FROM messages
@@ -540,7 +571,6 @@ class SQLiteBackend:
                 total_removed += cursor.rowcount
 
             if max_messages is not None:
-                # Keep only the latest max_messages.
                 cursor = self._conn.execute(
                     """
                     DELETE FROM messages
