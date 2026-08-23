@@ -390,7 +390,7 @@ class TestChannelRead:
 class TestChannelPoll:
     """Tests for channel_poll (cursor auto-advances)."""
 
-    def test_poll_returns_new_messages(self):
+    def test_query_returns_new_messages(self):
         bus = _make_bus()
         client = _make_client(bus)
         client.channel_send("ch", "msg1")
@@ -400,7 +400,7 @@ class TestChannelPoll:
         client.close()
         bus.close()
 
-    def test_poll_advances_cursor(self):
+    def test_query_advances_cursor(self):
         """Second poll returns empty if no new messages."""
         bus = _make_bus()
         client = _make_client(bus)
@@ -411,7 +411,7 @@ class TestChannelPoll:
         client.close()
         bus.close()
 
-    def test_poll_incremental(self):
+    def test_query_incremental(self):
         """Send more after first poll, second poll returns only new."""
         bus = _make_bus()
         client = _make_client(bus)
@@ -424,7 +424,7 @@ class TestChannelPoll:
         client.close()
         bus.close()
 
-    def test_poll_empty_channel(self):
+    def test_query_empty_channel(self):
         bus = _make_bus()
         client = _make_client(bus)
         msgs = client.channel_poll("nonexistent")

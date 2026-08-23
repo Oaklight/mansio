@@ -70,7 +70,7 @@ Mansio 采用分层架构，灵感来自消息中间件，针对 AI 智能体工
 |------|------|------|
 | **存储层** | `Backend` 协议 | 持久化或临时消息存储（`SQLiteBackend`、`MemoryBackend`） |
 | **路由层** | `Bus` | 通道管理、发布/订阅分发、UUID 生成、输入验证、访问控制 |
-| **传输层** | `Transport` 协议 | 本地 vs 远程总线访问的抽象（`LocalTransport`） |
+| **传输层** | `Transport` 协议 | 本地 vs 远程总线访问的抽象（Bus directly satisfies Transport） |
 | **智能体 API** | `MansioClient` | 身份、游标、认证、语义化消息 API |
 | **前端层** | `Frontend` 协议 | 网络服务层（REST + SSE），挂载到 Bus（`HttpFrontend`、`MansioServer`） |
 | **管理层** | `AdminServer` | HTTP 仪表板 + REST API 监控 |

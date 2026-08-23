@@ -61,9 +61,9 @@ Mansio 是一个面向 LLM/Agent 的消息中枢系统，为多智能体协作�
 ```
 MansioClient(target)
   │
-  ├── target = Bus 对象 → LocalTransport → Bus → Backend
-  ├── target = "mansio.db"  → 自建 Bus(SQLiteBackend) → LocalTransport
-  ├── target = "redis://..." → 自建 Bus(RedisBackend) → LocalTransport
+  ├── target = Bus 对象 → Bus → Backend
+  ├── target = "mansio.db"  → 自建 Bus(SQLiteBackend)
+  ├── target = "redis://..." → 自建 Bus(RedisBackend)
   └── target = "http://..."  → HttpTransport → HttpFrontend → Bus → Backend
                                                 (通过 MansioServer)
 ```
@@ -121,7 +121,7 @@ class Backend(Protocol):
         """按 channel 查询消息，支持基于 ID 的 cursor 分页。"""
         ...
 
-    def list_channels(self) -> list[str]:
+    def channels(self) -> list[str]:
         """列出所有有消息的 channel。"""
         ...
 
@@ -170,7 +170,7 @@ class MyBackend:
     def __init__(self, connection_url: str): ...
     def store(self, message: Message) -> None: ...
     def query(self, channel, after=None, limit=100) -> list[Message]: ...
-    def list_channels(self) -> list[str]: ...
+    def channels(self) -> list[str]: ...
     def close(self) -> None: ...
 
 # 使用
@@ -265,9 +265,9 @@ client = MansioClient("http://mansio:8741", "coder-1", secret="sk-xxx")
 ```
 target 类型                → Transport         → Bus 生命周期
 ───────────────────────────────────────────────────────────────
-Bus 对象                   → LocalTransport    → 调用方管理
-文件路径 / :memory:        → LocalTransport    → Client 自建自管
-redis:// / amqp://         → LocalTransport    → Client 自建自管
+Bus 对象                   → Bus            → 调用方管理
+文件路径 / :memory:        → Bus            → Client 自建自管
+redis:// / amqp://         → Bus            → Client 自建自管
 http:// / https://         → RemoteTransport   → 远程 Server 管理
 ```
 

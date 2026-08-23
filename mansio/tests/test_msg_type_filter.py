@@ -12,7 +12,7 @@ class TestMsgTypeFilterMemoryBackend:
     def _make_bus(self) -> Bus:
         return Bus(backend=MemoryBackend())
 
-    def test_poll_with_msg_type_returns_matching(self):
+    def test_query_with_msg_type_returns_matching(self):
         bus = self._make_bus()
         bus.publish("ch", "alice", "chat", "hi")
         bus.publish("ch", "alice", "task", "do stuff")
@@ -23,7 +23,7 @@ class TestMsgTypeFilterMemoryBackend:
         assert msgs[0].msg_type == "task"
         assert msgs[0].payload == "do stuff"
 
-    def test_poll_without_msg_type_returns_all(self):
+    def test_query_without_msg_type_returns_all(self):
         bus = self._make_bus()
         bus.publish("ch", "alice", "chat", "hi")
         bus.publish("ch", "alice", "task", "do stuff")
@@ -32,7 +32,7 @@ class TestMsgTypeFilterMemoryBackend:
         msgs = bus.query("ch")
         assert len(msgs) == 3
 
-    def test_poll_with_nonexistent_msg_type_returns_empty(self):
+    def test_query_with_nonexistent_msg_type_returns_empty(self):
         bus = self._make_bus()
         bus.publish("ch", "alice", "chat", "hi")
         bus.publish("ch", "alice", "task", "do stuff")
@@ -40,7 +40,7 @@ class TestMsgTypeFilterMemoryBackend:
         msgs = bus.query("ch", msg_type="nonexistent")
         assert msgs == []
 
-    def test_poll_msg_type_combined_with_after(self):
+    def test_query_msg_type_combined_with_after(self):
         bus = self._make_bus()
         id1 = bus.publish("ch", "alice", "task", "first task")
         bus.publish("ch", "alice", "chat", "hello")
@@ -57,7 +57,7 @@ class TestMsgTypeFilterSQLiteBackend:
     def _make_bus(self) -> Bus:
         return Bus(backend=SQLiteBackend(":memory:"))
 
-    def test_poll_with_msg_type_returns_matching(self):
+    def test_query_with_msg_type_returns_matching(self):
         bus = self._make_bus()
         bus.publish("ch", "alice", "chat", "hi")
         bus.publish("ch", "alice", "task", "do stuff")
@@ -68,7 +68,7 @@ class TestMsgTypeFilterSQLiteBackend:
         assert msgs[0].msg_type == "task"
         assert msgs[0].payload == "do stuff"
 
-    def test_poll_without_msg_type_returns_all(self):
+    def test_query_without_msg_type_returns_all(self):
         bus = self._make_bus()
         bus.publish("ch", "alice", "chat", "hi")
         bus.publish("ch", "alice", "task", "do stuff")
@@ -77,7 +77,7 @@ class TestMsgTypeFilterSQLiteBackend:
         msgs = bus.query("ch")
         assert len(msgs) == 3
 
-    def test_poll_with_nonexistent_msg_type_returns_empty(self):
+    def test_query_with_nonexistent_msg_type_returns_empty(self):
         bus = self._make_bus()
         bus.publish("ch", "alice", "chat", "hi")
         bus.publish("ch", "alice", "task", "do stuff")
@@ -85,7 +85,7 @@ class TestMsgTypeFilterSQLiteBackend:
         msgs = bus.query("ch", msg_type="nonexistent")
         assert msgs == []
 
-    def test_poll_msg_type_combined_with_after(self):
+    def test_query_msg_type_combined_with_after(self):
         bus = self._make_bus()
         id1 = bus.publish("ch", "alice", "task", "first task")
         bus.publish("ch", "alice", "chat", "hello")

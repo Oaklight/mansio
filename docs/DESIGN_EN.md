@@ -65,9 +65,9 @@ Each layer depends only on the Protocol interface of the layer below, never on c
 ```
 MansioClient(target)
   │
-  ├── target = Bus object  → LocalTransport → Bus → Backend
-  ├── target = "mansio.db" → auto-create Bus(SQLiteBackend) → LocalTransport
-  ├── target = "redis://…" → auto-create Bus(RedisBackend) → LocalTransport
+  ├── target = Bus object  → Bus → Backend
+  ├── target = "mansio.db" → auto-create Bus(SQLiteBackend)
+  ├── target = "redis://…" → auto-create Bus(RedisBackend)
   └── target = "http://…"  → HttpTransport → HttpFrontend → Bus → Backend
                                                (via MansioServer)
 ```
@@ -125,7 +125,7 @@ class Backend(Protocol):
         """Query messages by channel with cursor-based pagination."""
         ...
 
-    def list_channels(self) -> list[str]:
+    def channels(self) -> list[str]:
         """List all channels that contain messages."""
         ...
 
@@ -174,7 +174,7 @@ class MyBackend:
     def __init__(self, connection_url: str): ...
     def store(self, message: Message) -> None: ...
     def query(self, channel, after=None, limit=100) -> list[Message]: ...
-    def list_channels(self) -> list[str]: ...
+    def channels(self) -> list[str]: ...
     def close(self) -> None: ...
 
 # Usage
@@ -264,9 +264,9 @@ Internal routing via Transport abstraction:
 ```
 Target Type                → Transport         → Bus Lifecycle
 ───────────────────────────────────────────────────────────────
-Bus object                 → LocalTransport    → Caller manages
-File path / :memory:       → LocalTransport    → Client creates & manages
-redis:// / amqp://         → LocalTransport    → Client creates & manages
+Bus object                 → Bus            → Caller manages
+File path / :memory:       → Bus            → Client creates & manages
+redis:// / amqp://         → Bus            → Client creates & manages
 http:// / https://         → RemoteTransport   → Remote Server manages
 ```
 

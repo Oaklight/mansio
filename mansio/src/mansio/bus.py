@@ -248,17 +248,29 @@ class Bus:
             )
 
     def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
-        """Record a heartbeat for *agent_id*."""
+        """Record a heartbeat for *agent_id*.
+
+        Raises:
+            NotImplementedError: If backend is not Presenceable.
+        """
         self._require_presence()
         self._backend.heartbeat(agent_id, metadata)
 
     def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
-        """Return all known agents with computed online/offline status."""
+        """Return all known agents with computed online/offline status.
+
+        Raises:
+            NotImplementedError: If backend is not Presenceable.
+        """
         self._require_presence()
         return self._backend.agents(timeout_seconds)
 
     def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
-        """Return presence for a single agent, or ``None`` if unknown."""
+        """Return presence for a single agent, or ``None`` if unknown.
+
+        Raises:
+            NotImplementedError: If backend is not Presenceable.
+        """
         self._require_presence()
         return self._backend.agent_status(agent_id, timeout_seconds)
 
