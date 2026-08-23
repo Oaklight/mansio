@@ -457,7 +457,7 @@ def _cmd_client_channels(args: argparse.Namespace) -> None:
     from mansio.transport_http import HttpTransport
 
     transport = HttpTransport(args.server, agent_id=args.agent, token=args.api_token)
-    for ch in transport.list_channels():
+    for ch in transport.channels():
         print(ch)
     transport.close()
 

@@ -80,13 +80,13 @@ class TestHttpTransport:
 
         transport.close()
 
-    def test_list_channels(self, server_url: str) -> None:
+    def test_channels(self, server_url: str) -> None:
         transport = HttpTransport(server_url, agent_id="test-agent")
 
         transport.publish("alpha", "a", "chat", "x")
         transport.publish("beta", "a", "chat", "y")
 
-        channels = transport.list_channels()
+        channels = transport.channels()
         assert "alpha" in channels
         assert "beta" in channels
 

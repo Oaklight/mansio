@@ -150,7 +150,7 @@ class MansioClient:
         return msgs
 
     def channel_list(self) -> list[str]:
-        return self._transport.list_channels()
+        return self._transport.channels()
 
     # ── DM ────────────────────────────────────────────────────────
 
@@ -253,9 +253,9 @@ class MansioClient:
     def queue_claim(
         self, channel: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
-        return self._transport.claim(
+        return self._transport.queue_claim(
             channel, self._agent_id, lease_seconds=lease_seconds
         )
 
     def queue_ack(self, message_id: str) -> ClaimResult | None:
-        return self._transport.ack(message_id, self._agent_id)
+        return self._transport.queue_ack(message_id, self._agent_id)

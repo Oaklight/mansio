@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 
 from mansio.backends import SQLiteBackend
 from mansio.bus import Bus
-from mansio.transport import LocalTransport
 
 if TYPE_CHECKING:
     from mansio.transport import Transport
@@ -133,7 +132,7 @@ class MansioClient:
             TypeError: For unsupported target types.
         """
         if isinstance(target, Bus):
-            return LocalTransport(target), target, False
+            return target, target, False
 
         if not isinstance(target, str):
             raise TypeError(f"target must be Bus or str, got {type(target).__name__}")
@@ -152,7 +151,7 @@ class MansioClient:
         # File path or :memory: -> auto-create Bus with SQLiteBackend
         db_path: str | Path = target if target == ":memory:" else Path(target)
         bus = Bus(backend=SQLiteBackend(db_path))
-        return LocalTransport(bus), bus, True
+        return bus, bus, True
 
     # ── Authentication ────────────────────────────────────────────
 
@@ -428,7 +427,7 @@ class MansioClient:
         Returns:
             Sorted list of channel names.
         """
-        return self._transport.list_channels()
+        return self._transport.channels()
 
     # ── Sugar API: Notes ──────────────────────────────────────────
 
@@ -594,17 +593,19 @@ class MansioClient:
         Returns:
             The message ID.
         """
-        # Warn when the recipient has never been seen (local transport only;
-        # the HTTP server returns a warning field in the response).
-        if isinstance(self._transport, LocalTransport):
-            bus = self._transport._bus  # noqa: SLF001
-            if bus.agent_status(to_agent) is None:
+        # Best-effort warning when the recipient has never been seen.
+        # Failures (backend lacks presence, server error, etc.) are
+        # silently ignored — a presence check must never block sending.
+        try:
+            if self._transport.agent_status(to_agent) is None:
                 warnings.warn(
                     f"target agent '{to_agent}' is not registered; "
                     f"message stored but may never be read",
                     UserWarning,
                     stacklevel=2,
                 )
+        except Exception:  # noqa: BLE001
+            pass
         channel = self._dm_channel(self._agent_id, to_agent)
         return self.channel_send(channel, content, msg_type="chat")
 
@@ -688,7 +689,7 @@ class MansioClient:
         Returns:
             ClaimResult with the claimed message, or None if empty.
         """
-        return self._transport.claim(channel, self._agent_id, lease_seconds=lease_seconds)
+        return self._transport.queue_claim(channel, self._agent_id, lease_seconds=lease_seconds)
 
     def queue_ack(self, message_id: str) -> ClaimResult | None:
         """Acknowledge a claimed message as completed.
@@ -699,7 +700,7 @@ class MansioClient:
         Returns:
             ClaimResult with status "completed", or None.
         """
-        return self._transport.ack(message_id, self._agent_id)
+        return self._transport.queue_ack(message_id, self._agent_id)
 
     # ── Sugar API: Notifications ──────────────────────────────────
 
