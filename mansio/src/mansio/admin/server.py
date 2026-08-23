@@ -155,17 +155,6 @@ class AdminServer:
             password=self._auth.password if self._auth else None,
         )
 
-    def subscription_counts(self) -> dict[str, list[str]]:
-        """Return subscription IDs grouped by channel.
-
-        Admin-only diagnostic. Reads from the Bus's internal
-        subscription map.
-
-        Returns:
-            Mapping of channel name to list of subscription IDs.
-        """
-        return {channel: list(subs.keys()) for channel, subs in self._bus._subs.items() if subs}
-
     @staticmethod
     def find_available_port(host: str, start_port: int) -> int:
         """Find an available port starting from start_port."""
@@ -320,13 +309,12 @@ class AdminServer:
     def _setup_dashboard_routes(self) -> None:
         """Stats and throughput routes."""
         bus = self._bus
-        admin_self = self
 
         @self._app.get("/api/stats")
         def stats(request: Any) -> dict:
             s = bus.backend.get_stats()
             s["active_subscriptions"] = sum(
-                len(v) for v in admin_self.subscription_counts().values()
+                len(v) for v in self._bus.subscription_counts().values()
             )
             return s
 
@@ -350,12 +338,11 @@ class AdminServer:
     def _setup_channel_routes(self) -> None:
         """Channel listing and detail routes."""
         bus = self._bus
-        admin_self = self
 
         @self._app.get("/api/channels")
         def channels(request: Any) -> dict:
             result = []
-            sub_counts = admin_self.subscription_counts()
+            sub_counts = self._bus.subscription_counts()
             for ch_name in bus.channels():
                 msgs = bus.poll(ch_name, limit=1000)
                 senders = {m.sender for m in msgs}
@@ -427,11 +414,10 @@ class AdminServer:
 
     def _setup_subscription_routes(self) -> None:
         """Subscription listing route."""
-        admin_self = self
 
         @self._app.get("/api/subscriptions")
         def subscriptions(request: Any) -> dict:
-            counts = admin_self.subscription_counts()
+            counts = self._bus.subscription_counts()
             ch_list = [
                 {"channel": ch, "subscription_ids": ids, "count": len(ids)}
                 for ch, ids in counts.items()
