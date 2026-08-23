@@ -17,7 +17,7 @@ API Endpoints:
 
 Authentication:
     When a TokenStore is configured, all /v1/* endpoints (except
-    /health and /v1/auth/check) require ``Authorization: Bearer pzt-...``.
+    /health and /v1/auth/check) require ``Authorization: Bearer mst-...``.
     The token is validated server-side, and the sender field in publish
     requests must match the token's agent_id. Supertokens (agent_id=NULL)
     bypass sender checks.

@@ -6,12 +6,30 @@ import argparse
 import json
 import os
 import sys
+import warnings
 
 from mansio_client import MansioClient, __version__
 
+_LEGACY_ENV_MAP = {
+    "MANSIO_URL": "PIAZZA_URL",
+    "MANSIO_AGENT_ID": "PIAZZA_AGENT_ID",
+    "MANSIO_TOKEN": "PIAZZA_TOKEN",
+}
+
 
 def _env_or(name: str, default: str | None = None) -> str | None:
-    return os.environ.get(name, default)
+    val = os.environ.get(name)
+    if val is not None:
+        return val
+    legacy = _LEGACY_ENV_MAP.get(name)
+    if legacy and (legacy_val := os.environ.get(legacy)):
+        warnings.warn(
+            f"{legacy} is deprecated, use {name} instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return legacy_val
+    return default
 
 
 def _build_parser() -> argparse.ArgumentParser:

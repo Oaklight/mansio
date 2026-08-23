@@ -41,7 +41,7 @@ class HttpTransport:
             ``"https://mansio.example.com"``.
         agent_id: Agent identifier for SSE subscriptions.
         timeout: HTTP request timeout in seconds.
-        token: Optional Bearer token for API authentication (``pzt-...``).
+        token: Optional Bearer token for API authentication (``mst-...``).
     """
 
     def __init__(
