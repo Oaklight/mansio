@@ -6,7 +6,6 @@ from typing import Any
 import pytest
 
 from mansio import Bus, MansioClient, MemoryBackend
-from mansio.transport import LocalTransport
 
 # ── Helpers ───────────────────────────────────────────────────────
 
@@ -25,78 +24,6 @@ def _make_client(
     if bus is None:
         bus = _make_bus()
     return MansioClient(bus, agent_id, **kwargs)
-
-
-# ──────────────────────────────────────────────────────────────────
-# Transport
-# ──────────────────────────────────────────────────────────────────
-
-
-class TestLocalTransport:
-    """Tests for LocalTransport."""
-
-    def test_publish_delegates_to_bus(self):
-        bus = _make_bus()
-        transport = LocalTransport(bus)
-        msg_id = transport.publish("ch", "sender", "text", "hello")
-        assert isinstance(msg_id, str)
-        # Verify message landed in bus
-        msgs = bus.query("ch")
-        assert len(msgs) == 1
-        assert msgs[0].payload == "hello"
-        bus.close()
-
-    def test_query_delegates_to_bus(self):
-        bus = _make_bus()
-        transport = LocalTransport(bus)
-        bus.publish("ch", "s", "text", "msg1")
-        bus.publish("ch", "s", "text", "msg2")
-        msgs = transport.query("ch", limit=10)
-        assert len(msgs) == 2
-        assert msgs[0].payload == "msg1"
-        bus.close()
-
-    def test_list_channels_delegates(self):
-        bus = _make_bus()
-        transport = LocalTransport(bus)
-        assert transport.list_channels() == []
-        bus.publish("alpha", "s", "text", "x")
-        bus.publish("beta", "s", "text", "y")
-        channels = transport.list_channels()
-        assert "alpha" in channels
-        assert "beta" in channels
-        bus.close()
-
-    def test_require_auth_false_by_default(self):
-        bus = _make_bus()
-        transport = LocalTransport(bus)
-        assert transport.require_auth is False
-        bus.close()
-
-    def test_require_auth_true(self):
-        bus = _make_bus(require_auth=True)
-        transport = LocalTransport(bus)
-        assert transport.require_auth is True
-        bus.close()
-
-    def test_close_is_noop(self):
-        """Closing transport does NOT close the bus."""
-        bus = _make_bus()
-        transport = LocalTransport(bus)
-        bus.publish("ch", "s", "text", "hello")
-        transport.close()
-        # Bus still works after transport close
-        msgs = bus.query("ch")
-        assert len(msgs) == 1
-        bus.close()
-
-    def test_repr(self):
-        bus = _make_bus()
-        transport = LocalTransport(bus)
-        r = repr(transport)
-        assert "LocalTransport" in r
-        assert "Bus" in r
-        bus.close()
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -202,11 +129,11 @@ class TestAgentIdValidation:
 class TestMansioClientConstructor:
     """Tests for MansioClient constructor target resolution."""
 
-    def test_bus_object_local_transport(self):
-        """Bus -> LocalTransport, client does NOT own bus."""
+    def test_bus_object_is_transport(self):
+        """Bus satisfies Transport protocol directly, no wrapper needed."""
         bus = _make_bus()
         client = MansioClient(bus, "test-agent")
-        assert isinstance(client.transport, LocalTransport)
+        assert isinstance(client.transport, Bus)
         client.close()
         # Bus still usable after client close
         bus.publish("ch", "s", "text", "still alive")
@@ -216,14 +143,14 @@ class TestMansioClientConstructor:
     def test_memory_string_creates_bus(self):
         """:memory: -> auto-creates Bus, client owns bus."""
         client = MansioClient(":memory:", "test-agent")
-        assert isinstance(client.transport, LocalTransport)
+        assert isinstance(client.transport, Bus)
         client.close()
 
     def test_file_path_creates_bus(self, tmp_path):
         """File path -> auto-creates Bus with SQLiteBackend."""
         db_file = str(tmp_path / "test.db")
         client = MansioClient(db_file, "test-agent")
-        assert isinstance(client.transport, LocalTransport)
+        assert isinstance(client.transport, Bus)
         client.channel_send("ch", "hello")
         client.close()
         # DB file should exist
@@ -278,7 +205,7 @@ class TestMansioClientConstructor:
         client = MansioClient(bus, "test-agent", display_name="My Agent")
         assert client.agent_id == "test-agent"
         assert client.display_name == "My Agent"
-        assert isinstance(client.transport, LocalTransport)
+        assert isinstance(client.transport, Bus)
         client.close()
 
     def test_repr(self):

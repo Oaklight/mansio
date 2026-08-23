@@ -2,6 +2,9 @@
 
 Transport is an internal protocol that decouples MansioClient from
 whether the Bus is in-process or behind a network API.
+
+Bus structurally satisfies this protocol, so no wrapper is needed
+for in-process use.
 """
 
 from __future__ import annotations
@@ -10,8 +13,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from mansio.bus import Bus
-    from mansio.types import ClaimResult, Message
+    from mansio.types import AgentPresence, ClaimResult, Message
 
 
 class Transport(Protocol):
@@ -30,14 +32,23 @@ class Transport(Protocol):
         """Publish a message. Returns message ID."""
         ...
 
-    def claim(
+    def queue_claim(
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
         """Claim the oldest unclaimed/lease-expired message."""
         ...
 
-    def ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
+    def queue_ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
         """Ack a claimed message."""
+        ...
+
+    def queue_status(self, message_id: str) -> dict | None:
+        """Return the queue status dict for a single message.
+
+        Returns:
+            Dict with 'status', 'claimed_by', 'claimed_at', etc.,
+            or None if the message has no queue status.
+        """
         ...
 
     def query(
@@ -45,11 +56,12 @@ class Transport(Protocol):
         channel: str,
         after: str | None = None,
         limit: int = 100,
+        msg_type: str | None = None,
     ) -> list[Message]:
         """Query messages from a channel."""
         ...
 
-    def list_channels(self) -> list[str]:
+    def channels(self) -> list[str]:
         """List all channels with messages."""
         ...
 
@@ -69,11 +81,11 @@ class Transport(Protocol):
         """
         ...
 
-    def unsubscribe(self, sub_id: str) -> None:
+    def unsubscribe(self, subscription_id: str) -> None:
         """Remove a subscription.
 
         Args:
-            sub_id: ID returned by subscribe().
+            subscription_id: ID returned by subscribe().
         """
         ...
 
@@ -86,72 +98,16 @@ class Transport(Protocol):
         """Release resources."""
         ...
 
+    # ── Presence ──────────────────────────────────────────────────
 
-class LocalTransport:
-    """Transport that wraps an in-process Bus object.
+    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *agent_id*."""
+        ...
 
-    Args:
-        bus: The Bus instance to delegate to.
-    """
+    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+        """Return all known agents with computed online/offline status."""
+        ...
 
-    def __init__(self, bus: Bus) -> None:
-        self._bus = bus
-
-    def publish(
-        self,
-        channel: str,
-        sender: str,
-        msg_type: str,
-        payload: str,
-        metadata: dict | None = None,
-        *,
-        queue: bool = False,
-    ) -> str:
-        """Publish via the local bus."""
-        return self._bus.publish(channel, sender, msg_type, payload, metadata, queue=queue)
-
-    def claim(
-        self, channel: str, claimed_by: str, *, lease_seconds: int = 300
-    ) -> ClaimResult | None:
-        """Claim via the local bus."""
-        return self._bus.queue_claim(channel, claimed_by, lease_seconds=lease_seconds)
-
-    def ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
-        """Ack via the local bus."""
-        return self._bus.queue_ack(message_id, claimed_by)
-
-    def query(
-        self,
-        channel: str,
-        after: str | None = None,
-        limit: int = 100,
-    ) -> list[Message]:
-        """Query via the local bus."""
-        return self._bus.query(channel, after=after, limit=limit)
-
-    def list_channels(self) -> list[str]:
-        """List channels via the local bus."""
-        return self._bus.channels()
-
-    @property
-    def require_auth(self) -> bool:
-        """Delegate to bus.require_auth."""
-        return self._bus.require_auth
-
-    def subscribe(
-        self,
-        channel: str,
-        callback: Callable[[Message], None],
-    ) -> str:
-        """Subscribe via the local bus."""
-        return self._bus.subscribe(channel, callback)
-
-    def unsubscribe(self, sub_id: str) -> None:
-        """Unsubscribe via the local bus."""
-        self._bus.unsubscribe(sub_id)
-
-    def close(self) -> None:
-        """No-op -- caller manages bus lifecycle."""
-
-    def __repr__(self) -> str:
-        return f"LocalTransport({self._bus!r})"
+    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
+        """Return presence for a single agent, or ``None`` if unknown."""
+        ...

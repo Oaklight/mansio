@@ -15,7 +15,7 @@ from collections.abc import Callable
 
 from mansio._vendor.httpclient import Client as HttpClient
 from mansio._vendor.sse import SSEClient
-from mansio.types import ClaimResult, Message
+from mansio.types import AgentPresence, ClaimResult, Message
 
 
 class MansioAPIError(Exception):
@@ -106,7 +106,7 @@ class HttpTransport:
         self._check_response(resp)
         return resp.json()["message_id"]
 
-    def claim(
+    def queue_claim(
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
         """Claim the oldest unclaimed/lease-expired message."""
@@ -126,7 +126,7 @@ class HttpTransport:
             claimed_at=r["claimed_at"],
         )
 
-    def ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
+    def queue_ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
         """Acknowledge a claimed message as completed."""
         resp = self._http.post(
             f"{self._base_url}/v1/ack",
@@ -149,18 +149,21 @@ class HttpTransport:
         channel: str,
         after: str | None = None,
         limit: int = 100,
+        msg_type: str | None = None,
     ) -> list[Message]:
         """Query messages from a channel via the remote server."""
         params: dict[str, str] = {"channel": channel, "limit": str(limit)}
         if after:
             params["after"] = after
+        if msg_type:
+            params["msg_type"] = msg_type
 
         url = f"{self._base_url}/v1/query?{urllib.parse.urlencode(params)}"
         resp = self._http.get(url)
         self._check_response(resp)
         return [self._dict_to_msg(m) for m in resp.json().get("messages", [])]
 
-    def list_channels(self) -> list[str]:
+    def channels(self) -> list[str]:
         """List all channels on the remote server."""
         resp = self._http.get(f"{self._base_url}/v1/channels")
         self._check_response(resp)
@@ -174,6 +177,63 @@ class HttpTransport:
             self._check_response(resp)
             self._require_auth = resp.json().get("require_auth", False)
         return self._require_auth
+
+    def queue_status(self, message_id: str) -> dict | None:
+        """Return the queue status dict for a single message.
+
+        Returns:
+            Dict with 'status', 'claimed_by', 'claimed_at', etc.,
+            or None if the message has no queue status.
+        """
+        params = urllib.parse.urlencode({"message_id": message_id})
+        resp = self._http.get(f"{self._base_url}/v1/queue/status?{params}")
+        self._check_response(resp)
+        data = resp.json()
+        if not data.get("found"):
+            return None
+        return data.get("status")
+
+    # ── Presence ──────────────────────────────────────────────────
+
+    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *agent_id*."""
+        body: dict = {"agent_id": agent_id}
+        if metadata:
+            body["metadata"] = metadata
+        resp = self._http.post(f"{self._base_url}/v1/presence/heartbeat", json=body)
+        self._check_response(resp)
+
+    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+        """Return all known agents with computed online/offline status."""
+        params = urllib.parse.urlencode({"timeout": str(timeout_seconds)})
+        resp = self._http.get(f"{self._base_url}/v1/presence?{params}")
+        self._check_response(resp)
+        return [
+            AgentPresence(
+                agent_id=a["agent_id"],
+                status=a["status"],
+                last_seen=a["last_seen"],
+                metadata=a.get("metadata"),
+            )
+            for a in resp.json().get("agents", [])
+        ]
+
+    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
+        """Return presence for a single agent, or ``None`` if unknown."""
+        params = urllib.parse.urlencode({"timeout": str(timeout_seconds)})
+        resp = self._http.get(
+            f"{self._base_url}/v1/presence/{urllib.parse.quote(agent_id, safe='')}?{params}"
+        )
+        if resp.status_code == 404:
+            return None
+        self._check_response(resp)
+        data = resp.json()
+        return AgentPresence(
+            agent_id=data["agent_id"],
+            status=data["status"],
+            last_seen=data["last_seen"],
+            metadata=data.get("metadata"),
+        )
 
     def close(self) -> None:
         """Stop SSE thread and release resources."""
@@ -219,16 +279,16 @@ class HttpTransport:
 
         return sub_id
 
-    def unsubscribe(self, sub_id: str) -> None:
+    def unsubscribe(self, subscription_id: str) -> None:
         """Remove a subscription.
 
         Args:
-            sub_id: ID returned by subscribe().
+            subscription_id: ID returned by subscribe().
         """
         with self._sse_lock:
             for channel, subs in list(self._sse_callbacks.items()):
-                if sub_id in subs:
-                    del subs[sub_id]
+                if subscription_id in subs:
+                    del subs[subscription_id]
                     if not subs:
                         del self._sse_callbacks[channel]
                         self._sse_channels.discard(channel)
