@@ -313,9 +313,7 @@ class AdminServer:
         @self._app.get("/api/stats")
         def stats(request: Any) -> dict:
             s = bus.backend.stats()
-            s["active_subscriptions"] = sum(
-                len(v) for v in bus.subscription_counts().values()
-            )
+            s["active_subscriptions"] = sum(len(v) for v in bus.subscription_counts().values())
             return s
 
         @self._app.get("/api/stats/throughput")
@@ -344,7 +342,7 @@ class AdminServer:
             result = []
             sub_counts = self._bus.subscription_counts()
             for ch_name in bus.channels():
-                msgs = bus.poll(ch_name, limit=1000)
+                msgs = bus.query(ch_name, limit=1000)
                 senders = {m.sender for m in msgs}
                 last_time = msgs[-1].timestamp if msgs else None
                 result.append(
@@ -360,7 +358,7 @@ class AdminServer:
 
         @self._app.get("/api/channels/<name>")
         def channel_detail(request: Any, name: str) -> dict | tuple:
-            msgs = bus.poll(name, limit=1000)
+            msgs = bus.query(name, limit=1000)
             if not msgs:
                 return {"error": "Not Found", "message": f"Channel '{name}' not found"}, 404
             senders = sorted({m.sender for m in msgs})
