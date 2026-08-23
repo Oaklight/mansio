@@ -1,4 +1,4 @@
-# Piazza — agent messaging hub
+# Mansio — agent messaging hub
 #
 # Quick start:
 #   docker compose up -d
@@ -6,8 +6,8 @@
 # The SQLite database is stored under ./data/ on the host.
 
 services:
-  piazza:
-    image: oaklight/piazza
+  mansio:
+    image: oaklight/mansio
     ports:
       - "8741:8741" # Admin panel
       - "8742:8742" # HTTP API (REST + SSE)

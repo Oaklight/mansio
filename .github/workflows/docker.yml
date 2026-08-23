@@ -54,23 +54,23 @@ jobs:
         # The Dockerfile's `COPY dist/ /tmp/dist/` requires the source dir to
         # exist in the build context. In CI we install from PyPI (no local
         # wheel), so create an empty dist/ to make the COPY a harmless no-op.
-        run: mkdir -p piazza/dist
+        run: mkdir -p mansio/dist
 
       - name: Wait for PyPI availability
         run: |
           VERSION="${{ steps.meta.outputs.version }}"
-          echo "Waiting for piazza==$VERSION on PyPI..."
+          echo "Waiting for mansio==$VERSION on PyPI..."
           for i in $(seq 1 45); do
             CODE=$(curl -fsS -o /dev/null -w "%{http_code}" \
-              "https://pypi.org/pypi/piazza/$VERSION/json" || true)
+              "https://pypi.org/pypi/mansio/$VERSION/json" || true)
             if [ "$CODE" = "200" ]; then
-              echo "✅ piazza==$VERSION found on PyPI (attempt $i)"
+              echo "✅ mansio==$VERSION found on PyPI (attempt $i)"
               exit 0
             fi
             echo "  Attempt $i/45: not yet available (HTTP $CODE), waiting 20s..."
             sleep 20
           done
-          echo "❌ piazza==$VERSION not found on PyPI after 15 minutes"
+          echo "❌ mansio==$VERSION not found on PyPI after 15 minutes"
           exit 1
 
       - name: Log in to Docker Hub
@@ -89,7 +89,7 @@ jobs:
           build-args: |
             PACKAGE_VERSION=${{ steps.meta.outputs.version }}
           tags: |
-            oaklight/piazza:${{ steps.meta.outputs.version }}
-            oaklight/piazza:latest
+            oaklight/mansio:${{ steps.meta.outputs.version }}
+            oaklight/mansio:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
