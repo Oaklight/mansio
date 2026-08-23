@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mansio.backends import SQLiteBackend
-from mansio.protocols import Backend, Compactable
+from mansio.protocols import Backend, Compactable, Presenceable
 from mansio.serializers import JSONSerializer
 from mansio.types import AgentPresence, ClaimResult, Message
 
@@ -231,18 +231,27 @@ class Bus:
         """Mark a claimed message as completed."""
         return self._backend.queue_ack(message_id, claimed_by)
 
-    # ── Presence ──────────────────────────────────────────────
+    # ── Presence (optional — Presenceable backends only) ─────
+
+    def _require_presence(self) -> None:
+        if not isinstance(self._backend, Presenceable):
+            raise NotImplementedError(
+                f"{type(self._backend).__name__} does not implement Presenceable"
+            )
 
     def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
         """Record a heartbeat for *agent_id*."""
+        self._require_presence()
         self._backend.heartbeat(agent_id, metadata)
 
     def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
         """Return all known agents with computed online/offline status."""
+        self._require_presence()
         return self._backend.agents(timeout_seconds)
 
     def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
         """Return presence for a single agent, or ``None`` if unknown."""
+        self._require_presence()
         return self._backend.agent_status(agent_id, timeout_seconds)
 
     def close(self) -> None:
