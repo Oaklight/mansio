@@ -8,6 +8,7 @@ from mansio.client import MansioClient
 from mansio.protocols import Backend, Compactable, MessageBus, Presenceable, Serializer
 from mansio.serializers import JSONSerializer
 from mansio.server import MansioServer
+from mansio.system_policy import CompactionPolicy, system_channel_policy
 from mansio.transport_http import HttpTransport, MansioAPIError
 from mansio.types import AgentPresence, ClaimResult, Message
 
@@ -22,6 +23,7 @@ __all__ = [
     "Bus",
     "ClaimResult",
     "Compactable",
+    "CompactionPolicy",
     "HttpTransport",
     "MansioAPIError",
     "JSONSerializer",
@@ -37,4 +39,5 @@ __all__ = [
     "SQLiteStorage",
     "Serializer",
     "StorageBackend",
+    "system_channel_policy",
 ]
