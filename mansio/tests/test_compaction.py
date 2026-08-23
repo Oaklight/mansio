@@ -46,7 +46,7 @@ class TestRegistryCompaction:
                 metadata={"secret_hash": f"hash-{i}", "action": "register"},
             )
 
-        msgs = bus.poll("_system:registry", limit=1000)
+        msgs = bus.query("_system:registry", limit=1000)
         assert len(msgs) == 1
         assert msgs[0].sender == "agent-a"
         # Should be the latest registration.
@@ -64,7 +64,7 @@ class TestRegistryCompaction:
                     metadata={"secret_hash": f"hash-{agent}-{i}"},
                 )
 
-        msgs = bus.poll("_system:registry", limit=1000)
+        msgs = bus.query("_system:registry", limit=1000)
         senders = [m.sender for m in msgs]
         assert sorted(senders) == ["alice", "bob", "carol"]
         for m in msgs:
@@ -75,7 +75,7 @@ class TestRegistryCompaction:
         for i in range(10):
             bus.publish("general", "agent-a", "text", f"msg-{i}")
 
-        msgs = bus.poll("general", limit=1000)
+        msgs = bus.query("general", limit=1000)
         assert len(msgs) == 10
 
 
@@ -88,7 +88,7 @@ class TestCursorCompaction:
         for i in range(10):
             bus.publish(ch, "agent-x", "cursor_snapshot", f'{{"cursor": {i}}}')
 
-        msgs = bus.poll(ch, limit=1000)
+        msgs = bus.query(ch, limit=1000)
         assert len(msgs) == 1
         assert '"cursor": 9' in msgs[0].payload
 
@@ -99,8 +99,8 @@ class TestCursorCompaction:
             for i in range(5):
                 bus.publish(ch, agent, "cursor_snapshot", f'{{"n": {i}}}')
 
-        assert len(bus.poll("_system:cursors:alpha", limit=100)) == 1
-        assert len(bus.poll("_system:cursors:beta", limit=100)) == 1
+        assert len(bus.query("_system:cursors:alpha", limit=100)) == 1
+        assert len(bus.query("_system:cursors:beta", limit=100)) == 1
 
 
 class TestCompactMethodDirect:
@@ -113,7 +113,7 @@ class TestCompactMethodDirect:
 
         removed = backend.compact("test-ch", max_messages=5)
         assert removed == 15
-        msgs = bus.poll("test-ch", limit=100)
+        msgs = bus.query("test-ch", limit=100)
         assert len(msgs) == 5
         # Should keep the latest 5.
         payloads = [m.payload for m in msgs]
@@ -127,7 +127,7 @@ class TestCompactMethodDirect:
 
         removed = backend.compact("ch", keep_latest_per_sender=True)
         assert removed == 12  # 15 total - 3 kept
-        msgs = bus.poll("ch", limit=100)
+        msgs = bus.query("ch", limit=100)
         assert len(msgs) == 3
         senders = {m.sender for m in msgs}
         assert senders == {"a", "b", "c"}
@@ -147,5 +147,5 @@ class TestCompactMethodDirect:
         # Dedup first → 3 msgs, then max_messages=2 → keep latest 2.
         removed = backend.compact("ch", keep_latest_per_sender=True, max_messages=2)
         assert removed == 13  # 15 total - 2 kept
-        msgs = bus.poll("ch", limit=100)
+        msgs = bus.query("ch", limit=100)
         assert len(msgs) == 2

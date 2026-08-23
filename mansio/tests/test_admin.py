@@ -349,7 +349,7 @@ class TestAdminAPI:
         assert result["message_id"]
 
         # Verify message was stored
-        msgs = bus.poll("test")
+        msgs = bus.query("test")
         assert len(msgs) == 1
         assert msgs[0].payload == "hello from admin"
 
