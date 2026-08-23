@@ -1,3 +1,3 @@
-# piazza.types
+# mansio.types
 
-::: piazza.types
+::: mansio.types

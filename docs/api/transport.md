@@ -2,8 +2,8 @@
 
 ## LocalTransport
 
-::: piazza.transport.LocalTransport
+::: mansio.transport.LocalTransport
 
 ## HttpTransport
 
-::: piazza.transport_http.HttpTransport
+::: mansio.transport_http.HttpTransport

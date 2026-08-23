@@ -2,8 +2,8 @@
 
 ## HttpFrontend
 
-::: piazza.frontends.http.HttpFrontend
+::: mansio.frontends.http.HttpFrontend
 
 ## IrcFrontend
 
-::: piazza.frontends.irc.IrcFrontend
+::: mansio.frontends.irc.IrcFrontend

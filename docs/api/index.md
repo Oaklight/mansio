@@ -2,26 +2,26 @@
 
 ## Core
 
-::: piazza.Message
-::: piazza.Bus
-::: piazza.SQLiteBus
+::: mansio.Message
+::: mansio.Bus
+::: mansio.SQLiteBus
 
 ## Protocols
 
-::: piazza.Backend
-::: piazza.Serializer
-::: piazza.MessageBus
+::: mansio.Backend
+::: mansio.Serializer
+::: mansio.MessageBus
 
 ## Backends
 
-::: piazza.SQLiteBackend
-::: piazza.MemoryBackend
-::: piazza.JSONSerializer
+::: mansio.SQLiteBackend
+::: mansio.MemoryBackend
+::: mansio.JSONSerializer
 
 ## Admin
 
-::: piazza.admin.AdminServer
-::: piazza.admin.AdminInfo
+::: mansio.admin.AdminServer
+::: mansio.admin.AdminInfo
 
 ## Deprecated Aliases
 

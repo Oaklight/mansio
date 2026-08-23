@@ -1,10 +1,10 @@
 # Usage Guide
 
-Learn how to use piazza for multi-agent messaging.
+Learn how to use mansio for multi-agent messaging.
 
 ## Architecture
 
-piazza uses a pluggable backend architecture defined by protocols in `piazza.protocols`:
+mansio uses a pluggable backend architecture defined by protocols in `mansio.protocols`:
 
 - **`Backend`** -- handles message transport and persistence (e.g., `SQLiteBackend`, `MemoryBackend`)
 - **`Serializer`** -- encodes/decodes metadata dicts (e.g., `JSONSerializer`)
@@ -13,17 +13,17 @@ piazza uses a pluggable backend architecture defined by protocols in `piazza.pro
 The `Bus` class composes a `Backend` with in-process pub/sub:
 
 ```python
-from piazza import Bus, SQLiteBackend, MemoryBackend
+from mansio import Bus, SQLiteBackend, MemoryBackend
 
 # SQLite-backed (default)
-bus = Bus(backend=SQLiteBackend("workspace/.piazza.db"))
+bus = Bus(backend=SQLiteBackend("workspace/.mansio.db"))
 
 # In-memory for testing
 bus = Bus(backend=MemoryBackend())
 
 # Shorthand for SQLite
-from piazza import SQLiteBus
-bus = SQLiteBus("workspace/.piazza.db")
+from mansio import SQLiteBus
+bus = SQLiteBus("workspace/.mansio.db")
 ```
 
 The `backends/` package ships two implementations:
@@ -35,7 +35,7 @@ The `backends/` package ships two implementations:
 
 ## Admin Panel
 
-piazza includes a built-in admin panel for monitoring your message bus. Start it with:
+mansio includes a built-in admin panel for monitoring your message bus. Start it with:
 
 ```python
 info = bus.start_admin()

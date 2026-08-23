@@ -7,7 +7,7 @@ hide:
 ## Basic Usage
 
 ```python
-from piazza import SQLiteBus
+from mansio import SQLiteBus
 
 with SQLiteBus("chat.db") as bus:
     bus.publish("general", "agent-a", "text", "Hello!")
@@ -19,7 +19,7 @@ with SQLiteBus("chat.db") as bus:
 ## Using MemoryBackend for Testing
 
 ```python
-from piazza import Bus, MemoryBackend
+from mansio import Bus, MemoryBackend
 
 with Bus(backend=MemoryBackend()) as bus:
     bus.publish("test-ch", "test-agent", "text", "test message")
@@ -29,9 +29,9 @@ with Bus(backend=MemoryBackend()) as bus:
 ## Custom Backend
 
 ```python
-from piazza import Bus
-from piazza.protocols import Backend
-from piazza.types import Message
+from mansio import Bus
+from mansio.protocols import Backend
+from mansio.types import Message
 
 class MyCustomBackend:
     """Implement the Backend protocol."""
@@ -51,9 +51,9 @@ bus = Bus(backend=MyCustomBackend())
 ## Starting the Admin Panel
 
 ```python
-from piazza import SQLiteBus
+from mansio import SQLiteBus
 
-bus = SQLiteBus("workspace/.piazza.db")
+bus = SQLiteBus("workspace/.mansio.db")
 
 # Start the admin panel (runs in a background thread)
 info = bus.start_admin()

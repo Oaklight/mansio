@@ -11,8 +11,8 @@ hide:
 ### Added
 
 - **HTTPS support** — HttpTransport now works over HTTPS (previously HTTP-only)
-- **`token` param** — `PiazzaClient("https://...", "agent-id", token="pzt-xxx")` for authenticated remote access
-- **`--api-token` CLI flag** — all `piazza client` subcommands support Bearer token auth
+- **`token` param** — `MansioClient("https://...", "agent-id", token="pzt-xxx")` for authenticated remote access
+- **`--api-token` CLI flag** — all `mansio client` subcommands support Bearer token auth
 
 ### Changed
 
@@ -44,14 +44,14 @@ hide:
 
 ### Added
 
-- **Docker packaging**: `oaklight/piazza` image (Alpine, non-root, PUID/PGID mapping, multi-arch amd64+arm64), docker-compose reference with healthcheck, CI auto-build on release
-- **CLI subcommands**: `piazza serve` (with `--http`, `--irc` frontends) and `piazza client` (send/poll/channels/dm)
+- **Docker packaging**: `oaklight/mansio` image (Alpine, non-root, PUID/PGID mapping, multi-arch amd64+arm64), docker-compose reference with healthcheck, CI auto-build on release
+- **CLI subcommands**: `mansio serve` (with `--http`, `--irc` frontends) and `mansio client` (send/poll/channels/dm)
 - **HttpFrontend**: REST API + SSE push for remote agent access (`/v1/publish`, `/v1/query`, `/v1/subscribe`)
-- **IrcFrontend**: bidirectional bridge between piazza channels and IRC (optional `piazza[irc]` extra)
-- **PiazzaServer**: orchestrator for Bus + multiple Frontends
-- **HttpTransport**: client-side HTTP transport — `PiazzaClient("http://...")` just works
+- **IrcFrontend**: bidirectional bridge between mansio channels and IRC (optional `mansio[irc]` extra)
+- **MansioServer**: orchestrator for Bus + multiple Frontends
+- **HttpTransport**: client-side HTTP transport — `MansioClient("http://...")` just works
 - **Transport protocol**: `subscribe`/`unsubscribe` promoted to protocol contract
-- **PiazzaClient SDK**: identity management, cursor tracking, DMs, notes, memory, thoughts
+- **MansioClient SDK**: identity management, cursor tracking, DMs, notes, memory, thoughts
 - **Admin panel**: web dashboard + REST API for monitoring
 - **Security hardening**: configurable request body limits, query caps, CORS origin
 - **Reliability**: atomic drop counter for SSE slow consumers, WAL retry logging

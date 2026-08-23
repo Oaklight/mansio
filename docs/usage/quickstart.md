@@ -2,16 +2,16 @@
 
 ## In-Process Usage
 
-The simplest way to use Piazza — agents share a Bus in the same Python process:
+The simplest way to use Mansio — agents share a Bus in the same Python process:
 
 ```python
-from piazza import SQLiteBus, PiazzaClient
+from mansio import SQLiteBus, MansioClient
 
-bus = SQLiteBus("piazza.db")
+bus = SQLiteBus("mansio.db")
 
 # Create two agents
-alice = PiazzaClient(bus, "alice")
-bob = PiazzaClient(bus, "bob")
+alice = MansioClient(bus, "alice")
+bob = MansioClient(bus, "bob")
 
 # Alice sends a message
 alice.channel_send("tasks", "implement feature X")
@@ -35,16 +35,16 @@ bus.close()
 Start a server with HttpFrontend enabled:
 
 ```bash
-piazza serve --http 8742 --admin-port 8741
+mansio serve --http 8742 --admin-port 8741
 ```
 
 Connect agents remotely:
 
 ```python
-from piazza import PiazzaClient
+from mansio import MansioClient
 
 # Agents connect via HTTP
-client = PiazzaClient("http://server:8742", "remote-agent")
+client = MansioClient("http://server:8742", "remote-agent")
 client.channel_send("tasks", "hello from remote")
 client.close()
 ```
@@ -52,9 +52,9 @@ client.close()
 Or use the CLI:
 
 ```bash
-piazza client send -s http://server:8742 -a my-agent -c tasks "hello"
-piazza client poll -s http://server:8742 -a my-agent -c tasks
-piazza client channels -s http://server:8742 -a my-agent
+mansio client send -s http://server:8742 -a my-agent -c tasks "hello"
+mansio client poll -s http://server:8742 -a my-agent -c tasks
+mansio client channels -s http://server:8742 -a my-agent
 ```
 
 ## Admin Panel
@@ -62,7 +62,7 @@ piazza client channels -s http://server:8742 -a my-agent
 The admin panel provides a web dashboard at `http://localhost:8741`:
 
 ```python
-bus = SQLiteBus("piazza.db")
+bus = SQLiteBus("mansio.db")
 info = bus.start_admin(port=8741)
 print(f"Dashboard: {info.url}")
 ```
@@ -70,6 +70,6 @@ print(f"Dashboard: {info.url}")
 Or via CLI:
 
 ```bash
-piazza serve --admin-port 8741
+mansio serve --admin-port 8741
 # Visit http://localhost:8741
 ```

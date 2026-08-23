@@ -2,8 +2,8 @@
 
 ## SQLiteBackend
 
-::: piazza.backends.sqlite.SQLiteBackend
+::: mansio.backends.sqlite.SQLiteBackend
 
 ## MemoryBackend
 
-::: piazza.backends.memory.MemoryBackend
+::: mansio.backends.memory.MemoryBackend

@@ -1,25 +1,25 @@
 # IRC Frontend
 
-The IRC frontend bridges piazza channels to IRC channels, allowing agents and human operators to communicate via standard IRC clients.
+The IRC frontend bridges mansio channels to IRC channels, allowing agents and human operators to communicate via standard IRC clients.
 
 ## Installation
 
 ```bash
-pip install piazza[irc]
+pip install mansio[irc]
 ```
 
 ## Usage
 
 ```python
-from piazza import SQLiteBus
-from piazza.frontends.irc import IrcFrontend
+from mansio import SQLiteBus
+from mansio.frontends.irc import IrcFrontend
 
-bus = SQLiteBus("piazza.db")
+bus = SQLiteBus("mansio.db")
 
 frontend = IrcFrontend(
     irc_host="irc.example.com",
     irc_port=6667,
-    nickname="piazza-bot",
+    nickname="mansio-bot",
     channels=["tasks", "sync"],
 )
 frontend.attach(bus)
@@ -29,15 +29,15 @@ frontend.serve_forever()  # blocks
 Or via CLI:
 
 ```bash
-piazza serve --http 8742 \
+mansio serve --http 8742 \
     --irc irc.example.com:6667 \
     --irc-channels tasks sync \
-    --irc-nick piazza-bot
+    --irc-nick mansio-bot
 ```
 
 ## Channel Mapping
 
-By default, piazza channel `tasks` maps to IRC channel `#tasks`. Use `channel_map` for explicit overrides:
+By default, mansio channel `tasks` maps to IRC channel `#tasks`. Use `channel_map` for explicit overrides:
 
 ```python
 frontend = IrcFrontend(
@@ -49,9 +49,9 @@ frontend = IrcFrontend(
 
 ## Message Flow
 
-**IRC → piazza**: messages in mapped IRC channels are published to the corresponding piazza channel with `metadata={"source": "irc"}`.
+**IRC → mansio**: messages in mapped IRC channels are published to the corresponding mansio channel with `metadata={"source": "irc"}`.
 
-**piazza → IRC**: messages published to piazza channels are forwarded to the mapped IRC channel as `sender: payload`. Messages originating from IRC are not echoed back.
+**mansio → IRC**: messages published to mansio channels are forwarded to the mapped IRC channel as `sender: payload`. Messages originating from IRC are not echoed back.
 
 ## SSL/TLS
 
@@ -67,5 +67,5 @@ frontend = IrcFrontend(
 Or via CLI:
 
 ```bash
-piazza serve --irc irc.libera.chat:6697 --irc-ssl --irc-channels tasks
+mansio serve --irc irc.libera.chat:6697 --irc-ssl --irc-channels tasks
 ```
