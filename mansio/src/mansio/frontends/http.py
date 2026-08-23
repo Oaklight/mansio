@@ -428,7 +428,7 @@ async def _handle_registry_lookup(request: Any, bus: Any) -> dict | tuple:
             "message": "Query param 'agent_id' required",
         }, 400
 
-    msgs = await asyncio.to_thread(bus.poll, "_system:registry", limit=1000)
+    msgs = await asyncio.to_thread(bus.query, "_system:registry", limit=1000)
     for m in reversed(msgs):
         if m.sender == agent_id and m.msg_type == "register":
             return {"found": True, "agent_id": agent_id, "metadata": m.metadata}
@@ -703,7 +703,7 @@ class HttpFrontend:
             channel, after, limit = qp["channel"], qp["after"], qp["limit"]
 
             msgs = await asyncio.to_thread(
-                bus.poll, channel, after=after, limit=limit, msg_type=qp.get("msg_type")
+                bus.query, channel, after=after, limit=limit, msg_type=qp.get("msg_type")
             )
 
             auth_result = _auth_result_var.get()
@@ -757,7 +757,7 @@ class HttpFrontend:
 
             lease = int(data.get("lease_seconds", 300))
             result = await asyncio.to_thread(
-                bus.claim, data["channel"], claimed_by, lease_seconds=lease
+                bus.queue_claim, data["channel"], claimed_by, lease_seconds=lease
             )
             if result is None:
                 return {"claimed": False}
@@ -772,7 +772,7 @@ class HttpFrontend:
             if err:
                 return err
 
-            result = await asyncio.to_thread(bus.ack, data["message_id"], claimed_by)
+            result = await asyncio.to_thread(bus.queue_ack, data["message_id"], claimed_by)
             if result is None:
                 return {"acked": False}
             return {"acked": True, "result": _claim_result_to_dict(result)}
