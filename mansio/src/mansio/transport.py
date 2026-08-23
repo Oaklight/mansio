@@ -114,11 +114,11 @@ class LocalTransport:
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
         """Claim via the local bus."""
-        return self._bus.claim(channel, claimed_by, lease_seconds=lease_seconds)
+        return self._bus.queue_claim(channel, claimed_by, lease_seconds=lease_seconds)
 
     def ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
         """Ack via the local bus."""
-        return self._bus.ack(message_id, claimed_by)
+        return self._bus.queue_ack(message_id, claimed_by)
 
     def query(
         self,
@@ -127,7 +127,7 @@ class LocalTransport:
         limit: int = 100,
     ) -> list[Message]:
         """Query via the local bus."""
-        return self._bus.poll(channel, after=after, limit=limit)
+        return self._bus.query(channel, after=after, limit=limit)
 
     def list_channels(self) -> list[str]:
         """List channels via the local bus."""
