@@ -41,7 +41,7 @@ class HttpTransport:
             ``"https://mansio.example.com"``.
         agent_id: Agent identifier for SSE subscriptions.
         timeout: HTTP request timeout in seconds.
-        token: Optional Bearer token for API authentication (``pzt-...``).
+        token: Optional Bearer token for API authentication (``mst-...``).
     """
 
     def __init__(
@@ -113,7 +113,7 @@ class HttpTransport:
         body: dict = {"channel": channel, "claimed_by": claimed_by}
         if lease_seconds != 300:
             body["lease_seconds"] = lease_seconds
-        resp = self._http.post(f"{self._base_url}/v1/claim", json=body)
+        resp = self._http.post(f"{self._base_url}/v1/queue/claim", json=body)
         self._check_response(resp)
         data = resp.json()
         if not data.get("claimed"):
@@ -129,7 +129,7 @@ class HttpTransport:
     def queue_ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
         """Acknowledge a claimed message as completed."""
         resp = self._http.post(
-            f"{self._base_url}/v1/ack",
+            f"{self._base_url}/v1/queue/ack",
             json={"message_id": message_id, "claimed_by": claimed_by},
         )
         self._check_response(resp)

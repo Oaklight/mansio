@@ -4,8 +4,7 @@ Covers:
 - GET  /v1/queue/status — queue status of a message (issue #145)
 - POST /v1/queue/claim  — canonical claim path
 - POST /v1/queue/ack    — canonical ack path
-- POST /v1/claim        — deprecated alias (backward compat)
-- POST /v1/ack          — deprecated alias (backward compat)
+
 """
 
 from __future__ import annotations
@@ -167,43 +166,4 @@ class TestQueueAckNewPath:
         data = resp.json()
         assert data["acked"] is True
         assert data["result"]["status"] == "completed"
-        http.close()
-
-
-class TestDeprecatedAliases:
-    """POST /v1/claim and POST /v1/ack still work (backward compat)."""
-
-    def test_old_claim_path_still_works(self, server_url: str) -> None:
-        http = HttpClient()
-        _publish_queue_msg(http, server_url, channel="old-claim")
-
-        resp = http.post(
-            f"{server_url}/v1/claim",
-            json={"channel": "old-claim", "claimed_by": "worker-1"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["claimed"] is True
-        http.close()
-
-    def test_old_ack_path_still_works(self, server_url: str) -> None:
-        http = HttpClient()
-        _publish_queue_msg(http, server_url, channel="old-ack")
-
-        # Claim via old path
-        resp = http.post(
-            f"{server_url}/v1/claim",
-            json={"channel": "old-ack", "claimed_by": "worker-1"},
-        )
-        assert resp.status_code == 200
-        msg_id = resp.json()["result"]["message"]["id"]
-
-        # Ack via old path
-        resp = http.post(
-            f"{server_url}/v1/ack",
-            json={"message_id": msg_id, "claimed_by": "worker-1"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["acked"] is True
         http.close()

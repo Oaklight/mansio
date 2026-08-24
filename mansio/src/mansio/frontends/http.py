@@ -18,10 +18,6 @@ API Endpoints:
     GET  /v1/registry/lookup — look up agent registration
     GET  /health             — health check
 
-Deprecated (backward-compatible aliases):
-    POST /v1/claim           — alias for /v1/queue/claim
-    POST /v1/ack             — alias for /v1/queue/ack
-
 Authentication:
     When a TokenStore is configured, all /v1/* endpoints (except
     /health and /v1/auth/check) require ``Authorization: Bearer mst-...``.
@@ -811,16 +807,6 @@ class HttpFrontend:
         @self._app.get("/v1/queue/status")
         async def queue_status(request: Request) -> dict | tuple:
             return await _handle_queue_status(request, bus)
-
-        # ── Deprecated aliases (backward compat) ─────────────────
-
-        @self._app.post("/v1/claim")
-        async def claim(request: Request) -> dict | tuple:
-            return await _handle_claim(request)
-
-        @self._app.post("/v1/ack")
-        async def ack(request: Request) -> dict | tuple:
-            return await _handle_ack(request)
 
     def _setup_presence_routes(self) -> None:
         """Register presence (heartbeat / roster) routes."""
