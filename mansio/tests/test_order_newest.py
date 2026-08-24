@@ -213,7 +213,7 @@ class TestHttpFrontendOrder:
         transport.publish("test-order-inv", "agent", "text", "msg")
 
         with pytest.raises(MansioAPIError, match="400"):
-            transport.query("test-order-inv", order="invalid")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+            transport.query("test-order-inv", order="invalid")  # type: ignore[arg-type]
         transport.close()
 
 

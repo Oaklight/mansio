@@ -378,9 +378,11 @@ class MaildirBackend(Backend, Presenceable, Compactable):
             channel: Filter by channel name.
             sender: Filter by sender.
             msg_type: Filter by message type.
+            order: ``"oldest"`` (default) returns from the beginning;
+                ``"newest"`` returns the last *limit* messages.
 
         Returns:
-            Messages in chronological order (oldest first).
+            Messages in chronological order.
         """
         with self._lock:
             if channel:
@@ -398,6 +400,8 @@ class MaildirBackend(Backend, Presenceable, Compactable):
             messages = [m for m in messages if m.sender == sender]
         if msg_type:
             messages = [m for m in messages if m.msg_type == msg_type]
+        if order == "newest":
+            return messages[-limit:]
         return messages[:limit]
 
     def stats(self) -> dict:
