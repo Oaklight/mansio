@@ -8,16 +8,11 @@ from collections import defaultdict
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from mansio.backends import SQLiteBackend
 from mansio.protocols import Backend, Presenceable
-from mansio.serializers import JSONSerializer
 from mansio.system_policy import CompactionPolicy, system_channel_policy
 from mansio.types import AgentPresence, ClaimResult, Message
-
-if TYPE_CHECKING:
-    from mansio.protocols import Serializer
 
 # Thread-safe monotonic sequence for _uuid7 fallback
 _seq_lock = threading.Lock()
@@ -58,14 +53,11 @@ class Bus:
     """Composable message bus.
 
     Combines a Backend for message transport/persistence with
-    in-process pub/sub. The serializer is used for encoding/decoding
-    metadata dicts.
+    in-process pub/sub.
 
     Args:
         backend: Message backend for transport and persistence.
             Defaults to in-memory SQLite.
-        serializer: Serializer for metadata encoding.
-            Defaults to JSON.
         require_auth: If True, MansioClient must authenticate with
             a registered secret. Defaults to False.
         compaction_policy: Callable invoked after each publish with
@@ -73,7 +65,7 @@ class Bus:
             :func:`system_channel_policy`.
 
     Example:
-        >>> bus = Bus()  # in-memory SQLite + JSON
+        >>> bus = Bus()  # in-memory SQLite
         >>> bus = Bus(backend=SQLiteBackend("workspace/.mansio.db"))
         >>> bus = Bus(backend=MemoryBackend())  # pure in-memory for tests
     """
@@ -81,13 +73,11 @@ class Bus:
     def __init__(
         self,
         backend: Backend | None = None,
-        serializer: Serializer | None = None,
         *,
         require_auth: bool = False,
         compaction_policy: CompactionPolicy | None = None,
     ) -> None:
         self._backend = backend or SQLiteBackend()
-        self._serializer = serializer or JSONSerializer()
         self._require_auth = require_auth
         self._compaction_policy = compaction_policy or system_channel_policy
         self._subs: dict[str, dict[str, Callable[[Message], None]]] = defaultdict(dict)
@@ -96,11 +86,6 @@ class Bus:
     def backend(self) -> Backend:
         """The underlying message backend."""
         return self._backend
-
-    @property
-    def serializer(self) -> Serializer:
-        """The serializer used for metadata."""
-        return self._serializer
 
     @property
     def require_auth(self) -> bool:
