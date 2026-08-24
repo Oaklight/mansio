@@ -319,10 +319,8 @@ class MaildirBackend(Backend, Presenceable, Compactable):
         with self._lock:
             channels = []
             self._load_channel_map()
-            for dirname, channel in self._channel_map.items():
-                md_path = self._root / dirname
-                # Check if it has any messages
-                md = mailbox.Maildir(str(md_path), create=False)
+            for _dirname, channel in self._channel_map.items():
+                md = self._get_maildir(channel)
                 if len(md) > 0:
                     channels.append(channel)
             return sorted(channels)
@@ -670,6 +668,8 @@ class MaildirBackend(Backend, Presenceable, Compactable):
                     result[status] += 1
             else:
                 msg_obj = md[key]
+                if msg_obj.get("X-Mansio-Queue") != "true":
+                    continue
                 flags = msg_obj.get_flags()
                 if "S" not in flags and "F" not in flags:
                     result["unclaimed"] += 1
@@ -883,6 +883,7 @@ class MaildirBackend(Backend, Presenceable, Compactable):
         keep_ids: set[str],
         id_to_key: dict[str, str],
         md: mailbox.Maildir,
+        channel: str | None = None,
     ) -> int:
         """Delete messages not in *keep_ids* and flush."""
         removed = 0
@@ -892,6 +893,8 @@ class MaildirBackend(Backend, Presenceable, Compactable):
             key = id_to_key.get(m.id)
             if key:
                 md.discard(key)
+                if channel:
+                    self._remove_claim(channel, key)
                 self._msg_index.pop(m.id, None)
                 removed += 1
         if removed:
@@ -931,7 +934,7 @@ class MaildirBackend(Backend, Presenceable, Compactable):
                 keep_msgs = keep_msgs[-max_messages:]
 
             keep_ids = {m.id for m in keep_msgs}
-            return self._remove_excess(msgs, keep_ids, id_to_key, md)
+            return self._remove_excess(msgs, keep_ids, id_to_key, md, channel)
 
     def __repr__(self) -> str:
         return f"MaildirBackend({str(self._root)!r})"
