@@ -11,7 +11,10 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
+from mansio._vendor.structlog import get_logger
 from mansio.types import AgentPresence, ClaimResult, Message
+
+logger = get_logger(__name__)
 
 
 class Backend(ABC):
@@ -153,6 +156,8 @@ class Backend(ABC):
         Returns:
             Number of messages.
         """
+        # Naive default — fetches up to 10M messages. Concrete backends should
+        # override with efficient implementations (e.g., SQL COUNT/GROUP BY).
         if channel:
             return len(self.query(channel, limit=10_000_000))
         return len(self.search(limit=10_000_000))
@@ -228,6 +233,7 @@ class Backend(ABC):
 
         Default implementation returns 0 (no-op).
         """
+        logger.debug("queue_retire not overridden — no queue cleanup performed")
         return 0
 
     def recent_timestamps(self, seconds: int = 60) -> list[str]:
