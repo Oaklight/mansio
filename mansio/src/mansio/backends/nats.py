@@ -298,7 +298,12 @@ class NATSBackend(Backend, Presenceable, Compactable):
         self._run_async(_pub())
 
     def store_queue(self, message: Message) -> None:
-        """Store a queue message to NATS JetStream with claim tracking."""
+        """Store a queue message to NATS JetStream with claim tracking.
+
+        Note: publish + KV create are not transactional. If KV create
+        fails after a successful publish, the message remains in the
+        stream (visible to query) but is invisible to queue operations.
+        """
         self._ensure_connected()
 
         subject = self._subject(message.channel)
@@ -315,7 +320,7 @@ class NATSBackend(Backend, Presenceable, Compactable):
                 "claimed_at": None,
                 "lease_until": None,
             }
-            await self._kv.put(message.id, json.dumps(state).encode())
+            await self._kv.create(message.id, json.dumps(state).encode())
 
         self._run_async(_pub_queue())
 
@@ -695,6 +700,10 @@ class NATSBackend(Backend, Presenceable, Compactable):
         """Scan KV bucket for queue entries, optionally filtered by channel.
 
         Returns list of (key, kv_entry, state_dict) tuples.
+
+        Note: O(n) round-trips (keys + get per key). Acceptable for
+        moderate queue depths; consider indexed lookups if this becomes
+        a bottleneck.
         """
         assert self._kv is not None
         results: list[tuple[str, Any, dict]] = []
@@ -727,6 +736,8 @@ class NATSBackend(Backend, Presenceable, Compactable):
             entries = await self._kv_scan(channel)
             candidates = []
             for key, entry, state in entries:
+                # ISO 8601 strings with +00:00 suffix are lexicographically
+                # comparable, so direct string comparison works for lease expiry.
                 if state["status"] == "unclaimed" or (
                     state["status"] == "claimed" and (state.get("lease_until") or "") < claimed_at
                 ):
@@ -788,6 +799,8 @@ class NATSBackend(Backend, Presenceable, Compactable):
 
         return self._run_async(_ack())
 
+    _QUEUE_STATUS_KEYS = ("status", "claimed_by", "claimed_at", "lease_until")
+
     def queue_status(self, message_id: str) -> dict | None:
         """Return queue status for a single message from KV."""
         self._ensure_connected()
@@ -798,7 +811,8 @@ class NATSBackend(Backend, Presenceable, Compactable):
                 entry = await self._kv.get(message_id)
             except KeyNotFoundError:
                 return None
-            return json.loads(entry.value)
+            state = json.loads(entry.value)
+            return {k: state.get(k) for k in self._QUEUE_STATUS_KEYS}
 
         return self._run_async(_status())
 
@@ -818,8 +832,8 @@ class NATSBackend(Backend, Presenceable, Compactable):
     async def _kv_delete_with_stream(self, key: str, seq: int | None) -> None:
         """Delete a KV entry and its backing stream message."""
         assert self._js is not None and self._kv is not None
-        if seq:
-            with contextlib.suppress(Exception):
+        if seq is not None:
+            with contextlib.suppress(nats.errors.Error):
                 await self._js.delete_msg(self._stream_name, seq)
         await self._kv.delete(key)
 

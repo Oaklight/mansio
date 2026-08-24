@@ -390,6 +390,7 @@ class TestNATSBackendQueue:
         status = backend.queue_status("s1")
         assert status is not None
         assert status["status"] == "unclaimed"
+        assert set(status.keys()) == {"status", "claimed_by", "claimed_at", "lease_until"}
 
         backend.queue_claim("tasks", "worker-1")
         status = backend.queue_status("s1")
@@ -435,6 +436,26 @@ class TestNATSBackendQueue:
         assert reclaimed is not None
         assert reclaimed.message.id == "el1"
         assert reclaimed.claimed_by == "w2"
+
+    def test_retire_completed(self, backend: NATSBackend):
+        backend.store_queue(_make_msg(channel="tasks", msg_id="r1"))
+        backend.store_queue(_make_msg(channel="tasks", msg_id="r2"))
+        backend.queue_claim("tasks", "w1")
+        backend.queue_claim("tasks", "w2")
+        backend.queue_ack("r1", "w1")
+        backend.queue_ack("r2", "w2")
+
+        retired = backend.queue_retire(max_age_seconds=0)
+        assert retired == 2
+        assert backend.queue_status("r1") is None
+        assert backend.queue_status("r2") is None
+        assert backend.queue_stats()["completed"] == 0
+
+    def test_retire_doesnt_touch_unclaimed(self, backend: NATSBackend):
+        backend.store_queue(_make_msg(channel="tasks", msg_id="u1"))
+        retired = backend.queue_retire(max_age_seconds=0)
+        assert retired == 0
+        assert backend.queue_status("u1") is not None
 
     def test_query_returns_queue_messages(self, backend: NATSBackend):
         backend.store_queue(_make_msg(channel="tasks", msg_id="qr1"))
