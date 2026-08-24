@@ -9,7 +9,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, overload
 
 from mansio_client.transport import HttpTransport
 from mansio_client.types import AgentPresence, ClaimResult, Message
@@ -153,8 +153,26 @@ class MansioClient:
             self._cursors[channel] = msgs[-1].id
         return msgs
 
-    def channel_list(self) -> list[str]:
-        return self._transport.channels()
+    @overload
+    def channel_list(self) -> list[str]: ...
+    @overload
+    def channel_list(self, *, detail: Literal[False]) -> list[str]: ...
+    @overload
+    def channel_list(self, *, detail: Literal[True]) -> list[dict]: ...
+
+    def channel_list(self, *, detail: bool = False) -> list[str] | list[dict]:
+        """List channels on the server.
+
+        Args:
+            detail: If True, return list of dicts with channel metadata
+                (name, message_count, last_activity, sender_count, type)
+                instead of plain channel name strings.
+
+        Returns:
+            List of channel name strings, or list of dicts when
+            *detail* is True.
+        """
+        return self._transport.channels(detail=detail)
 
     # ── DM ────────────────────────────────────────────────────────
 

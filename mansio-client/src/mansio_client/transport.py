@@ -12,7 +12,7 @@ import json
 import threading
 import urllib.parse
 from collections.abc import Callable
-from typing import Literal
+from typing import Literal, overload
 
 from mansio_client._vendor.httpclient import Client as HttpClient
 from mansio_client._vendor.sse import SSEClient
@@ -182,9 +182,28 @@ class HttpTransport:
         self._check_response(resp)
         return [self._dict_to_msg(m) for m in resp.json().get("messages", [])]
 
-    def channels(self) -> list[str]:
-        """List all channels on the remote server."""
-        resp = self._http.get(f"{self._base_url}/v1/channels")
+    @overload
+    def channels(self) -> list[str]: ...
+    @overload
+    def channels(self, *, detail: Literal[False]) -> list[str]: ...
+    @overload
+    def channels(self, *, detail: Literal[True]) -> list[dict]: ...
+
+    def channels(self, *, detail: bool = False) -> list[str] | list[dict]:
+        """List all channels on the remote server.
+
+        Args:
+            detail: If True, return list of dicts with channel metadata
+                instead of plain channel name strings.
+
+        Returns:
+            List of channel name strings, or list of dicts when
+            *detail* is True.
+        """
+        url = f"{self._base_url}/v1/channels"
+        if detail:
+            url += "?detail=true"
+        resp = self._http.get(url)
         self._check_response(resp)
         return resp.json().get("channels", [])
 

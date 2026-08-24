@@ -10,7 +10,7 @@ for in-process use.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol, overload
 
 if TYPE_CHECKING:
     from mansio.types import AgentPresence, ClaimResult, Message
@@ -62,7 +62,14 @@ class Transport(Protocol):
         """Query messages from a channel."""
         ...
 
-    def channels(self) -> list[str]:
+    @overload
+    def channels(self) -> list[str]: ...
+    @overload
+    def channels(self, *, detail: Literal[False]) -> list[str]: ...
+    @overload
+    def channels(self, *, detail: Literal[True]) -> list[dict]: ...
+
+    def channels(self, *, detail: bool = False) -> list[str] | list[dict]:
         """List all channels with messages."""
         ...
 

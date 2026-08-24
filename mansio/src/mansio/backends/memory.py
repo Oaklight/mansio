@@ -10,6 +10,22 @@ from typing import Literal
 from mansio.protocols import Backend, Compactable, Presenceable
 from mansio.types import AgentPresence, ClaimResult, Message
 
+_CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
+    ("dm:", "dm"),
+    ("notebook:", "notebook"),
+    ("memory:", "memory"),
+    ("broadcast:", "broadcast"),
+    ("_system:", "system"),
+]
+
+
+def _infer_channel_type(name: str) -> str:
+    """Infer channel type from its name prefix."""
+    for prefix, ctype in _CHANNEL_TYPE_PREFIXES:
+        if name.startswith(prefix):
+            return ctype
+    return "user"
+
 
 class MemoryBackend(Backend, Presenceable, Compactable):
     """In-memory message backend for testing.
@@ -81,6 +97,36 @@ class MemoryBackend(Backend, Presenceable, Compactable):
         if order == "newest":
             return msgs[-limit:]
         return msgs[:limit]
+
+    def list_channels_detail(self) -> list[dict]:
+        """List all channels with metadata.
+
+        Returns:
+            List of dicts with keys: name, message_count, last_activity,
+            sender_count, type.
+        """
+        with self._lock:
+            result: list[dict] = []
+            for ch in sorted(self._messages):
+                msgs = self._messages[ch]
+                if not msgs:
+                    continue
+                senders: set[str] = set()
+                last_activity = ""
+                for m in msgs:
+                    senders.add(m.sender)
+                    if m.timestamp > last_activity:
+                        last_activity = m.timestamp
+                result.append(
+                    {
+                        "name": ch,
+                        "message_count": len(msgs),
+                        "last_activity": last_activity,
+                        "sender_count": len(senders),
+                        "type": _infer_channel_type(ch),
+                    }
+                )
+            return result
 
     def list_channels(self) -> list[str]:
         """List all channels that have at least one message.
