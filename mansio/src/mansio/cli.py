@@ -111,11 +111,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ── serve ─────────────────────────────────────────────────────
     serve = sub.add_parser("serve", help="Start the mansio server")
-    serve.add_argument(
+    backend_group = serve.add_mutually_exclusive_group()
+    backend_group.add_argument(
         "-d",
         "--db",
-        default="mansio.db",
+        default=None,
         help="SQLite database path (default: mansio.db)",
+    )
+    backend_group.add_argument(
+        "--maildir",
+        metavar="PATH",
+        default=None,
+        help="Use Maildir backend at PATH instead of SQLite",
     )
     serve.add_argument(
         "--http",
@@ -267,6 +274,21 @@ def _migrate_legacy_db(db_path: str, logger) -> str:
     return db_path
 
 
+def _create_bus(args: argparse.Namespace, logger: Any) -> Any:
+    """Instantiate the message bus from CLI arguments."""
+    if args.maildir:
+        from mansio.backends.maildir import MaildirBackend
+        from mansio.bus import Bus
+
+        backend = MaildirBackend(args.maildir)
+        logger.info("Bus started", backend="maildir", path=args.maildir)
+        return Bus(backend=backend)
+    db_path = _migrate_legacy_db(args.db or _DEFAULT_DB, logger)
+    bus = SQLiteBus(db_path)
+    logger.info("Bus started", backend="sqlite", db=db_path)
+    return bus
+
+
 def _cmd_serve(args: argparse.Namespace) -> None:
     """Handle the ``serve`` subcommand.
 
@@ -289,9 +311,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
         logger.error("--no-auth cannot be used with --remote (would expose unauthenticated API)")
         sys.exit(1)
 
-    db_path = _migrate_legacy_db(args.db, logger)
-    bus = SQLiteBus(db_path)
-    logger.info("Bus started", db=args.db)
+    bus = _create_bus(args, logger)
 
     # Set up token store (unless --no-auth)
     token_store = None

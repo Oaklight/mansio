@@ -23,6 +23,7 @@ __all__ = [
     "ClaimResult",
     "Compactable",
     "CompactionPolicy",
+    "MaildirBackend",
     "HttpTransport",
     "MansioAPIError",
     "MemoryBackend",
