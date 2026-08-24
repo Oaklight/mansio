@@ -429,3 +429,57 @@ class TestAdminAPI:
         finally:
             admin.stop()
             bus.close()
+
+
+# ============== Password Redaction Tests ==============
+
+
+class TestPasswordRedaction:
+    """Verify admin password is never logged in plaintext (#45)."""
+
+    def test_password_not_in_start_log(self):
+        """AdminServer.start() must log the redacted password, not the raw value."""
+        from unittest.mock import patch
+
+        from mansio.admin.server import AdminServer, _redact_password
+
+        password = "super-secret-password-value"
+        bus = SQLiteBus(":memory:")
+        server = AdminServer(bus, port=0, auth_password=password)
+
+        try:
+            with patch("mansio.admin.server.logger") as mock_logger:
+                info = server.start()
+                assert info.password == password  # password is still returned
+
+                # Verify logger.info was called with redacted password
+                mock_logger.info.assert_called_once()
+                call_kwargs = mock_logger.info.call_args
+                # The raw password must not appear in any argument
+                call_str = str(call_kwargs)
+                assert password not in call_str, f"Raw password in log call: {call_str}"
+                # The redacted version should appear
+                assert _redact_password(password) in call_str
+        finally:
+            server.stop()
+            bus.close()
+
+    def test_admin_info_repr_redacts_password(self):
+        """AdminInfo.__repr__() must not contain the raw password."""
+        from mansio.admin.server import AdminInfo
+
+        password = "another-secret-pw"
+        info = AdminInfo(
+            host="127.0.0.1", port=8741, url="http://localhost:8741", password=password
+        )
+        r = repr(info)
+        assert password not in r
+        assert "****" in r or "*" in r
+
+    def test_redact_password_helper(self):
+        """_redact_password masks all but the last 4 chars."""
+        from mansio.admin.server import _redact_password
+
+        assert _redact_password("abcdefghij") == "******ghij"
+        assert _redact_password("ab") == "****"  # short values fully masked
+        assert _redact_password("abcd") == "****"  # exactly tail length
