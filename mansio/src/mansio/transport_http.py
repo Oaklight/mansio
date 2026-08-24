@@ -190,7 +190,7 @@ class HttpTransport:
         if resp.status_code == 404:
             return None
         self._check_response(resp)
-        return resp.json()
+        return resp.json().get("status")
 
     # ── Presence ──────────────────────────────────────────────────
 
