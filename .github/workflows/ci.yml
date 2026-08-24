@@ -40,6 +40,40 @@ jobs:
             exit 1
           fi
 
+      - name: Verify transport method signatures in sync
+        run: |
+          python3 -c "
+          import ast, sys
+
+          def get_methods(path):
+              tree = ast.parse(open(path).read())
+              methods = {}
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.ClassDef) and 'Transport' in node.name:
+                      for item in node.body:
+                          if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                              if not item.name.startswith('_'):
+                                  args = [a.arg for a in item.args.args if a.arg != 'self']
+                                  methods[item.name] = args
+              return methods
+
+          m1 = get_methods('mansio/src/mansio/transport_http.py')
+          m2 = get_methods('mansio-client/src/mansio_client/transport.py')
+
+          if m1 != m2:
+              print('ERROR: Transport method signatures have drifted')
+              only1 = set(m1) - set(m2)
+              only2 = set(m2) - set(m1)
+              if only1: print(f'  Only in mansio: {only1}')
+              if only2: print(f'  Only in mansio-client: {only2}')
+              for name in set(m1) & set(m2):
+                  if m1[name] != m2[name]:
+                      print(f'  {name}: mansio={m1[name]} vs client={m2[name]}')
+              sys.exit(1)
+          print('Transport signatures in sync ✅')
+          "
+
+
   test:
     runs-on: ubuntu-latest
     steps:

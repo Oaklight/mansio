@@ -97,6 +97,42 @@ class TestHttpTransport:
         assert transport.require_auth is False
         transport.close()
 
+    def test_queue_status_roundtrip(self, server_url: str) -> None:
+        """queue_status() returns correct dict through HTTP transport."""
+        transport = HttpTransport(server_url, agent_id="test-agent")
+
+        # Publish a queue message
+        msg_id = transport.publish(
+            channel="queue-ch",
+            sender="test-agent",
+            msg_type="task",
+            payload="do work",
+            queue=True,
+        )
+        assert msg_id
+
+        # Unclaimed status
+        status = transport.queue_status(msg_id)
+        assert status is not None
+        assert isinstance(status, dict)
+        assert status["status"] == "unclaimed"
+
+        # Claim the message
+        result = transport.queue_claim("queue-ch", "test-agent")
+        assert result is not None
+        assert result.message.id == msg_id
+
+        # Claimed status
+        status = transport.queue_status(msg_id)
+        assert status is not None
+        assert status["status"] == "claimed"
+        assert status["claimed_by"] == "test-agent"
+
+        # Nonexistent message returns None (not raises)
+        assert transport.queue_status("nonexistent-id-12345") is None
+
+        transport.close()
+
 
 # ── MansioClient over HTTP Tests ─────────────────────────────────
 
