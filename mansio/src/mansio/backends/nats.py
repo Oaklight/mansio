@@ -426,6 +426,8 @@ class NATSBackend(Backend, Presenceable, Compactable):
             after: If provided, only return messages with ID > this value.
             limit: Maximum number of messages to return.
             msg_type: If provided, only return messages of this type.
+            order: ``"oldest"`` (default) or ``"newest"``.
+                Currently only ``"oldest"`` is implemented.
 
         Returns:
             Messages in chronological order (oldest first).
@@ -433,6 +435,10 @@ class NATSBackend(Backend, Presenceable, Compactable):
         Raises:
             Exception: On NATS connection or fetch failure.
         """
+        if order != "oldest":
+            logger.warning(
+                "NATSBackend.query() does not support order=%r yet; returning oldest-first", order
+            )
         self._ensure_connected()
         subject = self._subject(channel)
         return self._run_async(
