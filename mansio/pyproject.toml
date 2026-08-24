@@ -85,6 +85,8 @@ unresolved-attribute = "warn"
 invalid-assignment = "warn"
 # Lazy/conditional imports (TYPE_CHECKING, deferred admin loading)
 unresolved-import = "warn"
+# nats-py type stubs are incomplete (e.g. opt_start_time expects datetime but str works at runtime)
+invalid-argument-type = "warn"
 
 [tool.complexipy]
 paths = ["src"]

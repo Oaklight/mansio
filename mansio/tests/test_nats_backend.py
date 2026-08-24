@@ -74,12 +74,19 @@ def backend():
     b = _make_backend()
     b.connect()
     yield b
-    # Cleanup: purge the stream then close
+    # Cleanup: purge the stream and KV bucket then close
     try:
 
         async def _purge():
             assert b._js is not None
             await b._js.purge_stream(b._stream_name)
+            if b._kv is not None:
+                try:
+                    keys = await b._kv.keys()
+                    for key in keys:
+                        await b._kv.delete(key)
+                except Exception:
+                    pass
 
         b._run_async(_purge())
     except Exception:
@@ -325,24 +332,141 @@ class TestNATSBackendChannelEncoding:
         assert results[0].channel == "dm:alice:bob"
 
 
-class TestNATSBackendQueueNotImplemented:
-    """Queue operations should raise NotImplementedError."""
+class TestNATSBackendQueue:
+    """Queue operations via JetStream KV."""
 
-    def test_queue_claim_not_implemented(self, backend: NATSBackend):
-        with pytest.raises(NotImplementedError):
-            backend.queue_claim("test-channel", "worker-1")
+    def test_store_queue_and_claim(self, backend: NATSBackend):
+        msg = _make_msg(channel="tasks", msg_id="q1")
+        backend.store_queue(msg)
+        result = backend.queue_claim("tasks", "worker-1")
+        assert result is not None
+        assert result.message.id == "q1"
+        assert result.status == "claimed"
+        assert result.claimed_by == "worker-1"
+        assert result.claimed_at is not None
+        assert result.lease_until is not None
 
-    def test_queue_ack_not_implemented(self, backend: NATSBackend):
-        with pytest.raises(NotImplementedError):
-            backend.queue_ack("msg-1", "worker-1")
+    def test_claim_empty_channel(self, backend: NATSBackend):
+        assert backend.queue_claim("empty", "worker-1") is None
 
-    def test_queue_stats_not_implemented(self, backend: NATSBackend):
-        with pytest.raises(NotImplementedError):
-            backend.queue_stats()
+    def test_claim_fifo_order(self, backend: NATSBackend):
+        for i in range(3):
+            backend.store_queue(_make_msg(channel="q", msg_id=f"q{i:04d}"))
+        r1 = backend.queue_claim("q", "w1")
+        r2 = backend.queue_claim("q", "w2")
+        assert r1 is not None and r2 is not None
+        assert r1.message.id == "q0000"
+        assert r2.message.id == "q0001"
 
-    def test_queue_retire_not_implemented(self, backend: NATSBackend):
-        with pytest.raises(NotImplementedError):
-            backend.queue_retire()
+    def test_ack_success(self, backend: NATSBackend):
+        backend.store_queue(_make_msg(channel="tasks", msg_id="a1"))
+        claimed = backend.queue_claim("tasks", "worker-1")
+        assert claimed is not None
+        acked = backend.queue_ack("a1", "worker-1")
+        assert acked is not None
+        assert acked.status == "completed"
+        assert acked.lease_until is None
+
+    def test_ack_wrong_agent(self, backend: NATSBackend):
+        backend.store_queue(_make_msg(channel="tasks", msg_id="a2"))
+        backend.queue_claim("tasks", "worker-1")
+        assert backend.queue_ack("a2", "wrong-worker") is None
+
+    def test_ack_unclaimed(self, backend: NATSBackend):
+        backend.store_queue(_make_msg(channel="tasks", msg_id="a3"))
+        assert backend.queue_ack("a3", "worker-1") is None
+
+    def test_ack_nonexistent(self, backend: NATSBackend):
+        assert backend.queue_ack("nonexistent", "worker-1") is None
+
+    def test_double_ack(self, backend: NATSBackend):
+        backend.store_queue(_make_msg(channel="tasks", msg_id="a4"))
+        backend.queue_claim("tasks", "worker-1")
+        backend.queue_ack("a4", "worker-1")
+        assert backend.queue_ack("a4", "worker-1") is None
+
+    def test_queue_status(self, backend: NATSBackend):
+        backend.store_queue(_make_msg(channel="tasks", msg_id="s1"))
+        status = backend.queue_status("s1")
+        assert status is not None
+        assert status["status"] == "unclaimed"
+
+        backend.queue_claim("tasks", "worker-1")
+        status = backend.queue_status("s1")
+        assert status is not None
+        assert status["status"] == "claimed"
+        assert status["claimed_by"] == "worker-1"
+
+    def test_queue_status_nonexistent(self, backend: NATSBackend):
+        assert backend.queue_status("nonexistent") is None
+
+    def test_queue_status_regular_msg(self, backend: NATSBackend):
+        backend.store(_make_msg(msg_id="regular"))
+        assert backend.queue_status("regular") is None
+
+    def test_queue_stats(self, backend: NATSBackend):
+        backend.store_queue(_make_msg(channel="tasks", msg_id="st1"))
+        backend.store_queue(_make_msg(channel="tasks", msg_id="st2"))
+        backend.store_queue(_make_msg(channel="tasks", msg_id="st3"))
+        backend.queue_claim("tasks", "w1")
+        backend.queue_claim("tasks", "w2")
+        backend.queue_ack("st1", "w1")
+
+        stats = backend.queue_stats("tasks")
+        assert stats["unclaimed"] == 1
+        assert stats["claimed"] == 1
+        assert stats["completed"] == 1
+
+    def test_queue_stats_global(self, backend: NATSBackend):
+        backend.store_queue(_make_msg(channel="ch1", msg_id="g1"))
+        backend.store_queue(_make_msg(channel="ch2", msg_id="g2"))
+        stats = backend.queue_stats()
+        assert stats["unclaimed"] == 2
+
+    def test_claim_all_returns_none(self, backend: NATSBackend):
+        backend.store_queue(_make_msg(channel="tasks", msg_id="c1"))
+        backend.queue_claim("tasks", "w1")
+        assert backend.queue_claim("tasks", "w2") is None
+
+    def test_expired_lease_reclaimable(self, backend: NATSBackend):
+        backend.store_queue(_make_msg(channel="tasks", msg_id="el1"))
+        backend.queue_claim("tasks", "w1", lease_seconds=0)
+        reclaimed = backend.queue_claim("tasks", "w2")
+        assert reclaimed is not None
+        assert reclaimed.message.id == "el1"
+        assert reclaimed.claimed_by == "w2"
+
+    def test_query_returns_queue_messages(self, backend: NATSBackend):
+        backend.store_queue(_make_msg(channel="tasks", msg_id="qr1"))
+        results = backend.query("tasks")
+        assert len(results) == 1
+        assert results[0].id == "qr1"
+
+    def test_claim_atomic_two_threads(self, backend: NATSBackend):
+        import threading
+
+        for i in range(5):
+            backend.store_queue(_make_msg(channel="work", msg_id=f"at{i:04d}"))
+
+        claimed: list = []
+        lock = threading.Lock()
+
+        def worker():
+            while True:
+                r = backend.queue_claim("work", f"w-{threading.current_thread().name}")
+                if r is None:
+                    break
+                with lock:
+                    claimed.append(r.message.id)
+
+        threads = [threading.Thread(target=worker, name=f"t{i}") for i in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        assert len(claimed) == 5
+        assert len(set(claimed)) == 5
 
 
 class TestNATSBackendPresence:
