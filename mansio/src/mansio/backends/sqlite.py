@@ -8,6 +8,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 
 from mansio._vendor.retry import retry
 from mansio._vendor.structlog import get_logger
@@ -151,6 +152,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable):
         after: str | None = None,
         limit: int = 100,
         msg_type: str | None = None,
+        order: Literal["oldest", "newest"] = "oldest",
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -159,6 +161,9 @@ class SQLiteBackend(Backend, Presenceable, Compactable):
             after: If provided, only return messages with ID > this value.
             limit: Maximum number of messages to return.
             msg_type: If provided, only return messages of this type.
+            order: ``"oldest"`` returns the first *limit* messages;
+                ``"newest"`` returns the last *limit* messages.  Both
+                return results in chronological (ascending ID) order.
 
         Returns:
             Messages in chronological order (oldest first).
@@ -174,9 +179,15 @@ class SQLiteBackend(Backend, Presenceable, Compactable):
                 params.append(msg_type)
             where = " AND ".join(clauses)
             params.append(limit)
-            cursor = self._conn.execute(
-                f"SELECT * FROM messages WHERE {where} ORDER BY id ASC LIMIT ?", params
-            )
+            if order == "newest":
+                sql = (
+                    f"SELECT * FROM ("
+                    f"SELECT * FROM messages WHERE {where} ORDER BY id DESC LIMIT ?"
+                    f") sub ORDER BY id ASC"
+                )
+            else:
+                sql = f"SELECT * FROM messages WHERE {where} ORDER BY id ASC LIMIT ?"
+            cursor = self._conn.execute(sql, params)
             return [self._row_to_message(row) for row in cursor.fetchall()]
 
     def list_channels(self) -> list[str]:

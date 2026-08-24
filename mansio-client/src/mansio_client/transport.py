@@ -12,6 +12,7 @@ import json
 import threading
 import urllib.parse
 from collections.abc import Callable
+from typing import Literal
 
 from mansio_client._vendor.httpclient import Client as HttpClient
 from mansio_client._vendor.sse import SSEClient
@@ -165,6 +166,7 @@ class HttpTransport:
         after: str | None = None,
         limit: int = 100,
         msg_type: str | None = None,
+        order: Literal["oldest", "newest"] = "oldest",
     ) -> list[Message]:
         """Query messages from a channel via the remote server."""
         params: dict[str, str] = {"channel": channel, "limit": str(limit)}
@@ -172,6 +174,8 @@ class HttpTransport:
             params["after"] = after
         if msg_type:
             params["msg_type"] = msg_type
+        if order != "oldest":
+            params["order"] = order
 
         url = f"{self._base_url}/v1/query?{urllib.parse.urlencode(params)}"
         resp = self._http.get(url)

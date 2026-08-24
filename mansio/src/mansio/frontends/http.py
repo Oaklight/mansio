@@ -403,9 +403,9 @@ def _parse_query_limit(raw: str | None, max_limit: int) -> int | tuple[dict, int
 
 
 def _parse_query_params(request: Any, max_limit: int) -> dict:
-    """Extract and validate query parameters (channel, after, limit).
+    """Extract and validate query parameters (channel, after, limit, order).
 
-    Returns dict with 'channel', 'after', 'limit' on success,
+    Returns dict with 'channel', 'after', 'limit', 'order' on success,
     or dict with 'error' key and '_status' key on failure.
     """
     channel = (request.query_params.get("channel") or [None])[0]
@@ -425,7 +425,21 @@ def _parse_query_params(request: Any, max_limit: int) -> dict:
     if not isinstance(limit, int):
         return {"error": limit[0]["error"], "message": limit[0]["message"], "_status": 400}
 
-    return {"channel": channel, "after": after, "limit": limit, "msg_type": msg_type}
+    order = (request.query_params.get("order") or ["oldest"])[0]
+    if order not in ("oldest", "newest"):
+        return {
+            "error": "Bad Request",
+            "message": "'order' must be 'oldest' or 'newest'",
+            "_status": 400,
+        }
+
+    return {
+        "channel": channel,
+        "after": after,
+        "limit": limit,
+        "msg_type": msg_type,
+        "order": order,
+    }
 
 
 async def _handle_registry_lookup(request: Any, bus: Any) -> dict | tuple:
@@ -730,7 +744,12 @@ class HttpFrontend:
             channel, after, limit = qp["channel"], qp["after"], qp["limit"]
 
             msgs = await asyncio.to_thread(
-                bus.query, channel, after=after, limit=limit, msg_type=qp.get("msg_type")
+                bus.query,
+                channel,
+                after=after,
+                limit=limit,
+                msg_type=qp.get("msg_type"),
+                order=qp.get("order", "oldest"),
             )
 
             auth_result = _auth_result_var.get()

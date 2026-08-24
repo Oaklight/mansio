@@ -8,6 +8,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from mansio.backends import SQLiteBackend
 from mansio.protocols import Backend, Presenceable
@@ -146,6 +147,7 @@ class Bus:
         after: str | None = None,
         limit: int = 100,
         msg_type: str | None = None,
+        order: Literal["oldest", "newest"] = "oldest",
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -154,11 +156,15 @@ class Bus:
             after: If provided, only return messages with ID greater than this.
             limit: Maximum number of messages to return.
             msg_type: If provided, only return messages of this type.
+            order: ``"oldest"`` returns the first *limit* messages;
+                ``"newest"`` returns the last *limit* messages.
 
         Returns:
             Messages in chronological order (oldest first).
         """
-        return self._backend.query(channel, after=after, limit=limit, msg_type=msg_type)
+        return self._backend.query(
+            channel, after=after, limit=limit, msg_type=msg_type, order=order
+        )
 
     def subscribe(
         self,
