@@ -32,12 +32,12 @@ class MansioClient:
     Args:
         url: Server URL (e.g. ``"https://mansio-api.example.com"``).
         agent_id: Unique agent identifier (3-64 chars, lowercase).
-        token: Bearer token for API authentication (``pzt-...``).
+        token: Bearer token for API authentication (``mst-...``).
         display_name: Human-readable name. Defaults to agent_id.
 
     Example::
 
-        with MansioClient("https://api.example.com", "my-agent", token="pzt-xxx") as client:
+        with MansioClient("https://api.example.com", "my-agent", token="mst-xxx") as client:
             client.channel_send("general", "hello!")
             msgs = client.channel_poll("general")
     """
