@@ -30,7 +30,7 @@ import logging
 import threading
 import urllib.parse
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from mansio.protocols import Backend, Compactable, Presenceable
 from mansio.types import AgentPresence, ClaimResult, Message
@@ -385,6 +385,7 @@ class NATSBackend(Backend, Presenceable, Compactable):
         after: str | None = None,
         limit: int = 100,
         msg_type: str | None = None,
+        order: Literal["oldest", "newest"] = "oldest",
     ) -> list[Message]:
         """Retrieve messages from a channel via JetStream.
 

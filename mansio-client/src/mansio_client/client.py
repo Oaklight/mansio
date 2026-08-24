@@ -9,7 +9,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from mansio_client.transport import HttpTransport
 from mansio_client.types import AgentPresence, ClaimResult, Message
@@ -138,9 +138,13 @@ class MansioClient:
         )
 
     def channel_read(
-        self, channel: str, limit: int = 10, after: str | None = None
+        self,
+        channel: str,
+        limit: int = 10,
+        after: str | None = None,
+        order: Literal["oldest", "newest"] = "newest",
     ) -> list[Message]:
-        return self._transport.query(channel, after=after, limit=limit)
+        return self._transport.query(channel, after=after, limit=limit, order=order)
 
     def channel_poll(self, channel: str) -> list[Message]:
         cursor = self._cursors.get(channel)

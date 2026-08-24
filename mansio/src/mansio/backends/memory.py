@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from mansio.protocols import Backend, Compactable, Presenceable
 from mansio.types import AgentPresence, ClaimResult, Message
@@ -55,6 +56,7 @@ class MemoryBackend(Backend, Presenceable, Compactable):
         after: str | None = None,
         limit: int = 100,
         msg_type: str | None = None,
+        order: Literal["oldest", "newest"] = "oldest",
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -63,6 +65,9 @@ class MemoryBackend(Backend, Presenceable, Compactable):
             after: If provided, only return messages with ID > this value.
             limit: Maximum number of messages to return.
             msg_type: If provided, only return messages of this type.
+            order: ``"oldest"`` returns the first *limit* messages;
+                ``"newest"`` returns the last *limit* messages.  Both
+                return results in chronological (ascending ID) order.
 
         Returns:
             Messages in chronological order (oldest first).
@@ -73,6 +78,8 @@ class MemoryBackend(Backend, Presenceable, Compactable):
             msgs = [m for m in msgs if m.id > after]
         if msg_type is not None:
             msgs = [m for m in msgs if m.msg_type == msg_type]
+        if order == "newest":
+            return msgs[-limit:]
         return msgs[:limit]
 
     def list_channels(self) -> list[str]:

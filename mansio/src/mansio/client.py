@@ -13,7 +13,7 @@ import re
 import secrets
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from mansio.backends import SQLiteBackend
 from mansio.bus import Bus
@@ -395,6 +395,7 @@ class MansioClient:
         channel: str,
         limit: int = 10,
         after: str | None = None,
+        order: Literal["oldest", "newest"] = "newest",
     ) -> list[Message]:
         """Read messages from a channel (does NOT advance cursor).
 
@@ -402,11 +403,13 @@ class MansioClient:
             channel: Channel to read.
             limit: Maximum messages to return.
             after: Return only messages after this ID.
+            order: ``"newest"`` (default) returns the last *limit*
+                messages; ``"oldest"`` returns from the beginning.
 
         Returns:
             Messages in chronological order.
         """
-        return self._transport.query(channel, after=after, limit=limit)
+        return self._transport.query(channel, after=after, limit=limit, order=order)
 
     def channel_poll(self, channel: str) -> list[Message]:
         """Poll for new messages, auto-advancing the cursor.

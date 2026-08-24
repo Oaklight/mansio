@@ -10,7 +10,7 @@ for in-process use.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 if TYPE_CHECKING:
     from mansio.types import AgentPresence, ClaimResult, Message
@@ -57,6 +57,7 @@ class Transport(Protocol):
         after: str | None = None,
         limit: int = 100,
         msg_type: str | None = None,
+        order: Literal["oldest", "newest"] = "oldest",
     ) -> list[Message]:
         """Query messages from a channel."""
         ...

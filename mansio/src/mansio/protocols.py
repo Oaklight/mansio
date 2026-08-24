@@ -7,7 +7,7 @@ Defines the Backend ABC and optional capability protocols
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from mansio._vendor.structlog import get_logger
 from mansio.types import AgentPresence, ClaimResult, Message
@@ -58,6 +58,7 @@ class Backend(ABC):
         after: str | None = None,
         limit: int = 100,
         msg_type: str | None = None,
+        order: Literal["oldest", "newest"] = "oldest",
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -66,6 +67,10 @@ class Backend(ABC):
             after: If provided, only return messages with ID > this value.
             limit: Maximum number of messages to return.
             msg_type: If provided, only return messages of this type.
+            order: Return the oldest or newest messages first.
+                Both return results in chronological (ascending ID) order;
+                ``"newest"`` selects the last *limit* messages instead of
+                the first *limit*.
 
         Returns:
             Messages in chronological order (oldest first).
