@@ -51,7 +51,15 @@ class SQLiteBackend(Backend, Presenceable, Compactable):
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        # Set busy_timeout BEFORE any other PRAGMA so subsequent
+        # statements wait for locks instead of failing immediately.
         self._conn.execute("PRAGMA busy_timeout=5000")
+        # Switching to WAL journal_mode requires an exclusive lock.
+        # SQLite's busy handler does NOT cover PRAGMA journal_mode
+        # mutations — the lock contention surfaces as an immediate
+        # OperationalError("database is locked"). Retry with backoff
+        # so multiple processes can cold-start the same DB without
+        # racing each other.
         self._enable_wal()
         self._conn.executescript(_SCHEMA)
         self._ensure_queue_columns()

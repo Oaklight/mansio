@@ -31,7 +31,14 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Verify mansio-client types.py is in sync
-        run: diff mansio/src/mansio/types.py mansio-client/src/mansio_client/types.py
+        run: |
+          echo "Checking mansio-client types.py matches mansio types.py..."
+          if ! diff mansio/src/mansio/types.py mansio-client/src/mansio_client/types.py; then
+            echo ""
+            echo "ERROR: mansio-client types.py has drifted from mansio/types.py"
+            echo "Fix: cp mansio/src/mansio/types.py mansio-client/src/mansio_client/types.py"
+            exit 1
+          fi
 
   test:
     runs-on: ubuntu-latest
