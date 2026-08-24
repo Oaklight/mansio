@@ -145,7 +145,11 @@ def _validate_channel_name(
 
 
 def _validate_and_auth_publish(
-    auth_result: Any, sender: str, channel: str, token_store: TokenStore | None = None
+    auth_result: Any,
+    sender: str,
+    channel: str,
+    msg_type: str = "",
+    token_store: TokenStore | None = None,
 ) -> tuple[dict, int] | None:
     """Validate channel name and enforce publish auth.
 
@@ -167,15 +171,17 @@ def _validate_and_auth_publish(
 
     # System channels: agents can only write to their own system channels
     if channel.startswith("_system:"):
-        # Allow: _system:agents (presence announce from own agent)
+        # Allow: _system:agents with msg_type="presence" (SDK _announce())
         # Allow: _system:cursors:{agent_id} (own cursor persistence)
         # Allow: _system:registry (self-registration)
+        # Deny: _system:agents with arbitrary msg_types
         allowed_system = (
-            "_system:agents",
             f"_system:cursors:{auth_result}",
             "_system:registry",
         )
-        if channel not in allowed_system:
+        if channel == "_system:agents" and msg_type == "presence":
+            pass  # allow SDK presence announcement
+        elif channel not in allowed_system:
             return {
                 "error": "Forbidden",
                 "message": f"Channel '{channel}' is reserved for system use",
@@ -689,7 +695,11 @@ class HttpFrontend:
             data["sender"] = data["sender"].strip()
 
             auth_error = _validate_and_auth_publish(
-                auth_result, data["sender"], data["channel"], token_store=self._token_store
+                auth_result,
+                data["sender"],
+                data["channel"],
+                msg_type=data["msg_type"],
+                token_store=self._token_store,
             )
             if auth_error:
                 return auth_error
