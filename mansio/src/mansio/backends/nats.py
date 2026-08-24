@@ -42,11 +42,17 @@ try:
     from nats.js.api import (
         ConsumerConfig,
         DeliverPolicy,
+        KeyValueConfig,
         RetentionPolicy,
         StorageType,
         StreamConfig,
     )
     from nats.js.client import JetStreamContext
+    from nats.js.errors import (
+        KeyNotFoundError,
+        KeyWrongLastSequenceError,
+        NoKeysError,
+    )
 except ImportError as exc:
     raise ImportError("NATS backend requires 'nats-py'. Install with: pip install nats-py") from exc
 
@@ -102,6 +108,7 @@ class NATSBackend(Backend, Presenceable, Compactable):
 
         self._nc: NATSClient | None = None
         self._js: JetStreamContext | None = None
+        self._kv: Any = None
 
         # Guards the event loop lifecycle (_loop, _loop_thread, _connected).
         self._loop_lock = threading.Lock()
@@ -247,6 +254,15 @@ class NATSBackend(Backend, Presenceable, Compactable):
         except Exception:
             await self._js.add_stream(stream_config)
 
+        # KV bucket for queue claim state
+        kv_bucket = f"{self._stream_name}-queue-state"
+        try:
+            self._kv = await self._js.key_value(kv_bucket)
+        except Exception:
+            self._kv = await self._js.create_key_value(
+                KeyValueConfig(bucket=kv_bucket, storage=self._storage)
+            )
+
     def connect(self) -> None:
         """Connect to NATS server (sync wrapper).
 
@@ -282,15 +298,26 @@ class NATSBackend(Backend, Presenceable, Compactable):
         self._run_async(_pub())
 
     def store_queue(self, message: Message) -> None:
-        """Store a queue message to NATS JetStream.
+        """Store a queue message to NATS JetStream with claim tracking."""
+        self._ensure_connected()
 
-        Not yet implemented -- JetStream queue support pending.
+        subject = self._subject(message.channel)
+        payload = self._msg_to_nats_payload(message)
 
-        Raises:
-            NotImplementedError: Always.
-        """
-        # TODO: implement JetStream-based queue support
-        raise NotImplementedError("Queue store is not yet implemented for NATSBackend.")
+        async def _pub_queue() -> None:
+            assert self._js is not None and self._kv is not None
+            ack = await self._js.publish(subject, payload)
+            state = {
+                "status": "unclaimed",
+                "channel": message.channel,
+                "seq": ack.seq,
+                "claimed_by": None,
+                "claimed_at": None,
+                "lease_until": None,
+            }
+            await self._kv.put(message.id, json.dumps(state).encode())
+
+        self._run_async(_pub_queue())
 
     # ── Fetch helpers ─────────────────────────────────────────
 
@@ -656,62 +683,180 @@ class NATSBackend(Backend, Presenceable, Compactable):
 
     # ── Queue operations ──────────────────────────────────────
 
+    async def _fetch_msg_by_seq(self, seq: int) -> Message:
+        """Retrieve a message from the stream by its JetStream sequence number."""
+        assert self._js is not None
+        raw = await self._js.get_msg(self._stream_name, seq)
+        assert raw.data is not None
+        return self._nats_payload_to_msg(raw.data)
+
+    async def _kv_scan(self, channel: str | None = None) -> list[tuple[str, Any, dict]]:
+        """Scan KV bucket for queue entries, optionally filtered by channel.
+
+        Returns list of (key, kv_entry, state_dict) tuples.
+        """
+        assert self._kv is not None
+        results: list[tuple[str, Any, dict]] = []
+        try:
+            keys = await self._kv.keys()
+        except NoKeysError:
+            return results
+        for key in keys:
+            try:
+                entry = await self._kv.get(key)
+            except KeyNotFoundError:
+                continue
+            state = json.loads(entry.value)
+            if channel is not None and state.get("channel") != channel:
+                continue
+            results.append((key, entry, state))
+        return results
+
     def queue_claim(
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
-        """Claim the oldest unclaimed queue message.
+        """Claim the oldest unclaimed queue message via KV CAS."""
+        self._ensure_connected()
 
-        Not yet implemented -- JetStream queue support pending.
-        """
-        # TODO: implement JetStream-based queue claim
-        raise NotImplementedError(
-            "Queue claim is not yet implemented for NATSBackend. "
-            "Use SQLiteBackend or MemoryBackend for queue operations."
-        )
+        async def _claim() -> ClaimResult | None:
+            now = datetime.now(timezone.utc)
+            claimed_at = now.isoformat()
+            lease_until = (now + timedelta(seconds=lease_seconds)).isoformat()
+
+            entries = await self._kv_scan(channel)
+            candidates = []
+            for key, entry, state in entries:
+                if state["status"] == "unclaimed" or (
+                    state["status"] == "claimed" and (state.get("lease_until") or "") < claimed_at
+                ):
+                    candidates.append((key, entry, state))
+
+            candidates.sort(key=lambda x: x[2]["seq"])
+
+            for key, entry, state in candidates:
+                new_state = {
+                    **state,
+                    "status": "claimed",
+                    "claimed_by": claimed_by,
+                    "claimed_at": claimed_at,
+                    "lease_until": lease_until,
+                }
+                try:
+                    await self._kv.update(key, json.dumps(new_state).encode(), last=entry.revision)
+                except KeyWrongLastSequenceError:
+                    continue
+                msg = await self._fetch_msg_by_seq(state["seq"])
+                return ClaimResult(
+                    message=msg,
+                    status="claimed",
+                    claimed_by=claimed_by,
+                    claimed_at=claimed_at,
+                    lease_until=lease_until,
+                )
+            return None
+
+        return self._run_async(_claim())
 
     def queue_ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
-        """Acknowledge a claimed message.
+        """Acknowledge a claimed message via KV CAS."""
+        self._ensure_connected()
 
-        Not yet implemented -- JetStream queue support pending.
-        """
-        # TODO: implement JetStream-based queue ack
-        raise NotImplementedError(
-            "Queue ack is not yet implemented for NATSBackend. "
-            "Use SQLiteBackend or MemoryBackend for queue operations."
-        )
+        async def _ack() -> ClaimResult | None:
+            assert self._kv is not None
+            try:
+                entry = await self._kv.get(message_id)
+            except KeyNotFoundError:
+                return None
+            state = json.loads(entry.value)
+            if state["status"] != "claimed" or state["claimed_by"] != claimed_by:
+                return None
+            new_state = {**state, "status": "completed", "lease_until": None}
+            try:
+                await self._kv.update(
+                    message_id, json.dumps(new_state).encode(), last=entry.revision
+                )
+            except KeyWrongLastSequenceError:
+                return None
+            msg = await self._fetch_msg_by_seq(state["seq"])
+            return ClaimResult(
+                message=msg,
+                status="completed",
+                claimed_by=claimed_by,
+                claimed_at=state["claimed_at"],
+            )
+
+        return self._run_async(_ack())
 
     def queue_status(self, message_id: str) -> dict | None:
-        """Return queue status for a single message.
+        """Return queue status for a single message from KV."""
+        self._ensure_connected()
 
-        Not yet implemented -- JetStream queue support pending.
-        """
-        # TODO: implement JetStream-based queue status
-        raise NotImplementedError(
-            "Queue status is not yet implemented for NATSBackend. "
-            "Use SQLiteBackend or MemoryBackend for queue operations."
-        )
+        async def _status() -> dict | None:
+            assert self._kv is not None
+            try:
+                entry = await self._kv.get(message_id)
+            except KeyNotFoundError:
+                return None
+            return json.loads(entry.value)
+
+        return self._run_async(_status())
 
     def queue_stats(self, channel: str | None = None) -> dict:
-        """Return queue status counts.
+        """Return queue status counts by scanning KV entries."""
+        self._ensure_connected()
 
-        Not yet implemented -- JetStream queue support pending.
-        """
-        # TODO: implement JetStream-based queue stats
-        raise NotImplementedError(
-            "Queue stats is not yet implemented for NATSBackend. "
-            "Use SQLiteBackend or MemoryBackend for queue operations."
-        )
+        async def _stats() -> dict:
+            counts: dict[str, int] = {"unclaimed": 0, "claimed": 0, "completed": 0}
+            for _key, _entry, state in await self._kv_scan(channel):
+                status = state.get("status", "unclaimed")
+                counts[status] = counts.get(status, 0) + 1
+            return counts
+
+        return self._run_async(_stats())
+
+    async def _kv_delete_with_stream(self, key: str, seq: int | None) -> None:
+        """Delete a KV entry and its backing stream message."""
+        assert self._js is not None and self._kv is not None
+        if seq:
+            with contextlib.suppress(Exception):
+                await self._js.delete_msg(self._stream_name, seq)
+        await self._kv.delete(key)
+
+    async def _retire_by_age(self, cutoff: str) -> int:
+        """Delete completed queue entries older than *cutoff*."""
+        retired = 0
+        for key, _entry, state in await self._kv_scan():
+            if state["status"] == "completed" and (state.get("claimed_at") or "") < cutoff:
+                await self._kv_delete_with_stream(key, state.get("seq"))
+                retired += 1
+        return retired
+
+    async def _retire_by_count(self, max_per_channel: int) -> int:
+        """Enforce per-channel cap on completed queue entries."""
+        by_channel: dict[str, list[tuple[str, dict]]] = {}
+        for key, _entry, state in await self._kv_scan():
+            if state["status"] == "completed":
+                by_channel.setdefault(state.get("channel", ""), []).append((key, state))
+
+        retired = 0
+        for items in by_channel.values():
+            if len(items) <= max_per_channel:
+                continue
+            items.sort(key=lambda x: x[1].get("seq", 0))
+            for key, state in items[: len(items) - max_per_channel]:
+                await self._kv_delete_with_stream(key, state.get("seq"))
+                retired += 1
+        return retired
 
     def queue_retire(self, max_age_seconds: int = 86400, max_per_channel: int = 1000) -> int:
-        """Remove old completed queue messages.
+        """Remove old completed queue messages from KV and stream."""
+        self._ensure_connected()
 
-        Not yet implemented -- JetStream queue support pending.
-        """
-        # TODO: implement JetStream-based queue retire
-        raise NotImplementedError(
-            "Queue retire is not yet implemented for NATSBackend. "
-            "Use SQLiteBackend or MemoryBackend for queue operations."
-        )
+        async def _retire() -> int:
+            cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)).isoformat()
+            return await self._retire_by_age(cutoff) + await self._retire_by_count(max_per_channel)
+
+        return self._run_async(_retire())
 
     # ── Presence ──────────────────────────────────────────────
 
