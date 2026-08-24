@@ -5,8 +5,7 @@ __version__ = "0.2.3"
 from mansio.backends import MemoryBackend, SQLiteBackend
 from mansio.bus import Bus, SQLiteBus
 from mansio.client import MansioClient
-from mansio.protocols import Backend, Compactable, MessageBus, Presenceable, Serializer
-from mansio.serializers import JSONSerializer
+from mansio.protocols import Backend, Compactable, Presenceable
 from mansio.server import MansioServer
 from mansio.system_policy import CompactionPolicy, system_channel_policy
 from mansio.transport_http import HttpTransport, MansioAPIError
@@ -26,18 +25,15 @@ __all__ = [
     "CompactionPolicy",
     "HttpTransport",
     "MansioAPIError",
-    "JSONSerializer",
     "MemoryBackend",
     "MemoryStorage",
     "Message",
-    "MessageBus",
     "MansioClient",
     "MansioServer",
     "Presenceable",
     "SQLiteBackend",
     "SQLiteBus",
     "SQLiteStorage",
-    "Serializer",
     "StorageBackend",
     "system_channel_policy",
 ]

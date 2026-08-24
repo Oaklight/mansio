@@ -1,14 +1,12 @@
 """Protocols for mansio pluggable components.
 
 Defines the Backend ABC and optional capability protocols
-(Presenceable, Compactable) plus structural interfaces (PEP 544)
-for serializer and message-bus implementations.
+(Presenceable, Compactable).
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 from mansio._vendor.structlog import get_logger
@@ -314,117 +312,5 @@ class Compactable(Protocol):
 
         Returns:
             Number of messages removed.
-        """
-        ...
-
-
-class Serializer(Protocol):
-    """Protocol for message payload serialization.
-
-    Handles encoding/decoding of message metadata and payload content.
-    Implementations can use JSON, MessagePack, Protobuf, etc.
-    """
-
-    def encode(self, obj: dict) -> str:
-        """Encode a dict to string representation.
-
-        Args:
-            obj: Dictionary to encode.
-
-        Returns:
-            Encoded string.
-        """
-        ...
-
-    def decode(self, data: str) -> dict:
-        """Decode a string back to dict.
-
-        Args:
-            data: Encoded string.
-
-        Returns:
-            Decoded dictionary.
-        """
-        ...
-
-
-class MessageBus(Protocol):
-    """Protocol for a message bus implementation."""
-
-    def publish(
-        self,
-        channel: str,
-        sender: str,
-        msg_type: str,
-        payload: str,
-        metadata: dict | None = None,
-    ) -> str:
-        """Publish a message to a channel.
-
-        Args:
-            channel: Target channel name.
-            sender: Agent ID of the sender.
-            msg_type: Application-defined type string.
-            payload: Message content.
-            metadata: Optional extra fields.
-
-        Returns:
-            The message ID.
-        """
-        ...
-
-    def query(
-        self,
-        channel: str,
-        after: str | None = None,
-        limit: int = 100,
-        msg_type: str | None = None,
-    ) -> list[Message]:
-        """Retrieve messages from a channel.
-
-        Args:
-            channel: Channel to read from.
-            after: If provided, only return messages with ID greater than this.
-                Used as a cursor for incremental polling.
-            limit: Maximum number of messages to return.
-            msg_type: If provided, only return messages of this type.
-
-        Returns:
-            Messages in chronological order (oldest first).
-        """
-        ...
-
-    def subscribe(
-        self,
-        channel: str,
-        callback: Callable[[Message], None],
-    ) -> str:
-        """Register an in-process callback for new messages on a channel.
-
-        The callback is invoked synchronously during publish() within the
-        same process. For cross-process notification, use query() instead.
-
-        Args:
-            channel: Channel to watch.
-            callback: Function called with each new Message.
-
-        Returns:
-            Subscription ID for use with unsubscribe().
-        """
-        ...
-
-    def unsubscribe(self, subscription_id: str) -> None:
-        """Remove a subscription.
-
-        Args:
-            subscription_id: ID returned by subscribe().
-        """
-        ...
-
-    def channels(self) -> list[str]:
-        """List all channels that have at least one message.
-
-        Returns:
-            Sorted list of channel names.
         """
         ...

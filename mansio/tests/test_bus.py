@@ -10,7 +10,6 @@ import pytest
 
 from mansio import (
     Bus,
-    JSONSerializer,
     MemoryBackend,
     Message,
     SQLiteBackend,
@@ -124,28 +123,6 @@ class TestMessage:
             metadata=meta,
         )
         assert msg.metadata == meta
-
-
-# ──────────────────────────────────────────────
-# JSONSerializer
-# ──────────────────────────────────────────────
-
-
-class TestJSONSerializer:
-    """Tests for JSONSerializer."""
-
-    def test_encode_decode_roundtrip(self):
-        ser = JSONSerializer()
-        data = {"key": "value", "nested": {"a": 1}}
-        encoded = ser.encode(data)
-        assert isinstance(encoded, str)
-        assert ser.decode(encoded) == data
-
-    def test_encode_unicode(self):
-        ser = JSONSerializer()
-        data = {"name": "mansio 广场"}
-        encoded = ser.encode(data)
-        assert "mansio 广场" in encoded  # ensure_ascii=False
 
 
 # ──────────────────────────────────────────────
@@ -333,11 +310,6 @@ class TestBusWithMemoryBackend:
         mem = MemoryBackend()
         bus = Bus(backend=mem)
         assert bus.backend is mem
-        bus.close()
-
-    def test_serializer_property(self):
-        bus = Bus(backend=MemoryBackend())
-        assert isinstance(bus.serializer, JSONSerializer)
         bus.close()
 
     def test_repr(self):
