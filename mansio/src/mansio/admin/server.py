@@ -28,6 +28,13 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _redact_password(value: str, tail: int = 4) -> str:
+    """Mask a password for safe logging, showing only the last *tail* chars."""
+    if len(value) <= tail:
+        return "****"
+    return "*" * (len(value) - tail) + value[-tail:]
+
+
 @dataclass
 class AdminInfo:
     """Information about the running admin server."""
@@ -38,7 +45,7 @@ class AdminInfo:
     password: str | None
 
     def __repr__(self) -> str:
-        pw = "****" if self.password else "None"
+        pw = _redact_password(self.password) if self.password else "None"
         return f"AdminInfo(host={self.host!r}, port={self.port!r}, url={self.url!r}, password={pw})"
 
 
@@ -121,7 +128,14 @@ class AdminServer:
             password=self._auth.password if self._auth else None,
         )
 
-        logger.info("Admin server started", url=url)
+        if self._auth and self._auth.password:
+            logger.info(
+                "Admin server started",
+                url=url,
+                password=_redact_password(self._auth.password),
+            )
+        else:
+            logger.info("Admin server started", url=url)
 
         return info
 
