@@ -15,6 +15,23 @@ from mansio._vendor.structlog import get_logger
 from mansio.protocols import Backend, Compactable, Presenceable
 from mansio.types import AgentPresence, ClaimResult, Message
 
+_CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
+    ("dm:", "dm"),
+    ("notebook:", "notebook"),
+    ("memory:", "memory"),
+    ("broadcast:", "broadcast"),
+    ("_system:", "system"),
+]
+
+
+def _infer_channel_type(name: str) -> str:
+    """Infer channel type from its name prefix."""
+    for prefix, ctype in _CHANNEL_TYPE_PREFIXES:
+        if name.startswith(prefix):
+            return ctype
+    return "user"
+
+
 logger = get_logger(__name__)
 
 _SCHEMA = """\
@@ -189,6 +206,31 @@ class SQLiteBackend(Backend, Presenceable, Compactable):
                 sql = f"SELECT * FROM messages WHERE {where} ORDER BY id ASC LIMIT ?"
             cursor = self._conn.execute(sql, params)
             return [self._row_to_message(row) for row in cursor.fetchall()]
+
+    def list_channels_detail(self) -> list[dict]:
+        """List all channels with metadata.
+
+        Returns:
+            List of dicts with keys: name, message_count, last_activity,
+            sender_count, type.
+        """
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT channel, COUNT(*) as message_count, "
+                "MAX(timestamp) as last_activity, "
+                "COUNT(DISTINCT sender) as sender_count "
+                "FROM messages GROUP BY channel ORDER BY channel"
+            )
+            return [
+                {
+                    "name": row["channel"],
+                    "message_count": row["message_count"],
+                    "last_activity": row["last_activity"],
+                    "sender_count": row["sender_count"],
+                    "type": _infer_channel_type(row["channel"]),
+                }
+                for row in cursor.fetchall()
+            ]
 
     def list_channels(self) -> list[str]:
         """List all channels that have at least one message.

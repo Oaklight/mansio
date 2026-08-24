@@ -763,8 +763,23 @@ class HttpFrontend:
 
         @self._app.get("/v1/channels")
         async def channels(request: Request) -> dict:
-            all_channels = await asyncio.to_thread(bus.channels)
+            detail_param = (request.query_params.get("detail") or ["false"])[0]
+            want_detail = detail_param.lower() == "true"
+
             auth_result = _auth_result_var.get()
+
+            if want_detail:
+                all_detail = await asyncio.to_thread(bus.channels_detail)
+                if isinstance(auth_result, str):
+                    all_detail = [
+                        ch
+                        for ch in all_detail
+                        if not _is_private_channel(ch["name"])
+                        or auth_result in ch["name"].split(":")
+                    ]
+                return {"channels": all_detail}
+
+            all_channels: list[str] = await asyncio.to_thread(bus.channels)
             if isinstance(auth_result, str):
                 all_channels = [
                     ch

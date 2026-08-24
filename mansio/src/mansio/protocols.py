@@ -86,6 +86,15 @@ class Backend(ABC):
         """
         ...
 
+    def list_channels_detail(self) -> list[dict]:
+        """List all channels with metadata.
+
+        Returns:
+            List of dicts with keys: name, message_count, last_activity,
+            sender_count, type.
+        """
+        raise NotImplementedError
+
     @abstractmethod
     def queue_claim(
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300

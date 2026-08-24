@@ -8,7 +8,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Literal, overload
 
 from mansio.backends import SQLiteBackend
 from mansio.protocols import Backend, Presenceable
@@ -196,13 +196,36 @@ class Bus:
         for channel_subs in self._subs.values():
             channel_subs.pop(subscription_id, None)
 
-    def channels(self) -> list[str]:
+    @overload
+    def channels(self) -> list[str]: ...
+    @overload
+    def channels(self, *, detail: Literal[False]) -> list[str]: ...
+    @overload
+    def channels(self, *, detail: Literal[True]) -> list[dict]: ...
+
+    def channels(self, *, detail: bool = False) -> list[str] | list[dict]:
         """List all channels that have at least one message.
 
+        Args:
+            detail: If True, return list of dicts with channel metadata
+                instead of plain channel name strings.
+
         Returns:
-            Sorted list of channel names.
+            Sorted list of channel names, or list of dicts when
+            *detail* is True.
         """
+        if detail:
+            return self._backend.list_channels_detail()
         return self._backend.list_channels()
+
+    def channels_detail(self) -> list[dict]:
+        """List all channels with metadata.
+
+        Returns:
+            List of dicts with keys: name, message_count, last_activity,
+            sender_count, type.
+        """
+        return self._backend.list_channels_detail()
 
     def subscription_counts(self) -> dict[str, list[str]]:
         """Active subscription IDs grouped by channel.

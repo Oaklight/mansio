@@ -13,7 +13,7 @@ import re
 import secrets
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, overload
 
 from mansio.backends import SQLiteBackend
 from mansio.bus import Bus
@@ -426,13 +426,26 @@ class MansioClient:
             self._cursors[channel] = msgs[-1].id
         return msgs
 
-    def channel_list(self) -> list[str]:
+    @overload
+    def channel_list(self) -> list[str]: ...
+    @overload
+    def channel_list(self, *, detail: Literal[False]) -> list[str]: ...
+    @overload
+    def channel_list(self, *, detail: Literal[True]) -> list[dict]: ...
+
+    def channel_list(self, *, detail: bool = False) -> list[str] | list[dict]:
         """List all channels with messages.
 
+        Args:
+            detail: If True, return list of dicts with channel metadata
+                (name, message_count, last_activity, sender_count, type)
+                instead of plain channel name strings.
+
         Returns:
-            Sorted list of channel names.
+            List of channel name strings, or list of dicts when
+            *detail* is True.
         """
-        return self._transport.channels()
+        return self._transport.channels(detail=detail)
 
     # ── Sugar API: Notes ──────────────────────────────────────────
 
