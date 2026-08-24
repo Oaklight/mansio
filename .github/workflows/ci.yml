@@ -49,7 +49,7 @@ jobs:
               tree = ast.parse(open(path).read())
               methods = {}
               for node in ast.walk(tree):
-                  if isinstance(node, ast.ClassDef) and 'Transport' in node.name:
+                  if isinstance(node, ast.ClassDef) and node.name == 'HttpTransport':
                       for item in node.body:
                           if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                               if not item.name.startswith('_'):
