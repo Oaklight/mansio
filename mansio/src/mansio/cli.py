@@ -185,6 +185,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Use SSL/TLS for IRC connection",
     )
 
+    # ── mcp-serve ─────────────────────────────────────────────────
+    mcp = sub.add_parser("mcp-serve", help="Start MCP server (JSON-RPC over stdio)")
+    mcp.add_argument(
+        "-u",
+        "--url",
+        required=True,
+        help="Mansio server URL (e.g. http://localhost:8742)",
+    )
+    mcp.add_argument(
+        "-a",
+        "--agent-id",
+        required=True,
+        help="Agent ID to connect as",
+    )
+    mcp.add_argument(
+        "--token",
+        default=None,
+        help="Bearer token for API auth (mst-...)",
+    )
+    mcp.add_argument(
+        "--display-name",
+        default=None,
+        help="Human-readable display name (defaults to agent-id)",
+    )
+
     # ── client ────────────────────────────────────────────────────
     client = sub.add_parser("client", help="Interact with a remote mansio server")
     client_sub = client.add_subparsers(dest="action")
@@ -431,6 +456,22 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     bus.close()
 
 
+def _cmd_mcp_serve(args: argparse.Namespace) -> None:
+    """Handle the ``mcp-serve`` subcommand.
+
+    Args:
+        args: Parsed arguments namespace.
+    """
+    from mansio.mcp import serve
+
+    serve(
+        url=args.url,
+        agent_id=args.agent_id,
+        token=args.token,
+        display_name=args.display_name,
+    )
+
+
 def _cmd_client_send(args: argparse.Namespace) -> None:
     """Handle ``client send``.
 
@@ -524,6 +565,8 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "serve":
         _cmd_serve(args)
+    elif args.command == "mcp-serve":
+        _cmd_mcp_serve(args)
     elif args.command == "client":
         if args.action is None:
             print("usage: mansio client {send,poll,channels,dm} ...", file=sys.stderr)
