@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
-from mansio.protocols import Backend, Compactable, Presenceable
+from mansio.protocols import Backend, Compactable, Deletable, Presenceable
 from mansio.types import AgentPresence, ClaimResult, Message
 
 
@@ -132,7 +132,7 @@ def _email_to_msg(em: email.message.Message) -> Message | None:
     )
 
 
-class MaildirBackend(Backend, Presenceable, Compactable):
+class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
     """Maildir-backed message backend.
 
     Each Mansio channel is stored as a separate Maildir directory
@@ -743,6 +743,97 @@ class MaildirBackend(Backend, Presenceable, Compactable):
                     md.flush()
 
         return deleted
+
+    # ── Deletion ─────────────────────────────────────────────────
+
+    def delete_channel(self, channel: str) -> int:
+        """Delete a channel and all its messages.
+
+        Removes the Maildir directory and all associated files.
+
+        Args:
+            channel: Channel name to delete.
+
+        Returns:
+            Number of messages deleted.
+        """
+        import shutil
+
+        with self._lock:
+            dirname = _channel_to_dirname(channel)
+            md_path = (self._root / dirname).resolve()
+            if not md_path.is_relative_to(self._root.resolve()):
+                return 0
+
+            # Count messages before deletion
+            count = 0
+            if channel in self._maildirs:
+                md = self._maildirs[channel]
+                count = len(md)
+                md.close()
+                del self._maildirs[channel]
+            elif md_path.exists():
+                md = mailbox.Maildir(str(md_path), create=False)
+                count = len(md)
+                md.close()
+
+            # Remove message index entries for this channel
+            to_remove = [mid for mid, (ch, _key) in self._msg_index.items() if ch == channel]
+            for mid in to_remove:
+                del self._msg_index[mid]
+
+            # Remove the directory
+            if md_path.exists():
+                shutil.rmtree(md_path)
+
+            # Update channel map
+            self._channel_map.pop(dirname, None)
+            self._invalidate_channel_map()
+
+            return count
+
+    def _discard_maildir_key(self, channel: str, md_key: str) -> bool:
+        """Remove a maildir key and its claim sidecar.
+
+        Returns True on success, False if the key was already gone.
+        """
+        md = self._get_maildir(channel)
+        try:
+            md.discard(md_key)
+            md.flush()
+        except KeyError:
+            return False
+        claim_path = self._get_claim_path(channel, md_key)
+        if claim_path.exists():
+            claim_path.unlink()
+        return True
+
+    def _scan_delete_message(self, message_id: str) -> bool:
+        """Fallback scan across all channels to find and delete a message."""
+        self._load_channel_map()
+        for _dirname, channel in self._channel_map.items():
+            md = self._get_maildir(channel)
+            for key in md.iterkeys():
+                if md[key].get("X-Mansio-Id") == message_id:
+                    self._discard_maildir_key(channel, key)
+                    return True
+        return False
+
+    def delete_message(self, message_id: str) -> bool:
+        """Delete a single message by ID.
+
+        Args:
+            message_id: ID of the message to delete.
+
+        Returns:
+            True if the message was found and deleted, False otherwise.
+        """
+        with self._lock:
+            entry = self._msg_index.pop(message_id, None)
+            if entry is None:
+                return self._scan_delete_message(message_id)
+            channel, md_key = entry
+            return self._discard_maildir_key(channel, md_key)
 
     def info(self) -> dict:
         """Return backend type, config, and usage info."""

@@ -12,7 +12,7 @@ from typing import Literal
 
 from mansio._vendor.retry import retry
 from mansio._vendor.structlog import get_logger
-from mansio.protocols import Backend, Compactable, Presenceable
+from mansio.protocols import Backend, Compactable, Deletable, Presenceable
 from mansio.types import AgentPresence, ClaimResult, Message
 
 _CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS agent_presence (
 """
 
 
-class SQLiteBackend(Backend, Presenceable, Compactable):
+class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
     """SQLite-backed message backend.
 
     Supports cross-process sharing via WAL mode.
@@ -500,6 +500,36 @@ class SQLiteBackend(Backend, Presenceable, Compactable):
                 deleted += cur2.rowcount
             self._conn.commit()
         return deleted
+
+    # ── Deletion ─────────────────────────────────────────────
+
+    def delete_channel(self, channel: str) -> int:
+        """Delete a channel and all its messages.
+
+        Args:
+            channel: Channel name to delete.
+
+        Returns:
+            Number of messages deleted.
+        """
+        with self._lock:
+            cursor = self._conn.execute("DELETE FROM messages WHERE channel = ?", (channel,))
+            self._conn.commit()
+            return cursor.rowcount
+
+    def delete_message(self, message_id: str) -> bool:
+        """Delete a single message by ID.
+
+        Args:
+            message_id: ID of the message to delete.
+
+        Returns:
+            True if the message was found and deleted, False otherwise.
+        """
+        with self._lock:
+            cursor = self._conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+            self._conn.commit()
+            return cursor.rowcount > 0
 
     def info(self) -> dict:
         """Return backend type, config, and usage info."""

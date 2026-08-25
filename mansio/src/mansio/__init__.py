@@ -5,7 +5,7 @@ __version__ = "0.2.3"
 from mansio.backends import MemoryBackend, SQLiteBackend
 from mansio.bus import Bus, SQLiteBus
 from mansio.client import MansioClient
-from mansio.protocols import Backend, Compactable, Presenceable
+from mansio.protocols import Backend, Compactable, Deletable, Presenceable
 from mansio.server import MansioServer
 from mansio.system_policy import CompactionPolicy, system_channel_policy
 from mansio.transport_http import HttpTransport, MansioAPIError
@@ -22,6 +22,7 @@ __all__ = [
     "Bus",
     "ClaimResult",
     "Compactable",
+    "Deletable",
     "CompactionPolicy",
     "MaildirBackend",
     "HttpTransport",
