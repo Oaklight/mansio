@@ -323,7 +323,7 @@ def _tool_agents(client: MansioClient, args: dict[str, Any]) -> Any:
             "agent_id": a.agent_id,
             "status": a.status,
             "last_seen": a.last_seen,
-            **(a.metadata or {}),
+            "metadata": a.metadata,
         }
         for a in agents
     ]
