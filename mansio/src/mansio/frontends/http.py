@@ -433,12 +433,15 @@ def _parse_query_params(request: Any, max_limit: int) -> dict:
             "_status": 400,
         }
 
+    thread_id = (request.query_params.get("thread_id") or [None])[0]
+
     return {
         "channel": channel,
         "after": after,
         "limit": limit,
         "msg_type": msg_type,
         "order": order,
+        "thread_id": thread_id,
     }
 
 
@@ -529,7 +532,7 @@ def _claim_result_to_dict(result: Any) -> dict[str, Any]:
 
 def _msg_to_dict(m: Message) -> dict[str, Any]:
     """Serialize a Message to a dict."""
-    return {
+    d: dict[str, Any] = {
         "id": m.id,
         "channel": m.channel,
         "sender": m.sender,
@@ -538,6 +541,11 @@ def _msg_to_dict(m: Message) -> dict[str, Any]:
         "timestamp": m.timestamp,
         "metadata": m.metadata,
     }
+    if m.parent_id is not None:
+        d["parent_id"] = m.parent_id
+    if m.thread_id is not None:
+        d["thread_id"] = m.thread_id
+    return d
 
 
 class HttpFrontend:
@@ -719,15 +727,22 @@ class HttpFrontend:
             if auth_error:
                 return auth_error
 
-            msg_id = await asyncio.to_thread(
-                bus.publish,
-                channel=data["channel"],
-                sender=data["sender"],
-                msg_type=data["msg_type"],
-                payload=data["payload"],
-                metadata=data.get("metadata"),
-                queue=bool(data.get("queue")),
-            )
+            try:
+                msg_id = await asyncio.to_thread(
+                    bus.publish,
+                    channel=data["channel"],
+                    sender=data["sender"],
+                    msg_type=data["msg_type"],
+                    payload=data["payload"],
+                    metadata=data.get("metadata"),
+                    queue=bool(data.get("queue")),
+                    parent_id=data.get("parent_id"),
+                )
+            except ValueError as e:
+                return {
+                    "error": "Not Found" if "not found" in str(e) else "Bad Request",
+                    "message": str(e),
+                }, 404 if "not found" in str(e) else 400
             result: dict[str, object] = {"message_id": msg_id}
 
             warning = await _dm_unregistered_warning(bus, data["channel"], data["sender"])
@@ -751,6 +766,7 @@ class HttpFrontend:
                 limit=limit,
                 msg_type=qp.get("msg_type"),
                 order=qp.get("order", "oldest"),
+                thread_id=qp.get("thread_id"),
             )
 
             auth_result = _auth_result_var.get()

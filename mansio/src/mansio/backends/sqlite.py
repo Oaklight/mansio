@@ -81,6 +81,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
         self._enable_wal()
         self._conn.executescript(_SCHEMA)
         self._ensure_queue_columns()
+        self._ensure_threading_columns()
         self._conn.commit()
 
     @retry(
@@ -113,6 +114,17 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
             "CREATE INDEX IF NOT EXISTS idx_channel_status ON messages (channel, status, id)"
         )
 
+    def _ensure_threading_columns(self) -> None:
+        """Idempotent migration: add parent_id and thread_id columns."""
+        existing = {row[1] for row in self._conn.execute("PRAGMA table_info(messages)").fetchall()}
+        for col in ("parent_id", "thread_id"):
+            if col not in existing:
+                with contextlib.suppress(sqlite3.OperationalError):
+                    self._conn.execute(f"ALTER TABLE messages ADD COLUMN {col} TEXT")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_channel_thread ON messages (channel, thread_id)"
+        )
+
     def store(self, message: Message) -> None:
         """Persist a regular message to SQLite.
 
@@ -123,8 +135,9 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
         with self._lock:
             self._conn.execute(
                 "INSERT INTO messages "
-                "(id, channel, sender, msg_type, payload, timestamp, metadata, status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, channel, sender, msg_type, payload, timestamp, metadata, status, "
+                "parent_id, thread_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     message.id,
                     message.channel,
@@ -134,6 +147,8 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
                     message.timestamp,
                     meta_json,
                     None,
+                    message.parent_id,
+                    message.thread_id,
                 ),
             )
             self._conn.commit()
@@ -148,8 +163,9 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
         with self._lock:
             self._conn.execute(
                 "INSERT INTO messages "
-                "(id, channel, sender, msg_type, payload, timestamp, metadata, status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, channel, sender, msg_type, payload, timestamp, metadata, status, "
+                "parent_id, thread_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     message.id,
                     message.channel,
@@ -159,9 +175,20 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
                     message.timestamp,
                     meta_json,
                     "unclaimed",
+                    message.parent_id,
+                    message.thread_id,
                 ),
             )
             self._conn.commit()
+
+    def get_message(self, message_id: str) -> Message | None:
+        """Retrieve a single message by ID."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT * FROM messages WHERE id = ?", (message_id,)
+            )
+            row = cursor.fetchone()
+            return self._row_to_message(row) if row else None
 
     def query(
         self,
@@ -170,6 +197,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
         limit: int = 100,
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
+        thread_id: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -181,6 +209,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
             order: ``"oldest"`` returns the first *limit* messages;
                 ``"newest"`` returns the last *limit* messages.  Both
                 return results in chronological (ascending ID) order.
+            thread_id: If provided, only return messages in this thread.
 
         Returns:
             Messages in chronological order (oldest first).
@@ -194,6 +223,9 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
             if msg_type is not None:
                 clauses.append("msg_type = ?")
                 params.append(msg_type)
+            if thread_id is not None:
+                clauses.append("thread_id = ?")
+                params.append(thread_id)
             where = " AND ".join(clauses)
             params.append(limit)
             if order == "newest":
@@ -382,6 +414,15 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
         """
         meta_raw = row["metadata"]
         metadata = json.loads(meta_raw) if meta_raw else None
+        # parent_id/thread_id may not exist in old DBs before migration runs
+        try:
+            parent_id = row["parent_id"]
+        except (IndexError, KeyError):
+            parent_id = None
+        try:
+            thread_id = row["thread_id"]
+        except (IndexError, KeyError):
+            thread_id = None
         return Message(
             id=row["id"],
             channel=row["channel"],
@@ -390,6 +431,8 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
             payload=row["payload"],
             timestamp=row["timestamp"],
             metadata=metadata,
+            parent_id=parent_id or None,
+            thread_id=thread_id or None,
         )
 
     def queue_claim(

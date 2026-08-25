@@ -93,6 +93,17 @@ class Bus:
         """Whether this bus requires client authentication."""
         return self._require_auth
 
+    def get_message(self, message_id: str) -> Message | None:
+        """Look up a single message by ID.
+
+        Args:
+            message_id: The message ID to look up.
+
+        Returns:
+            The Message if found, otherwise None.
+        """
+        return self._backend.get_message(message_id)
+
     def publish(
         self,
         channel: str,
@@ -102,6 +113,7 @@ class Bus:
         metadata: dict | None = None,
         *,
         queue: bool = False,
+        parent_id: str | None = None,
     ) -> str:
         """Publish a message to a channel.
 
@@ -111,12 +123,33 @@ class Bus:
             msg_type: Application-defined type string.
             payload: Message content.
             metadata: Optional extra fields.
+            parent_id: Optional ID of the message being replied to.
+                Server auto-computes ``thread_id`` from the parent.
 
         Returns:
             The message ID.
+
+        Raises:
+            ValueError: If parent_id references a non-existent message
+                or a message in a different channel.
         """
         msg_id = _uuid7()
         timestamp = _now_iso()
+
+        # Resolve threading fields
+        thread_id: str | None = None
+        if parent_id is not None:
+            parent = self._backend.get_message(parent_id)
+            if parent is None:
+                raise ValueError(f"parent_id '{parent_id}' not found")
+            if parent.channel != channel:
+                raise ValueError(
+                    f"parent_id '{parent_id}' belongs to channel "
+                    f"'{parent.channel}', not '{channel}'"
+                )
+            # thread_id = parent's thread_id if it's already in a thread,
+            # otherwise the parent is the root → use parent's id
+            thread_id = parent.thread_id if parent.thread_id else parent_id
 
         msg = Message(
             id=msg_id,
@@ -126,6 +159,8 @@ class Bus:
             payload=payload,
             timestamp=timestamp,
             metadata=metadata,
+            parent_id=parent_id,
+            thread_id=thread_id,
         )
 
         if queue:
@@ -148,6 +183,7 @@ class Bus:
         limit: int = 100,
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
+        thread_id: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -158,12 +194,14 @@ class Bus:
             msg_type: If provided, only return messages of this type.
             order: ``"oldest"`` returns the first *limit* messages;
                 ``"newest"`` returns the last *limit* messages.
+            thread_id: If provided, only return messages in this thread.
 
         Returns:
             Messages in chronological order (oldest first).
         """
         return self._backend.query(
-            channel, after=after, limit=limit, msg_type=msg_type, order=order
+            channel, after=after, limit=limit, msg_type=msg_type, order=order,
+            thread_id=thread_id,
         )
 
     def subscribe(

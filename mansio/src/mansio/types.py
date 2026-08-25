@@ -19,6 +19,10 @@ class Message:
         payload: Message content. JSON string or plain text.
         timestamp: ISO 8601 timestamp of when the message was published.
         metadata: Optional extra fields as a dict.
+        parent_id: ID of the message this is a reply to (optional).
+        thread_id: ID of the root message of the conversation thread
+            (optional). Equals parent_id for direct replies to root;
+            enables flat thread queries.
     """
 
     id: str
@@ -28,6 +32,8 @@ class Message:
     payload: str
     timestamp: str
     metadata: dict | None = field(default=None)
+    parent_id: str | None = field(default=None)
+    thread_id: str | None = field(default=None)
 
     def payload_json(self) -> dict:
         """Parse payload as JSON. Raises ValueError if not valid JSON."""

@@ -155,6 +155,8 @@ class NATSBackend(Backend, Presenceable, Compactable):
             "payload": message.payload,
             "timestamp": message.timestamp,
             "metadata": message.metadata,
+            "parent_id": message.parent_id,
+            "thread_id": message.thread_id,
         }
         return json.dumps(data).encode("utf-8")
 
@@ -170,6 +172,8 @@ class NATSBackend(Backend, Presenceable, Compactable):
             payload=d["payload"],
             timestamp=d["timestamp"],
             metadata=d.get("metadata"),
+            parent_id=d.get("parent_id"),
+            thread_id=d.get("thread_id"),
         )
 
     # ── Event loop bridge ─────────────────────────────────────
@@ -418,6 +422,7 @@ class NATSBackend(Backend, Presenceable, Compactable):
         limit: int = 100,
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
+        thread_id: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel via JetStream.
 
@@ -441,9 +446,15 @@ class NATSBackend(Backend, Presenceable, Compactable):
             )
         self._ensure_connected()
         subject = self._subject(channel)
-        return self._run_async(
-            self._fetch_all(subject, limit=limit, after=after, msg_type=msg_type)
+        # NATS JetStream doesn't support server-side thread_id filtering,
+        # so we fetch more and filter client-side when needed.
+        fetch_limit = limit if thread_id is None else limit * 5
+        msgs = self._run_async(
+            self._fetch_all(subject, limit=fetch_limit, after=after, msg_type=msg_type)
         )
+        if thread_id is not None:
+            msgs = [m for m in msgs if m.thread_id == thread_id][:limit]
+        return msgs
 
     def list_channels(self) -> list[str]:
         """List all channels using JetStream stream info.
