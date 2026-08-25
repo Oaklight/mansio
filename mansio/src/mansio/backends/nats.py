@@ -123,6 +123,10 @@ class NATSBackend(Backend, Presenceable, Compactable):
         # In-memory presence store (not persisted to NATS)
         self._presence: dict[str, dict] = {}
 
+        # In-memory message index for get_message() lookups.
+        # Only contains messages stored through this backend instance.
+        self._messages_by_id: dict[str, Message] = {}
+
     # ── Subject encoding ──────────────────────────────────────
 
     def _subject(self, channel: str) -> str:
@@ -300,6 +304,7 @@ class NATSBackend(Backend, Presenceable, Compactable):
             await self._js.publish(subject, payload)
 
         self._run_async(_pub())
+        self._messages_by_id[message.id] = message
 
     def store_queue(self, message: Message) -> None:
         """Store a queue message to NATS JetStream with claim tracking.
@@ -327,6 +332,7 @@ class NATSBackend(Backend, Presenceable, Compactable):
             await self._kv.create(message.id, json.dumps(state).encode())
 
         self._run_async(_pub_queue())
+        self._messages_by_id[message.id] = message
 
     # ── Fetch helpers ─────────────────────────────────────────
 
@@ -412,6 +418,16 @@ class NATSBackend(Backend, Presenceable, Compactable):
         if sender and msg.sender != sender:
             return False
         return not (msg_type and msg.msg_type != msg_type)
+
+    # ── Message lookup ────────────────────────────────────────
+
+    def get_message(self, message_id: str) -> Message | None:
+        """Look up a message by ID from the in-memory index.
+
+        Only messages stored through this backend instance are indexed.
+        Returns None if the message is not found.
+        """
+        return self._messages_by_id.get(message_id)
 
     # ── Query ─────────────────────────────────────────────────
 
