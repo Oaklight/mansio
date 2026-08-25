@@ -336,7 +336,7 @@ class TestCallTool(unittest.TestCase):
         result = _call_tool(self.client, "mansio_agents", {})
         assert len(result) == 1
         assert result[0]["agent_id"] == "agent-a"
-        assert result[0]["display_name"] == "Agent A"
+        assert result[0]["metadata"]["display_name"] == "Agent A"
 
     def test_heartbeat(self) -> None:
         result = _call_tool(self.client, "mansio_heartbeat", {})
