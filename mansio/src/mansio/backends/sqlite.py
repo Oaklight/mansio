@@ -166,6 +166,16 @@ def check_schema(
         return "current"
 
     if stored > SCHEMA_VERSION:
+        if force_init:
+            logger.warning(
+                "Overriding future schema version (MANSIO_FORCE_INIT=1)",
+                stored_version=stored,
+                expected_version=SCHEMA_VERSION,
+                db=db_path,
+            )
+            _set_schema_version(conn, SCHEMA_VERSION)
+            conn.commit()
+            return "current"
         raise SchemaVersionError(
             f"Database '{db_path}' has schema version {stored}, but this "
             f"build only supports version {SCHEMA_VERSION}. Upgrade mansio "

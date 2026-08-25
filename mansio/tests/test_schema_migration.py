@@ -120,6 +120,17 @@ class TestCheckSchema:
         with pytest.raises(SchemaVersionError, match="schema version"):
             check_schema(conn, ":memory:")
 
+    def test_future_version_force_init_overrides(self) -> None:
+        conn = _fresh_conn()
+        _create_legacy_db(conn)
+        future = SCHEMA_VERSION + 3
+        _set_schema_version(conn, future)
+        conn.commit()
+        result = check_schema(conn, ":memory:", force_init=True)
+        assert result == "current"
+        # Version should be stamped down to current
+        assert _get_schema_version(conn) == SCHEMA_VERSION
+
     def test_future_version_error_message(self) -> None:
         conn = _fresh_conn()
         _create_legacy_db(conn)
