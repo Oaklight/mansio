@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -577,9 +578,8 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             meta = self._channels.get(name)
             if meta is None:
                 return False
-            from dataclasses import replace
 
-            self._channels[name] = replace(
+            self._channels[name] = dataclasses.replace(
                 meta,
                 visibility=visibility if visibility is not None else meta.visibility,
                 owner=owner if owner is not None else meta.owner,
@@ -616,11 +616,11 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                 return True  # unregistered channels are public
             if meta.owner == agent_id:
                 return True
-            if meta.visibility == "public" and required == "read":
+            if meta.visibility == "public" and required in ("read", "write"):
                 return True
             entry = self._acl.get(channel, {}).get(agent_id)
             if entry is None:
-                return meta.visibility == "public" and required in ("read", "write")
+                return False
             return PERMISSION_LEVELS.get(entry.permission, 0) >= PERMISSION_LEVELS.get(required, 0)
 
     def close(self) -> None:
