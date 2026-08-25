@@ -27,6 +27,125 @@
     --transition: all 0.2s ease;
 }
 
+/* ============== Dark Theme ============== */
+[data-theme="dark"] {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --text-primary: #e0e0e0;
+    --text-secondary: #8b8b8b;
+    --accent: #3dd6c8;
+    --accent-hover: #35c4b7;
+    --accent-light: rgba(61, 214, 200, 0.1);
+    --border: #2a2a4a;
+    --success: #4ade80;
+    --error: #f87171;
+    --warning: #fbbf24;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+    --shadow-md: 0 2px 8px rgba(0,0,0,0.3);
+    --shadow-lg: 0 4px 16px rgba(0,0,0,0.4);
+}
+
+[data-theme="dark"] .token-reveal {
+    background: #2a2a1a; border-color: #7a6a20;
+}
+[data-theme="dark"] .token-reveal-label { color: #fbbf24; }
+[data-theme="dark"] .token-reveal-value {
+    background: #1f1f10; color: #e0e0e0;
+}
+[data-theme="dark"] .token-reveal-label svg { stroke: #fbbf24; }
+[data-theme="dark"] .btn-danger:hover { background: #dc2626; }
+[data-theme="dark"] .login-overlay { background: rgba(0,0,0,0.7); }
+[data-theme="dark"] .login-card input { color: var(--text-primary); }
+[data-theme="dark"] select { color-scheme: dark; }
+[data-theme="dark"] input[type="checkbox"] { color-scheme: dark; }
+
+@media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) {
+        --bg-primary: #1a1a2e;
+        --bg-secondary: #16213e;
+        --text-primary: #e0e0e0;
+        --text-secondary: #8b8b8b;
+        --accent: #3dd6c8;
+        --accent-hover: #35c4b7;
+        --accent-light: rgba(61, 214, 200, 0.1);
+        --border: #2a2a4a;
+        --success: #4ade80;
+        --error: #f87171;
+        --warning: #fbbf24;
+        --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+        --shadow-md: 0 2px 8px rgba(0,0,0,0.3);
+        --shadow-lg: 0 4px 16px rgba(0,0,0,0.4);
+    }
+    html:not([data-theme="light"]) .token-reveal {
+        background: #2a2a1a; border-color: #7a6a20;
+    }
+    html:not([data-theme="light"]) .token-reveal-label { color: #fbbf24; }
+    html:not([data-theme="light"]) .token-reveal-value {
+        background: #1f1f10; color: #e0e0e0;
+    }
+    html:not([data-theme="light"]) .token-reveal-label svg { stroke: #fbbf24; }
+    html:not([data-theme="light"]) .btn-danger:hover { background: #dc2626; }
+    html:not([data-theme="light"]) .login-overlay { background: rgba(0,0,0,0.7); }
+    html:not([data-theme="light"]) .login-card input { color: var(--text-primary); }
+    html:not([data-theme="light"]) select { color-scheme: dark; }
+    html:not([data-theme="light"]) input[type="checkbox"] { color-scheme: dark; }
+}
+
+/* ============== Settings Panel ============== */
+.settings-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: transparent; cursor: pointer; color: var(--text-secondary);
+    transition: var(--transition);
+}
+.settings-btn:hover { color: var(--text-primary); background: var(--accent-light); }
+.settings-popup {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.4); z-index: 1500;
+    display: flex; align-items: center; justify-content: center;
+}
+.settings-popup.hidden { display: none; }
+.settings-card {
+    background: var(--bg-secondary); border-radius: var(--radius-lg);
+    padding: 28px; width: 380px; box-shadow: var(--shadow-lg);
+}
+.settings-card h3 { margin-bottom: 20px; font-size: 1.1rem; }
+.settings-section { margin-bottom: 20px; }
+.settings-label {
+    font-size: 0.75rem; font-weight: 600; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+}
+.theme-switcher { display: flex; gap: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.theme-switcher button {
+    flex: 1; padding: 8px 14px; border: none; background: transparent;
+    font-size: 0.8rem; font-weight: 500; cursor: pointer;
+    color: var(--text-secondary); transition: var(--transition);
+    border-right: 1px solid var(--border);
+}
+.theme-switcher button:last-child { border-right: none; }
+.theme-switcher button:hover { background: var(--accent-light); }
+.theme-switcher button.active {
+    background: var(--accent); color: #fff;
+}
+.settings-info {
+    font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;
+}
+.settings-info a { color: var(--accent); text-decoration: none; }
+.settings-info a:hover { text-decoration: underline; }
+.settings-divider {
+    border: none; border-top: 1px solid var(--border); margin: 16px 0;
+}
+
+/* ============== Status Footer ============== */
+.status-footer {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 0; margin-top: 24px;
+    border-top: 1px solid var(--border);
+    font-size: 0.7rem; color: var(--text-secondary);
+}
+.status-footer span { display: inline-flex; align-items: center; gap: 4px; }
+.footer-spacer { flex: 1; }
+
 /* ============== Reset & Base ============== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 /* Hide main content until auth check completes to prevent flash of unauthenticated content */
@@ -549,6 +668,21 @@ tr:hover { background: var(--accent-light); }
     .bubble { max-width: 90%; }
 }
 </style>
+<script>
+// Theme initialization — runs before body to prevent flash
+(function() {
+    var theme = localStorage.getItem('mansio-theme') || 'auto';
+    if (theme === 'dark') {
+        document.documentElement.dataset.theme = 'dark';
+    } else if (theme === 'light') {
+        document.documentElement.dataset.theme = 'light';
+    } else {
+        // auto: let CSS prefers-color-scheme handle it, but don't set data-theme
+        // so the @media query applies
+        document.documentElement.removeAttribute('data-theme');
+    }
+})();
+</script>
 </head>
 <body class="auth-pending">
 <div class="app">
@@ -571,6 +705,12 @@ tr:hover { background: var(--accent-light); }
                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
             </svg>
             Refresh
+        </button>
+        <button class="settings-btn" onclick="toggleSettings()" title="Settings">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
         </button>
         <button class="btn btn-secondary btn-sm" id="logoutBtn" onclick="doLogout()" style="display:none">Logout</button>
     </header>
@@ -735,6 +875,48 @@ tr:hover { background: var(--accent-light); }
     <!-- System Tab -->
     <div class="tab-content" id="tab-system">
         <div id="systemInfo" style="color:var(--text-secondary);text-align:center;padding:40px">Loading...</div>
+    </div>
+
+    <!-- Status Footer -->
+    <footer class="status-footer">
+        <span id="footerBackend">Backend: —</span>
+        <span id="footerMessages">Messages: —</span>
+        <span id="footerUptime">Uptime: —</span>
+        <span class="footer-spacer"></span>
+        <span>Mansio Admin</span>
+    </footer>
+</div>
+
+<!-- Settings Popup -->
+<div class="settings-popup hidden" id="settingsPopup" onclick="if(event.target===this)toggleSettings()">
+    <div class="settings-card">
+        <h3>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:text-bottom">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            Settings
+        </h3>
+        <div class="settings-section">
+            <div class="settings-label">Theme</div>
+            <div class="theme-switcher" id="themeSwitcher">
+                <button onclick="setTheme('light')" title="Light mode">☀️ Light</button>
+                <button onclick="setTheme('auto')" title="Follow system">🖥️ Auto</button>
+                <button onclick="setTheme('dark')" title="Dark mode">🌙 Dark</button>
+            </div>
+        </div>
+        <hr class="settings-divider">
+        <div class="settings-section">
+            <div class="settings-label">About</div>
+            <div class="settings-info">
+                <strong>Mansio Admin</strong><br>
+                Lightweight message broker admin panel.<br>
+                <a href="https://github.com/openagentsinc/mansio" target="_blank" rel="noopener">GitHub →</a>
+            </div>
+        </div>
+        <div style="text-align:right;margin-top:8px">
+            <button class="btn btn-secondary btn-sm" onclick="toggleSettings()">Close</button>
+        </div>
     </div>
 </div>
 
@@ -959,8 +1141,11 @@ function drawThroughputChart(buckets) {
     const chartW = W - padLeft - padRight;
     const chartH = H - padTop - padBottom;
 
+    // Theme-aware chart colors
+    const cc = getChartColors();
+
     // Grid lines
-    ctx.strokeStyle = '#E8E5E0';
+    ctx.strokeStyle = cc.grid;
     ctx.lineWidth = 0.5;
     for (let i = 0; i <= 4; i++) {
         const y = padTop + (chartH / 4) * i;
@@ -969,7 +1154,7 @@ function drawThroughputChart(buckets) {
         ctx.lineTo(W - padRight, y);
         ctx.stroke();
 
-        ctx.fillStyle = '#81807C';
+        ctx.fillStyle = cc.label;
         ctx.font = '10px sans-serif';
         ctx.textAlign = 'right';
         const val = Math.round(maxCount * (1 - i / 4));
@@ -977,7 +1162,7 @@ function drawThroughputChart(buckets) {
     }
 
     // X-axis labels
-    ctx.fillStyle = '#81807C';
+    ctx.fillStyle = cc.label;
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
     for (let i = 0; i < 60; i += 10) {
@@ -987,7 +1172,7 @@ function drawThroughputChart(buckets) {
     ctx.fillText('now', padLeft + chartW, H - 4);
 
     // Line
-    ctx.strokeStyle = '#2B8A7E';
+    ctx.strokeStyle = cc.line;
     ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
     ctx.beginPath();
@@ -1003,7 +1188,7 @@ function drawThroughputChart(buckets) {
     ctx.lineTo(padLeft + chartW, padTop + chartH);
     ctx.lineTo(padLeft, padTop + chartH);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(43, 138, 126, 0.08)';
+    ctx.fillStyle = cc.fill;
     ctx.fill();
 }
 
@@ -1626,6 +1811,87 @@ function copyToken(token) {
     );
 }
 
+/* ============== Theme & Settings ============== */
+function toggleSettings() {
+    document.getElementById('settingsPopup').classList.toggle('hidden');
+    updateThemeSwitcher();
+}
+
+function setTheme(theme) {
+    localStorage.setItem('mansio-theme', theme);
+    if (theme === 'dark') {
+        document.documentElement.dataset.theme = 'dark';
+    } else if (theme === 'light') {
+        document.documentElement.dataset.theme = 'light';
+    } else {
+        document.documentElement.removeAttribute('data-theme');
+    }
+    updateThemeSwitcher();
+    // Redraw chart with updated colors
+    if (currentTab === 'dashboard') loadDashboard();
+}
+
+function updateThemeSwitcher() {
+    var current = localStorage.getItem('mansio-theme') || 'auto';
+    var btns = document.querySelectorAll('#themeSwitcher button');
+    var themes = ['light', 'auto', 'dark'];
+    btns.forEach(function(btn, i) {
+        btn.classList.toggle('active', themes[i] === current);
+    });
+}
+
+function isDarkMode() {
+    var theme = document.documentElement.dataset.theme;
+    if (theme === 'dark') return true;
+    if (theme === 'light') return false;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function getChartColors() {
+    if (isDarkMode()) {
+        return {
+            grid: '#2a2a4a',
+            label: '#8b8b8b',
+            line: '#3dd6c8',
+            fill: 'rgba(61, 214, 200, 0.08)'
+        };
+    }
+    return {
+        grid: '#E8E5E0',
+        label: '#81807C',
+        line: '#2B8A7E',
+        fill: 'rgba(43, 138, 126, 0.08)'
+    };
+}
+
+/* ============== Status Footer ============== */
+async function updateFooter() {
+    try {
+        var stats = await api.getStats();
+        document.getElementById('footerMessages').textContent = 'Messages: ' + stats.total_messages.toLocaleString();
+    } catch(e) {}
+    try {
+        var sys = await api.getSystemInfo();
+        var b = sys.backend || {};
+        document.getElementById('footerBackend').textContent = 'Backend: ' + (b.type || 'unknown');
+        if (sys.uptime_seconds !== undefined) {
+            document.getElementById('footerUptime').textContent = 'Uptime: ' + formatUptime(sys.uptime_seconds);
+        } else if (sys.uptime !== undefined) {
+            document.getElementById('footerUptime').textContent = 'Uptime: ' + sys.uptime;
+        }
+    } catch(e) {}
+}
+
+function formatUptime(seconds) {
+    if (seconds === undefined || seconds === null) return '\u2014';
+    var d = Math.floor(seconds / 86400);
+    var h = Math.floor((seconds % 86400) / 3600);
+    var m = Math.floor((seconds % 3600) / 60);
+    if (d > 0) return d + 'd ' + h + 'h ' + m + 'm';
+    if (h > 0) return h + 'h ' + m + 'm';
+    return m + 'm';
+}
+
 /* ============== Init ============== */
 async function init() {
     try {
@@ -1643,7 +1909,18 @@ async function init() {
     document.body.classList.remove('auth-pending');
     await loadDashboard();
     populateChannelSelector();
+    updateFooter();
     refreshInterval = setInterval(refreshCurrentTab, 3000);
+    // Refresh footer periodically (every 30s)
+    setInterval(updateFooter, 30000);
+}
+
+// Listen for system theme changes to update chart
+if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+        var theme = localStorage.getItem('mansio-theme') || 'auto';
+        if (theme === 'auto' && currentTab === 'dashboard') loadDashboard();
+    });
 }
 
 init();
