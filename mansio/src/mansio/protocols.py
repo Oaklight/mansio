@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Literal, Protocol, runtime_checkable
 
 from mansio._vendor.structlog import get_logger
-from mansio.types import AgentPresence, ClaimResult, Message
+from mansio.types import ACLEntry, AgentPresence, ChannelMeta, ClaimResult, Message
 
 logger = get_logger(__name__)
 
@@ -290,6 +290,98 @@ class Backend(ABC):
             Dict with at least a 'type' key.
         """
         return {"type": type(self).__name__}
+
+
+@runtime_checkable
+class ChannelStore(Protocol):
+    """Optional protocol for backends that support explicit channel metadata and ACL.
+
+    Backends implementing this protocol store channel ownership, visibility,
+    and per-agent access control entries. The Bus layer consults this for
+    authorization decisions.
+    """
+
+    def create_channel(self, meta: ChannelMeta, acl: list[ACLEntry] | None = None) -> None:
+        """Create a channel with metadata and optional initial ACL.
+
+        Args:
+            meta: Channel metadata (name, owner, visibility, created_at).
+            acl: Optional initial ACL entries.
+
+        Raises:
+            ValueError: If the channel already exists.
+        """
+        ...
+
+    def get_channel(self, name: str) -> ChannelMeta | None:
+        """Return channel metadata, or None if the channel is not registered."""
+        ...
+
+    def list_channels_meta(self) -> list[ChannelMeta]:
+        """Return metadata for all registered channels."""
+        ...
+
+    def update_channel(
+        self, name: str, *, visibility: str | None = None, owner: str | None = None
+    ) -> bool:
+        """Update channel metadata fields.
+
+        Returns:
+            True if the channel was found and updated, False otherwise.
+        """
+        ...
+
+    def delete_channel_meta(self, name: str) -> bool:
+        """Delete channel metadata and its ACL entries.
+
+        Does **not** delete messages — that is handled by ``Deletable``.
+
+        Returns:
+            True if the channel existed and was deleted.
+        """
+        ...
+
+    def set_acl(self, channel: str, entries: list[ACLEntry]) -> None:
+        """Replace the ACL for a channel.
+
+        Args:
+            channel: Channel name.
+            entries: Complete list of ACL entries (replaces existing).
+        """
+        ...
+
+    def get_acl(self, channel: str) -> list[ACLEntry]:
+        """Return ACL entries for a channel."""
+        ...
+
+    def add_acl_entry(self, entry: ACLEntry) -> None:
+        """Add or update a single ACL entry (upsert by channel + agent_id)."""
+        ...
+
+    def remove_acl_entry(self, channel: str, agent_id: str) -> bool:
+        """Remove an ACL entry.
+
+        Returns:
+            True if the entry existed and was removed.
+        """
+        ...
+
+    def check_access(self, channel: str, agent_id: str, required: str = "read") -> bool:
+        """Check if an agent has the required permission on a channel.
+
+        Permission hierarchy: ``admin`` ⊃ ``write`` ⊃ ``read``.
+        Public channels grant implicit ``read`` to all agents.
+        Unregistered channels (no metadata) are treated as public.
+
+        Args:
+            channel: Channel name.
+            agent_id: Agent to check.
+            required: Minimum permission needed.
+
+        Returns:
+            True if access is granted.
+        """
+        ...
 
 
 @runtime_checkable

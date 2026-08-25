@@ -52,6 +52,43 @@ class ClaimResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ChannelMeta:
+    """Metadata for a channel.
+
+    Attributes:
+        name: Channel name (primary key).
+        owner: Agent ID of the channel creator.
+        visibility: ``"public"`` or ``"private"``.
+        created_at: ISO 8601 timestamp of channel creation.
+    """
+
+    name: str
+    owner: str
+    visibility: str  # "public" | "private"
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class ACLEntry:
+    """Access control entry for a channel.
+
+    Attributes:
+        channel: Channel name this entry applies to.
+        agent_id: Agent granted access.
+        permission: Access level — ``"read"``, ``"write"``, or ``"admin"``.
+            ``admin`` implies ``write`` implies ``read``.
+        granted_at: ISO 8601 timestamp.
+        granted_by: Agent that created this entry (optional).
+    """
+
+    channel: str
+    agent_id: str
+    permission: str = field(default="write")  # "read" | "write" | "admin"
+    granted_at: str = field(default="")
+    granted_by: str | None = field(default=None)
+
+
+@dataclass(frozen=True, slots=True)
 class AgentPresence:
     """Presence record for a single agent.
 

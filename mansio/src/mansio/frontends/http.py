@@ -65,6 +65,13 @@ _auth_result_var: contextvars.ContextVar[Any] = contextvars.ContextVar("auth_res
 _PRIVATE_CHANNEL_PREFIXES = ("notebook:", "memory:")
 
 
+def _now_iso() -> str:
+    """Return current UTC time as ISO 8601 string."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _is_private_channel(channel: str) -> bool:
     """Return True if *channel* is a DM or private-prefix channel.
 
@@ -597,6 +604,7 @@ class HttpFrontend:
         self._setup_deletion_routes()
         self._setup_queue_routes()
         self._setup_presence_routes()
+        self._setup_channel_acl_routes()
         self._setup_sse_route()
 
     def serve_forever(self) -> None:
@@ -1097,6 +1105,250 @@ class HttpFrontend:
                 "metadata": result.metadata,
             }
 
+    def _setup_channel_acl_routes(self) -> None:
+        """Register channel metadata and ACL management routes."""
+        self._setup_channel_meta_routes()
+        self._setup_acl_crud_routes()
+
+    def _setup_channel_meta_routes(self) -> None:
+        """Register channel metadata routes (create, get)."""
+        bus = self._bus
+        assert bus is not None
+
+        @self._app.post("/v1/channels")
+        async def create_channel(request: Request) -> dict | tuple:
+            body = request.json()
+            name = body.get("name", "").strip()
+            if not name:
+                return {"error": "Bad Request", "message": "'name' is required"}, 400
+
+            auth_result = _auth_result_var.get()
+            owner = body.get("owner", "")
+            if isinstance(auth_result, str):
+                owner = auth_result  # scoped tokens own what they create
+            elif not owner:
+                return {
+                    "error": "Bad Request",
+                    "message": "'owner' is required for supertoken/no-auth",
+                }, 400
+
+            visibility = body.get("visibility", "public")
+            if visibility not in ("public", "private"):
+                return {
+                    "error": "Bad Request",
+                    "message": "visibility must be 'public' or 'private'",
+                }, 400
+
+            try:
+                meta = await asyncio.to_thread(
+                    bus.create_channel, name, owner, visibility=visibility
+                )
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support channel management",
+                }, 501
+            except ValueError as exc:
+                return {"error": "Conflict", "message": str(exc)}, 409
+
+            return {
+                "channel": {
+                    "name": meta.name,
+                    "owner": meta.owner,
+                    "visibility": meta.visibility,
+                    "created_at": meta.created_at,
+                }
+            }, 201
+
+        @self._app.get("/v1/channels/<channel>/meta")
+        async def get_channel_meta(request: Request, channel: str = "") -> dict | tuple:
+            try:
+                meta = await asyncio.to_thread(bus.get_channel_meta, channel)
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support channel management",
+                }, 501
+
+            if meta is None:
+                return {"error": "Not Found", "message": f"Channel '{channel}' not found"}, 404
+
+            return {
+                "channel": {
+                    "name": meta.name,
+                    "owner": meta.owner,
+                    "visibility": meta.visibility,
+                    "created_at": meta.created_at,
+                }
+            }
+
+    def _setup_acl_crud_routes(self) -> None:
+        """Register ACL management routes (get, set, add, remove)."""
+        self._setup_acl_read_route()
+        self._setup_acl_write_routes()
+
+    def _setup_acl_read_route(self) -> None:
+        """Register GET /v1/channels/<channel>/acl."""
+        bus = self._bus
+        assert bus is not None
+
+        @self._app.get("/v1/channels/<channel>/acl")
+        async def get_acl(request: Request, channel: str = "") -> dict | tuple:
+            denied = await _require_acl_admin(bus, channel)
+            if denied:
+                return denied
+
+            try:
+                entries = await asyncio.to_thread(bus.get_acl, channel)
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support channel management",
+                }, 501
+
+            return {
+                "acl": [
+                    {
+                        "channel": e.channel,
+                        "agent_id": e.agent_id,
+                        "permission": e.permission,
+                        "granted_at": e.granted_at,
+                        "granted_by": e.granted_by,
+                    }
+                    for e in entries
+                ]
+            }
+
+    def _setup_acl_write_routes(self) -> None:
+        """Register PUT/POST/DELETE ACL mutation routes."""
+        self._setup_acl_set_route()
+        self._setup_acl_add_route()
+        self._setup_acl_remove_route()
+
+    def _setup_acl_set_route(self) -> None:
+        """Register PUT /v1/channels/<channel>/acl."""
+        bus = self._bus
+        assert bus is not None
+
+        @self._app.put("/v1/channels/<channel>/acl")
+        async def set_acl(request: Request, channel: str = "") -> dict | tuple:
+            denied = await _require_acl_admin(bus, channel)
+            if denied:
+                return denied
+
+            body = request.json()
+            raw_entries = body.get("acl", [])
+            if not isinstance(raw_entries, list):
+                return {"error": "Bad Request", "message": "'acl' must be a list"}, 400
+
+            from mansio.types import ACLEntry
+
+            auth_result = _auth_result_var.get()
+            now = _now_iso()
+            granted_by = auth_result if isinstance(auth_result, str) else None
+            entries = [
+                ACLEntry(
+                    channel=channel,
+                    agent_id=raw["agent_id"],
+                    permission=raw.get("permission", "read"),
+                    granted_at=now,
+                    granted_by=granted_by,
+                )
+                for raw in raw_entries
+            ]
+
+            try:
+                await asyncio.to_thread(bus.set_acl, channel, entries)
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support channel management",
+                }, 501
+
+            return {"status": "ok", "count": len(entries)}
+
+    def _setup_acl_add_route(self) -> None:
+        """Register POST /v1/channels/<channel>/acl."""
+        bus = self._bus
+        assert bus is not None
+
+        @self._app.post("/v1/channels/<channel>/acl")
+        async def add_acl_entry(request: Request, channel: str = "") -> dict | tuple:
+            denied = await _require_acl_admin(bus, channel)
+            if denied:
+                return denied
+
+            body = request.json()
+            agent_id = body.get("agent_id", "").strip()
+            if not agent_id:
+                return {"error": "Bad Request", "message": "'agent_id' is required"}, 400
+
+            permission = body.get("permission", "read")
+            if permission not in ("read", "write", "admin"):
+                return {
+                    "error": "Bad Request",
+                    "message": "permission must be 'read', 'write', or 'admin'",
+                }, 400
+
+            from mansio.types import ACLEntry
+
+            auth_result = _auth_result_var.get()
+            now = _now_iso()
+            granted_by = auth_result if isinstance(auth_result, str) else None
+            entry = ACLEntry(
+                channel=channel,
+                agent_id=agent_id,
+                permission=permission,
+                granted_at=now,
+                granted_by=granted_by,
+            )
+
+            try:
+                await asyncio.to_thread(bus.add_acl_entry, entry)
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support channel management",
+                }, 501
+
+            return {
+                "status": "ok",
+                "entry": {
+                    "channel": entry.channel,
+                    "agent_id": entry.agent_id,
+                    "permission": entry.permission,
+                },
+            }, 201
+
+    def _setup_acl_remove_route(self) -> None:
+        """Register DELETE /v1/channels/<channel>/acl/<agent_id>."""
+        bus = self._bus
+        assert bus is not None
+
+        @self._app.delete("/v1/channels/<channel>/acl/<agent_id>")
+        async def remove_acl_entry(
+            request: Request, channel: str = "", agent_id: str = ""
+        ) -> dict | tuple:
+            denied = await _require_acl_admin(bus, channel)
+            if denied:
+                return denied
+
+            try:
+                removed = await asyncio.to_thread(bus.remove_acl_entry, channel, agent_id)
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support channel management",
+                }, 501
+
+            if not removed:
+                return {
+                    "error": "Not Found",
+                    "message": f"No ACL entry for '{agent_id}' on '{channel}'",
+                }, 404
+
+            return {"status": "ok"}
+
     def _setup_sse_route(self) -> None:
         """Register the SSE subscribe routes."""
         bus = self._bus
@@ -1202,6 +1454,23 @@ def _match_channels(channels: list[str], pattern: str) -> list[str]:
     import fnmatch
 
     return [ch for ch in channels if fnmatch.fnmatch(ch, pattern)]
+
+
+async def _require_acl_admin(bus: Bus, channel: str) -> tuple[dict, int] | None:
+    """Check that the current user has admin access on *channel*.
+
+    Returns an error tuple (dict, status) if denied, or None if allowed.
+    Supertokens and no-auth mode always pass.
+    """
+    auth_result = _auth_result_var.get()
+    if isinstance(auth_result, str) and not await asyncio.to_thread(
+        bus.check_access, channel, auth_result, "admin"
+    ):
+        return {
+            "error": "Forbidden",
+            "message": f"Agent '{auth_result}' lacks admin permission on '{channel}'",
+        }, 403
+    return None
 
 
 def _check_subscribe_access(auth_result: Any, ch_list: list[str]) -> tuple[dict, int] | None:
