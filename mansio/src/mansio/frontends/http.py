@@ -898,7 +898,7 @@ class HttpFrontend:
 
             # For scoped tokens, verify the message belongs to the agent
             if isinstance(auth_result, str):
-                found_msg = await asyncio.to_thread(_find_message_by_id, bus, message_id)
+                found_msg = await asyncio.to_thread(bus.get_message, message_id)
 
                 if found_msg is None:
                     return {
@@ -970,6 +970,9 @@ class HttpFrontend:
 
             all_channels = await asyncio.to_thread(bus.channels)
             matched = _match_channels(all_channels, pattern)
+
+            # Protect system channels from bulk deletion
+            matched = [ch for ch in matched if not ch.startswith("_system:")]
 
             if older_than:
                 # Filter by last activity time
@@ -1419,22 +1422,6 @@ class HttpFrontend:
                 }, 400
             return await _handle_subscribe(request, [channel])
 
-
-def _find_message_by_id(bus: Bus, message_id: str) -> Any:
-    """Look up a message across all channels by ID.
-
-    Args:
-        bus: The bus to search.
-        message_id: Message ID to find.
-
-    Returns:
-        The Message object if found, None otherwise.
-    """
-    for ch in bus.channels():
-        for m in bus.query(ch, limit=10_000):
-            if m.id == message_id:
-                return m
-    return None
 
 
 def _match_channels(channels: list[str], pattern: str) -> list[str]:

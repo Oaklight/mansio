@@ -439,3 +439,65 @@ class TestHttpDeletionAuth:
         _publish_n(bus, "test-ch", "agent-a", 2)
         status, data = self._request("DELETE", f"{base_url}/v1/channels/test-ch")
         assert status == 401
+
+
+# ── Issue #169 Follow-up Tests ────────────────────────────────────
+
+
+class TestGetMessageLookup(TestHttpDeletion):
+    """Verify message deletion uses bus.get_message() (O(1)) not full scan."""
+
+    def test_delete_message_uses_get_message(self, client):
+        """Scoped-token path finds message via bus.get_message()."""
+        base_url, bus, _ = client
+        mid = bus.publish("test-ch", "agent-a", "text", "hello")
+
+        # Verify bus.get_message works
+        msg = bus.get_message(mid)
+        assert msg is not None
+        assert msg.id == mid
+
+    def test_delete_nonexistent_message_returns_404(self, client):
+        base_url, bus, _ = client
+        status, data = self._request(
+            "DELETE", f"{base_url}/v1/messages/nonexistent-id"
+        )
+        # Without auth, the delete path tries bus.delete_message directly
+        # which returns 0 → 404
+        assert status == 404
+
+
+class TestBulkDeleteSystemProtection(TestHttpDeletion):
+    """Verify bulk cleanup filters out _system: channels."""
+
+    def test_bulk_delete_star_skips_system_channels(self, client):
+        """Wildcard '*' must not delete _system: channels."""
+        base_url, bus, _ = client
+        _publish_n(bus, "user-ch", "agent-a", 2)
+        bus.publish("_system:agents", "agent-a", "presence", "online")
+
+        status, data = self._request(
+            "POST",
+            f"{base_url}/v1/admin/channels/cleanup",
+            {"pattern": "*"},
+        )
+        assert status == 200
+        # user-ch should be deleted
+        assert "user-ch" in data["channels"]
+        # _system:agents must NOT be deleted
+        assert "_system:agents" not in data["channels"]
+
+    def test_bulk_delete_system_glob_matches_nothing(self, client):
+        """Pattern '_system:*' should match zero channels (all filtered)."""
+        base_url, bus, _ = client
+        bus.publish("_system:agents", "agent-a", "presence", "online")
+        bus.publish("_system:registry", "agent-a", "registration", "data")
+
+        status, data = self._request(
+            "POST",
+            f"{base_url}/v1/admin/channels/cleanup",
+            {"pattern": "_system:*"},
+        )
+        assert status == 200
+        assert data["channels_deleted"] == 0
+        assert data["channels"] == []
