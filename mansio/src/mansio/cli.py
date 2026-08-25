@@ -283,8 +283,19 @@ def _create_bus(args: argparse.Namespace, logger: Any) -> Any:
         backend = MaildirBackend(args.maildir)
         logger.info("Bus started", backend="maildir", path=args.maildir)
         return Bus(backend=backend)
+
+    from mansio.backends.sqlite import SchemaVersionError
+
     db_path = _migrate_legacy_db(args.db or _DEFAULT_DB, logger)
-    bus = SQLiteBus(db_path)
+    force_init = os.environ.get("MANSIO_FORCE_INIT", "") == "1"
+    try:
+        bus = SQLiteBus(db_path, force_init=force_init)
+    except SchemaVersionError as exc:
+        logger.error(
+            str(exc),
+            hint="Set MANSIO_FORCE_INIT=1 to force initialization (data may be lost)",
+        )
+        sys.exit(1)
     logger.info("Bus started", backend="sqlite", db=db_path)
     return bus
 

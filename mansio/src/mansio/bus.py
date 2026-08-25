@@ -398,8 +398,13 @@ class SQLiteBus(Bus):
         >>> messages = bus.query("sync")
     """
 
-    def __init__(self, db_path: str | Path = ":memory:") -> None:
-        super().__init__(backend=SQLiteBackend(db_path))
+    def __init__(
+        self,
+        db_path: str | Path = ":memory:",
+        *,
+        force_init: bool = False,
+    ) -> None:
+        super().__init__(backend=SQLiteBackend(db_path, force_init=force_init))
 
     def __repr__(self) -> str:
         return f"SQLiteBus({self._backend!r})"

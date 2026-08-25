@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
+import shutil
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -34,6 +36,9 @@ def _infer_channel_type(name: str) -> str:
 
 logger = get_logger(__name__)
 
+# Current schema version — bump when the schema changes.
+SCHEMA_VERSION = 1
+
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
@@ -53,6 +58,148 @@ CREATE TABLE IF NOT EXISTS agent_presence (
 );
 """
 
+_META_TABLE = """\
+CREATE TABLE IF NOT EXISTS _meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
+
+
+class SchemaVersionError(Exception):
+    """Raised when the database schema version is incompatible."""
+
+
+def _get_schema_version(conn: sqlite3.Connection) -> int | None:
+    """Read the schema version from the _meta table.
+
+    Returns:
+        The schema version integer, or None if the _meta table
+        does not exist or has no schema_version row.
+    """
+    try:
+        row = conn.execute("SELECT value FROM _meta WHERE key = 'schema_version'").fetchone()
+    except sqlite3.OperationalError:
+        # _meta table doesn't exist
+        return None
+    return int(row[0]) if row else None
+
+
+def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+    """Write the schema version to the _meta table."""
+    conn.executescript(_META_TABLE)
+    conn.execute(
+        "INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)",
+        (str(version),),
+    )
+
+
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    """Check if a table exists in the database."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
+def backup_database(db_path: str | Path) -> Path | None:
+    """Create a timestamped backup of the database file.
+
+    Args:
+        db_path: Path to the database file.
+
+    Returns:
+        Path to the backup file, or None if the source doesn't exist
+        or is an in-memory database.
+    """
+    db_path = Path(db_path)
+    if not db_path.exists() or str(db_path) == ":memory:":
+        return None
+    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_path = db_path.with_suffix(f".db.bak.{ts}")
+    shutil.copy2(str(db_path), str(backup_path))
+    logger.info("Database backed up", source=str(db_path), backup=str(backup_path))
+    return backup_path
+
+
+def check_schema(
+    conn: sqlite3.Connection,
+    db_path: str,
+    *,
+    force_init: bool = False,
+) -> str:
+    """Check database schema version and decide on action.
+
+    Args:
+        conn: Open SQLite connection.
+        db_path: Database file path (for logging / backup).
+        force_init: If True, allow overwriting unknown schemas.
+
+    Returns:
+        One of: "fresh", "current", "legacy", "migrated".
+
+    Raises:
+        SchemaVersionError: If the schema is from a newer version
+            or is unrecognized (without force_init).
+    """
+    stored = _get_schema_version(conn)
+    has_messages = _has_table(conn, "messages")
+
+    if stored is None and not has_messages:
+        # Fresh database — no tables at all
+        return "fresh"
+
+    if stored is None and has_messages:
+        # Legacy database — has data but no version tracking.
+        # Stamp it with the current version (v1 is the original schema).
+        _set_schema_version(conn, SCHEMA_VERSION)
+        conn.commit()
+        logger.info(
+            "Legacy database detected, stamped with schema version",
+            version=SCHEMA_VERSION,
+            db=db_path,
+        )
+        return "legacy"
+
+    if stored == SCHEMA_VERSION:
+        return "current"
+
+    if stored > SCHEMA_VERSION:
+        raise SchemaVersionError(
+            f"Database '{db_path}' has schema version {stored}, but this "
+            f"build only supports version {SCHEMA_VERSION}. Upgrade mansio "
+            f"or restore from backup."
+        )
+
+    # stored < SCHEMA_VERSION — migration needed.
+    # For now there are no migrations (v1 is the first and only version),
+    # but the framework is ready. Future versions add migration functions
+    # to _MIGRATIONS and they run sequentially.
+    if str(db_path) != ":memory:":
+        backup_database(db_path)
+
+    # Run migrations from stored+1 to SCHEMA_VERSION
+    for target_ver in range(stored + 1, SCHEMA_VERSION + 1):
+        migration_fn = _MIGRATIONS.get(target_ver)
+        if migration_fn is None:
+            raise SchemaVersionError(
+                f"No migration path from schema version {stored} to "
+                f"{SCHEMA_VERSION}. Back up your data and reinstall."
+            )
+        logger.info("Running migration", from_version=target_ver - 1, to_version=target_ver)
+        migration_fn(conn)
+
+    _set_schema_version(conn, SCHEMA_VERSION)
+    conn.commit()
+    logger.info("Schema migration complete", version=SCHEMA_VERSION, db=db_path)
+    return "migrated"
+
+
+# Migration registry: version -> callable(conn).
+# Add entries as schema evolves: _MIGRATIONS[2] = _migrate_v1_to_v2
+_MIGRATIONS: dict[int, object] = {}
+
 
 class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
     """SQLite-backed message backend.
@@ -64,7 +211,12 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
             ephemeral storage (testing).
     """
 
-    def __init__(self, db_path: str | Path = ":memory:") -> None:
+    def __init__(
+        self,
+        db_path: str | Path = ":memory:",
+        *,
+        force_init: bool = False,
+    ) -> None:
         self._db_path = str(db_path)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
@@ -79,9 +231,19 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
         # so multiple processes can cold-start the same DB without
         # racing each other.
         self._enable_wal()
+
+        # Schema version check — may backup and migrate, or abort.
+        result = check_schema(self._conn, self._db_path, force_init=force_init)
+        if result == "fresh":
+            logger.info("Initializing fresh database", db=self._db_path)
+        elif result == "legacy":
+            logger.info("Existing database adopted", db=self._db_path)
+
         self._conn.executescript(_SCHEMA)
         self._ensure_queue_columns()
         self._ensure_threading_columns()
+        if result == "fresh":
+            _set_schema_version(self._conn, SCHEMA_VERSION)
         self._conn.commit()
 
     @retry(
@@ -576,8 +738,6 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
 
     def info(self) -> dict:
         """Return backend type, config, and usage info."""
-        import os
-
         info_dict: dict = {
             "type": "sqlite",
             "db_path": self._db_path,
