@@ -8,6 +8,7 @@ import os
 import shutil
 import sqlite3
 import threading
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -165,6 +166,9 @@ def check_schema(
     if stored == SCHEMA_VERSION:
         return "current"
 
+    # At this point stored is guaranteed to be int (None cases returned above)
+    assert stored is not None
+
     if stored > SCHEMA_VERSION:
         if force_init:
             logger.warning(
@@ -208,7 +212,7 @@ def check_schema(
 
 # Migration registry: version -> callable(conn).
 # Add entries as schema evolves: _MIGRATIONS[2] = _migrate_v1_to_v2
-_MIGRATIONS: dict[int, object] = {}
+_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {}
 
 
 class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
