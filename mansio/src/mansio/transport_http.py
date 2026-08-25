@@ -71,6 +71,7 @@ class HttpTransport:
         self._sse_lock = threading.Lock()
         self._sse_stop = threading.Event()
         self._sub_counter = 0
+        self._last_event_id: str = ""  # track across SSE restarts
 
         # Cache server auth requirement
         self._require_auth: bool | None = None
@@ -348,10 +349,13 @@ class HttpTransport:
                 headers=headers,
                 timeout=self._timeout + 20,  # longer than keepalive interval
                 max_retries=-1,  # unlimited reconnect
+                last_event_id=self._last_event_id,
             )
             for event in self._sse_client:
                 if self._sse_stop.is_set():
                     break
+                if event.id:
+                    self._last_event_id = event.id
                 self._dispatch_sse_event(event.data)
         except Exception:
             pass  # SSEClient handles reconnection internally
