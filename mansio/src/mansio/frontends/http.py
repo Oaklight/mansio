@@ -903,19 +903,19 @@ class HttpFrontend:
             }
 
     def _setup_sse_route(self) -> None:
-        """Register the SSE subscribe route."""
+        """Register the SSE subscribe routes."""
         bus = self._bus
         assert bus is not None
         cors = self._cors_origin
 
-        @self._app.get("/v1/subscribe")
-        async def subscribe(request: Request) -> StreamingResponse | tuple:
-            """SSE endpoint with validate-once-at-connect auth."""
-            ch_list = request.query_params.get("channel", [])
+        async def _handle_subscribe(
+            request: Request, ch_list: list[str]
+        ) -> StreamingResponse | tuple:
+            """Shared SSE handler for all subscribe endpoints."""
             if not ch_list:
                 return {
                     "error": "Bad Request",
-                    "message": "At least one 'channel' param required",
+                    "message": "At least one channel required",
                 }, 400
 
             auth_result = _auth_result_var.get()
@@ -923,10 +923,15 @@ class HttpFrontend:
             if error:
                 return error
 
+            # Parse Last-Event-ID for cursor-based resume
+            last_event_id = request.headers.get("last-event-id", "").strip() or None
+
             q, sub_ids = _setup_sse_subscriptions(bus, ch_list, auth_result)
 
             return StreamingResponse(
-                _sse_event_generator(q, sub_ids, bus),
+                _sse_event_generator(
+                    q, sub_ids, bus, ch_list, auth_result, last_event_id
+                ),
                 content_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -934,6 +939,41 @@ class HttpFrontend:
                     "Access-Control-Allow-Origin": cors,
                 },
             )
+
+        @self._app.get("/v1/subscribe")
+        async def subscribe(request: Request) -> StreamingResponse | tuple:
+            """Multi-channel SSE endpoint.
+
+            Accepts repeated ``channel`` params and/or a comma-separated
+            ``channels`` param::
+
+                GET /v1/subscribe?channel=ch1&channel=ch2
+                GET /v1/subscribe?channels=ch1,ch2
+            """
+            ch_list = list(request.query_params.get("channel", []))
+            # Also accept comma-separated "channels" param
+            for csv in request.query_params.get("channels", []):
+                ch_list.extend(c.strip() for c in csv.split(",") if c.strip())
+            # Deduplicate while preserving order
+            seen: set[str] = set()
+            deduped: list[str] = []
+            for ch in ch_list:
+                if ch not in seen:
+                    seen.add(ch)
+                    deduped.append(ch)
+            return await _handle_subscribe(request, deduped)
+
+        @self._app.get("/v1/channels/<channel>/subscribe")
+        async def subscribe_channel(
+            request: Request, channel: str = ""
+        ) -> StreamingResponse | tuple:
+            """Per-channel SSE convenience endpoint."""
+            if not channel:
+                return {
+                    "error": "Bad Request",
+                    "message": "Channel name required",
+                }, 400
+            return await _handle_subscribe(request, [channel])
 
 
 def _check_subscribe_access(auth_result: Any, ch_list: list[str]) -> tuple[dict, int] | None:
@@ -973,8 +1013,14 @@ def _setup_sse_subscriptions(
 
         def _make_callback(target_ch: str) -> Any:
             def _safe_enqueue(data: str) -> None:
-                with contextlib.suppress(asyncio.QueueFull):
+                try:
                     q.put_nowait(data)
+                except asyncio.QueueFull:
+                    # Backpressure: drop oldest, enqueue new event
+                    with contextlib.suppress(asyncio.QueueEmpty):
+                        q.get_nowait()
+                    with contextlib.suppress(asyncio.QueueFull):
+                        q.put_nowait(data)
 
             def _cb(msg: Message) -> None:
                 if isinstance(auth_result, str) and not _agent_involved(
@@ -994,10 +1040,52 @@ def _setup_sse_subscriptions(
     return q, sub_ids
 
 
-async def _sse_event_generator(q: asyncio.Queue[str | None], sub_ids: list[str], bus: Bus) -> Any:
-    """Async generator that yields SSE events from the queue."""
+_SSE_REPLAY_LIMIT = 500  # max messages to replay per channel on reconnect
+
+
+def _format_sse_event(data: str, event_id: str) -> str:
+    """Format a single SSE event with id: and data: fields."""
+    return f"id: {event_id}\ndata: {data}\n\n"
+
+
+async def _sse_event_generator(
+    q: asyncio.Queue[str | None],
+    sub_ids: list[str],
+    bus: Bus,
+    ch_list: list[str],
+    auth_result: Any,
+    last_event_id: str | None,
+) -> Any:
+    """Async generator that yields SSE events from the queue.
+
+    If *last_event_id* is set (via ``Last-Event-ID`` header), replays
+    missed messages from the bus before switching to live streaming.
+    Each event includes an ``id:`` field (the message ID) so the
+    W3C SSE client can resume on reconnect.
+    """
     try:
         yield ": connected\n\n"
+
+        # ── Replay missed messages on reconnect ──────────────────
+        if last_event_id:
+            for ch in ch_list:
+                missed = await asyncio.to_thread(
+                    bus.query, ch, after=last_event_id, limit=_SSE_REPLAY_LIMIT
+                )
+                if isinstance(auth_result, str):
+                    missed = [
+                        m
+                        for m in missed
+                        if _agent_involved(auth_result, m.channel, m.sender)
+                    ]
+                for m in missed:
+                    data = json.dumps(
+                        {"channel": ch, "message": _msg_to_dict(m)},
+                        ensure_ascii=False,
+                    )
+                    yield _format_sse_event(data, m.id)
+
+        # ── Live stream ──────────────────────────────────────────
         while True:
             try:
                 data = await asyncio.wait_for(q.get(), timeout=15)
@@ -1006,7 +1094,13 @@ async def _sse_event_generator(q: asyncio.Queue[str | None], sub_ids: list[str],
                 continue
             if data is None:
                 break
-            yield f"data: {data}\n\n"
+            # Extract message id from the JSON for the SSE id: field
+            try:
+                parsed = json.loads(data)
+                event_id = parsed.get("message", {}).get("id", "")
+            except (json.JSONDecodeError, AttributeError):
+                event_id = ""
+            yield _format_sse_event(data, event_id)
     finally:
         for sid in sub_ids:
             bus.unsubscribe(sid)
