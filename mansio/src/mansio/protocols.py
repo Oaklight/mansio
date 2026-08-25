@@ -59,6 +59,7 @@ class Backend(ABC):
         limit: int = 100,
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
+        thread_id: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -71,11 +72,23 @@ class Backend(ABC):
                 Both return results in chronological (ascending ID) order;
                 ``"newest"`` selects the last *limit* messages instead of
                 the first *limit*.
+            thread_id: If provided, only return messages in this thread.
 
         Returns:
             Messages in chronological order (oldest first).
         """
         ...
+
+    def get_message(self, message_id: str) -> Message | None:
+        """Retrieve a single message by ID.
+
+        Args:
+            message_id: The message ID to look up.
+
+        Returns:
+            The Message if found, otherwise None.
+        """
+        raise NotImplementedError
 
     @abstractmethod
     def list_channels(self) -> list[str]:

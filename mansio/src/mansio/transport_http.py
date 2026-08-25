@@ -87,6 +87,7 @@ class HttpTransport:
         metadata: dict | None = None,
         *,
         queue: bool = False,
+        parent_id: str | None = None,
     ) -> str:
         """Publish a message via the remote server.
 
@@ -103,6 +104,8 @@ class HttpTransport:
             body["metadata"] = metadata
         if queue:
             body["queue"] = True
+        if parent_id:
+            body["parent_id"] = parent_id
 
         resp = self._http.post(f"{self._base_url}/v1/publish", json=body)
         self._check_response(resp)
@@ -153,6 +156,7 @@ class HttpTransport:
         limit: int = 100,
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
+        thread_id: str | None = None,
     ) -> list[Message]:
         """Query messages from a channel via the remote server."""
         params: dict[str, str] = {"channel": channel, "limit": str(limit)}
@@ -162,6 +166,8 @@ class HttpTransport:
             params["msg_type"] = msg_type
         if order != "oldest":
             params["order"] = order
+        if thread_id:
+            params["thread_id"] = thread_id
 
         url = f"{self._base_url}/v1/query?{urllib.parse.urlencode(params)}"
         resp = self._http.get(url)
@@ -419,6 +425,8 @@ class HttpTransport:
             payload=d["payload"],
             timestamp=d["timestamp"],
             metadata=d.get("metadata"),
+            parent_id=d.get("parent_id"),
+            thread_id=d.get("thread_id"),
         )
 
     def __repr__(self) -> str:

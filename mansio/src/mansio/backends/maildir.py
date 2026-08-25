@@ -67,6 +67,10 @@ def _msg_to_email(message: Message) -> email.message.EmailMessage:
         em["X-Mansio-Metadata"] = json.dumps(
             message.metadata, ensure_ascii=False, separators=(",", ":")
         )
+    if message.parent_id:
+        em["X-Mansio-ParentId"] = message.parent_id
+    if message.thread_id:
+        em["X-Mansio-ThreadId"] = message.thread_id
     em["From"] = f"{message.sender}@mansio.local"
     em["Subject"] = f"[{message.channel}] {message.msg_type}"
     em["Date"] = message.timestamp
@@ -121,6 +125,9 @@ def _email_to_msg(em: email.message.Message) -> Message | None:
     if payload.endswith("\n"):
         payload = payload[:-1]
 
+    parent_id = em.get("X-Mansio-ParentId") or None
+    thread_id = em.get("X-Mansio-ThreadId") or None
+
     return Message(
         id=msg_id,
         channel=channel,
@@ -129,6 +136,8 @@ def _email_to_msg(em: email.message.Message) -> Message | None:
         payload=payload,
         timestamp=timestamp,
         metadata=metadata,
+        parent_id=parent_id,
+        thread_id=thread_id,
     )
 
 
@@ -285,6 +294,20 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
             self._msg_index[message.id] = (message.channel, md_key)
             md.flush()
 
+    def get_message(self, message_id: str) -> Message | None:
+        """Retrieve a single message by ID."""
+        with self._lock:
+            entry = self._msg_index.get(message_id)
+            if not entry:
+                return None
+            ch, md_key = entry
+            md = self._get_maildir(ch)
+            try:
+                em = md[md_key]
+            except KeyError:
+                return None
+            return _email_to_msg(em)
+
     def query(
         self,
         channel: str,
@@ -292,6 +315,7 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
         limit: int = 100,
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
+        thread_id: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -302,6 +326,7 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
             msg_type: If provided, only return messages of this type.
             order: ``"oldest"`` (default) returns from the beginning;
                 ``"newest"`` returns the last *limit* messages.
+            thread_id: If provided, only return messages in this thread.
 
         Returns:
             Messages in chronological order.
@@ -312,6 +337,8 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
             messages = [m for m in messages if m.id > after]
         if msg_type:
             messages = [m for m in messages if m.msg_type == msg_type]
+        if thread_id is not None:
+            messages = [m for m in messages if m.thread_id == thread_id]
         if order == "newest":
             return messages[-limit:]
         return messages[:limit]

@@ -132,9 +132,11 @@ class MansioClient:
         content: str,
         msg_type: str = "chat",
         metadata: dict | None = None,
+        parent_id: str | None = None,
     ) -> str:
         return self._transport.publish(
-            channel, self._agent_id, msg_type, content, metadata
+            channel, self._agent_id, msg_type, content, metadata,
+            parent_id=parent_id,
         )
 
     def channel_read(
@@ -143,8 +145,11 @@ class MansioClient:
         limit: int = 10,
         after: str | None = None,
         order: Literal["oldest", "newest"] = "newest",
+        thread_id: str | None = None,
     ) -> list[Message]:
-        return self._transport.query(channel, after=after, limit=limit, order=order)
+        return self._transport.query(
+            channel, after=after, limit=limit, order=order, thread_id=thread_id,
+        )
 
     def channel_poll(self, channel: str) -> list[Message]:
         cursor = self._cursors.get(channel)

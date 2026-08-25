@@ -66,6 +66,11 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable):
                 "claimed_at": None,
             }
 
+    def get_message(self, message_id: str) -> Message | None:
+        """Retrieve a single message by ID."""
+        with self._lock:
+            return self._messages_by_id.get(message_id)
+
     def query(
         self,
         channel: str,
@@ -73,6 +78,7 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable):
         limit: int = 100,
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
+        thread_id: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -84,6 +90,7 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable):
             order: ``"oldest"`` returns the first *limit* messages;
                 ``"newest"`` returns the last *limit* messages.  Both
                 return results in chronological (ascending ID) order.
+            thread_id: If provided, only return messages in this thread.
 
         Returns:
             Messages in chronological order (oldest first).
@@ -94,6 +101,8 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable):
             msgs = [m for m in msgs if m.id > after]
         if msg_type is not None:
             msgs = [m for m in msgs if m.msg_type == msg_type]
+        if thread_id is not None:
+            msgs = [m for m in msgs if m.thread_id == thread_id]
         if order == "newest":
             return msgs[-limit:]
         return msgs[:limit]
