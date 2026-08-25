@@ -59,8 +59,12 @@
 [data-theme="dark"] select { color-scheme: dark; }
 [data-theme="dark"] input[type="checkbox"] { color-scheme: dark; }
 
+/* Auto dark: when no explicit theme is set and system prefers dark,
+   apply dark theme via the same [data-theme="dark"] rules above.
+   The <head> init script already handles this, but this covers
+   the edge case where JS is disabled or hasn't run yet. */
 @media (prefers-color-scheme: dark) {
-    html:not([data-theme="light"]) {
+    html:not([data-theme="light"]):not([data-theme="dark"]) {
         --bg-primary: #1a1a2e;
         --bg-secondary: #16213e;
         --text-primary: #e0e0e0;
@@ -76,19 +80,6 @@
         --shadow-md: 0 2px 8px rgba(0,0,0,0.3);
         --shadow-lg: 0 4px 16px rgba(0,0,0,0.4);
     }
-    html:not([data-theme="light"]) .token-reveal {
-        background: #2a2a1a; border-color: #7a6a20;
-    }
-    html:not([data-theme="light"]) .token-reveal-label { color: #fbbf24; }
-    html:not([data-theme="light"]) .token-reveal-value {
-        background: #1f1f10; color: #e0e0e0;
-    }
-    html:not([data-theme="light"]) .token-reveal-label svg { stroke: #fbbf24; }
-    html:not([data-theme="light"]) .btn-danger:hover { background: #dc2626; }
-    html:not([data-theme="light"]) .login-overlay { background: rgba(0,0,0,0.7); }
-    html:not([data-theme="light"]) .login-card input { color: var(--text-primary); }
-    html:not([data-theme="light"]) select { color-scheme: dark; }
-    html:not([data-theme="light"]) input[type="checkbox"] { color-scheme: dark; }
 }
 
 /* ============== Settings Panel ============== */
@@ -911,7 +902,7 @@ tr:hover { background: var(--accent-light); }
             <div class="settings-info">
                 <strong>Mansio Admin</strong><br>
                 Lightweight message broker admin panel.<br>
-                <a href="https://github.com/openagentsinc/mansio" target="_blank" rel="noopener">GitHub →</a>
+                <a href="https://github.com/Oaklight/mansio" target="_blank" rel="noopener">GitHub →</a>
             </div>
         </div>
         <div style="text-align:right;margin-top:8px">
