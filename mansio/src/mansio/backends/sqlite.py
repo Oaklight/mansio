@@ -963,14 +963,14 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             ch_owner, ch_vis = row[0], row[1]
             if ch_owner == agent_id:
                 return True
-            if ch_vis == "public" and required == "read":
+            if ch_vis == "public" and required in ("read", "write"):
                 return True
             acl_row = self._conn.execute(
                 "SELECT permission FROM channel_acl WHERE channel = ? AND agent_id = ?",
                 (channel, agent_id),
             ).fetchone()
             if acl_row is None:
-                return ch_vis == "public" and required in ("read", "write")
+                return False
             return PERMISSION_LEVELS.get(acl_row[0], 0) >= PERMISSION_LEVELS.get(required, 0)
 
     # ── Presence ──────────────────────────────────────────────

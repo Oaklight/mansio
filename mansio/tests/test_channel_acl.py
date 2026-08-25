@@ -296,6 +296,19 @@ class TestCheckAccess:
     def test_public_owner_admin(self, backend):
         assert backend.check_access("pub", "alice", "admin")
 
+    def test_public_explicit_read_acl_keeps_write(self, backend):
+        """An explicit read ACL entry must not downgrade public write access."""
+        entry = ACLEntry(channel="pub", agent_id="stranger", permission="read", granted_at=_now())
+        backend.add_acl_entry(entry)
+        assert backend.check_access("pub", "stranger", "write")
+
+    def test_private_explicit_read_blocks_write(self, backend):
+        """On private channels, an explicit read ACL should NOT grant write."""
+        entry = ACLEntry(channel="priv", agent_id="stranger", permission="read", granted_at=_now())
+        backend.add_acl_entry(entry)
+        assert backend.check_access("priv", "stranger", "read")
+        assert not backend.check_access("priv", "stranger", "write")
+
     # Unregistered channels (no metadata)
     def test_unregistered_is_open(self, backend):
         assert backend.check_access("unknown", "anyone", "read")
@@ -554,6 +567,7 @@ class TestACLEnforcement:
         bus.publish("ch", "alice", "text", "hi")
         count = bus.delete_channel("ch", agent_id="alice")  # owner = admin
         assert count == 1
+        assert bus.get_channel_meta("ch") is None
 
     def test_delete_channel_admin_denied(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
@@ -567,6 +581,7 @@ class TestACLEnforcement:
         bus.publish("ch", "alice", "text", "hi")
         count = bus.delete_channel("ch")
         assert count == 1
+        assert bus.get_channel_meta("ch") is None
 
     # ── delete_message ────────────────────────
 
