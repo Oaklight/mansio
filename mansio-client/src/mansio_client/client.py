@@ -135,7 +135,11 @@ class MansioClient:
         parent_id: str | None = None,
     ) -> str:
         return self._transport.publish(
-            channel, self._agent_id, msg_type, content, metadata,
+            channel,
+            self._agent_id,
+            msg_type,
+            content,
+            metadata,
             parent_id=parent_id,
         )
 
@@ -148,7 +152,11 @@ class MansioClient:
         thread_id: str | None = None,
     ) -> list[Message]:
         return self._transport.query(
-            channel, after=after, limit=limit, order=order, thread_id=thread_id,
+            channel,
+            after=after,
+            limit=limit,
+            order=order,
+            thread_id=thread_id,
         )
 
     def channel_poll(self, channel: str) -> list[Message]:

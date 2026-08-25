@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import threading
 import time
-import urllib.parse
 
 import pytest
 
@@ -157,9 +156,7 @@ class TestLastEventIdReplay:
 
         def reconnect_sse():
             sse_url = f"{url}/v1/subscribe?channel=replay-ch"
-            client = SSEClient(
-                sse_url, timeout=10, max_retries=0, last_event_id=first_id
-            )
+            client = SSEClient(sse_url, timeout=10, max_retries=0, last_event_id=first_id)
             try:
                 for event in client:
                     received.append(event)
@@ -227,9 +224,7 @@ class TestLastEventIdReplay:
 
         def reconnect():
             sse_url = f"{url}/v1/subscribe?channel=mc-a&channel=mc-b"
-            client = SSEClient(
-                sse_url, timeout=10, max_retries=0, last_event_id=first_id
-            )
+            client = SSEClient(sse_url, timeout=10, max_retries=0, last_event_id=first_id)
             try:
                 for event in client:
                     received.append(event)
@@ -300,9 +295,7 @@ class TestPerChannelSubscribe:
 
         def reconnect():
             sse_url = f"{url}/v1/channels/pc-replay/subscribe"
-            client = SSEClient(
-                sse_url, timeout=10, max_retries=0, last_event_id=first_id
-            )
+            client = SSEClient(sse_url, timeout=10, max_retries=0, last_event_id=first_id)
             try:
                 for event in client:
                     received.append(event)

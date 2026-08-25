@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import threading
-import time
 import unittest
 from io import StringIO
 from unittest.mock import MagicMock, patch
+
+from mansio_client.types import AgentPresence, Message
 
 from mansio.mcp import (
     _TOOLS,
@@ -16,7 +16,6 @@ from mansio.mcp import (
     _msg_to_dict,
     serve,
 )
-from mansio_client.types import AgentPresence, Message
 
 
 def _make_msg(**overrides: object) -> Message:
@@ -62,12 +61,15 @@ class TestHandleRequest(unittest.TestCase):
         self.client = MagicMock()
 
     def test_initialize(self) -> None:
-        resp = _handle_request(self.client, {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {},
-        })
+        resp = _handle_request(
+            self.client,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {},
+            },
+        )
         assert resp is not None
         assert resp["id"] == 1
         result = resp["result"]
@@ -76,28 +78,37 @@ class TestHandleRequest(unittest.TestCase):
         assert "serverInfo" in result
 
     def test_initialized_notification(self) -> None:
-        resp = _handle_request(self.client, {
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-        })
+        resp = _handle_request(
+            self.client,
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+            },
+        )
         assert resp is None
 
     def test_ping(self) -> None:
-        resp = _handle_request(self.client, {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "ping",
-        })
+        resp = _handle_request(
+            self.client,
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "ping",
+            },
+        )
         assert resp is not None
         assert resp["result"] == {}
 
     def test_tools_list(self) -> None:
-        resp = _handle_request(self.client, {
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/list",
-            "params": {},
-        })
+        resp = _handle_request(
+            self.client,
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/list",
+                "params": {},
+            },
+        )
         assert resp is not None
         tools = resp["result"]["tools"]
         assert len(tools) == len(_TOOLS)
@@ -106,23 +117,29 @@ class TestHandleRequest(unittest.TestCase):
         assert "mansio_channels" in names
 
     def test_unknown_method(self) -> None:
-        resp = _handle_request(self.client, {
-            "jsonrpc": "2.0",
-            "id": 4,
-            "method": "foo/bar",
-        })
+        resp = _handle_request(
+            self.client,
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "foo/bar",
+            },
+        )
         assert resp is not None
         assert "error" in resp
         assert resp["error"]["code"] == -32601
 
     def test_tools_call_success(self) -> None:
         self.client.channel_list.return_value = ["general", "random"]
-        resp = _handle_request(self.client, {
-            "jsonrpc": "2.0",
-            "id": 5,
-            "method": "tools/call",
-            "params": {"name": "mansio_channels", "arguments": {}},
-        })
+        resp = _handle_request(
+            self.client,
+            {
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {"name": "mansio_channels", "arguments": {}},
+            },
+        )
         assert resp is not None
         assert "result" in resp
         content = resp["result"]["content"]
@@ -132,24 +149,30 @@ class TestHandleRequest(unittest.TestCase):
         assert data == ["general", "random"]
 
     def test_tools_call_unknown_tool(self) -> None:
-        resp = _handle_request(self.client, {
-            "jsonrpc": "2.0",
-            "id": 6,
-            "method": "tools/call",
-            "params": {"name": "nonexistent", "arguments": {}},
-        })
+        resp = _handle_request(
+            self.client,
+            {
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "tools/call",
+                "params": {"name": "nonexistent", "arguments": {}},
+            },
+        )
         assert resp is not None
         assert "error" in resp
         assert resp["error"]["code"] == -32602
 
     def test_tools_call_runtime_error(self) -> None:
         self.client.channel_list.side_effect = ConnectionError("server down")
-        resp = _handle_request(self.client, {
-            "jsonrpc": "2.0",
-            "id": 7,
-            "method": "tools/call",
-            "params": {"name": "mansio_channels", "arguments": {}},
-        })
+        resp = _handle_request(
+            self.client,
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {"name": "mansio_channels", "arguments": {}},
+            },
+        )
         assert resp is not None
         result = resp["result"]
         assert result["isError"] is True
@@ -168,30 +191,44 @@ class TestCallTool(unittest.TestCase):
 
     def test_channels_detail(self) -> None:
         self.client.channel_list.return_value = [{"name": "a", "message_count": 5}]
-        result = _call_tool(self.client, "mansio_channels", {"detail": True})
+        _result = _call_tool(self.client, "mansio_channels", {"detail": True})
         self.client.channel_list.assert_called_once_with(detail=True)
 
     def test_send(self) -> None:
         self.client.channel_send.return_value = "msg-42"
-        result = _call_tool(self.client, "mansio_send", {
-            "channel": "general",
-            "content": "hello",
-        })
+        result = _call_tool(
+            self.client,
+            "mansio_send",
+            {
+                "channel": "general",
+                "content": "hello",
+            },
+        )
         assert result == {"message_id": "msg-42"}
         self.client.channel_send.assert_called_once_with(
-            "general", "hello", msg_type="chat", parent_id=None,
+            "general",
+            "hello",
+            msg_type="chat",
+            parent_id=None,
         )
 
     def test_send_with_parent(self) -> None:
         self.client.channel_send.return_value = "msg-43"
-        result = _call_tool(self.client, "mansio_send", {
-            "channel": "general",
-            "content": "reply",
-            "parent_id": "msg-1",
-            "msg_type": "note",
-        })
+        _result = _call_tool(
+            self.client,
+            "mansio_send",
+            {
+                "channel": "general",
+                "content": "reply",
+                "parent_id": "msg-1",
+                "msg_type": "note",
+            },
+        )
         self.client.channel_send.assert_called_once_with(
-            "general", "reply", msg_type="note", parent_id="msg-1",
+            "general",
+            "reply",
+            msg_type="note",
+            parent_id="msg-1",
         )
 
     def test_read(self) -> None:
@@ -200,19 +237,29 @@ class TestCallTool(unittest.TestCase):
         assert len(result) == 1
         assert result[0]["id"] == "msg-1"
         self.client.channel_read.assert_called_once_with(
-            "general", limit=10, order="newest", thread_id=None,
+            "general",
+            limit=10,
+            order="newest",
+            thread_id=None,
         )
 
     def test_read_with_thread(self) -> None:
         self.client.channel_read.return_value = []
-        _call_tool(self.client, "mansio_read", {
-            "channel": "dev",
-            "thread_id": "msg-0",
-            "limit": 5,
-            "order": "oldest",
-        })
+        _call_tool(
+            self.client,
+            "mansio_read",
+            {
+                "channel": "dev",
+                "thread_id": "msg-0",
+                "limit": 5,
+                "order": "oldest",
+            },
+        )
         self.client.channel_read.assert_called_once_with(
-            "dev", limit=5, order="oldest", thread_id="msg-0",
+            "dev",
+            limit=5,
+            order="oldest",
+            thread_id="msg-0",
         )
 
     def test_poll(self) -> None:
@@ -222,25 +269,37 @@ class TestCallTool(unittest.TestCase):
 
     def test_dm_send(self) -> None:
         self.client.dm_send.return_value = "dm-1"
-        result = _call_tool(self.client, "mansio_dm_send", {
-            "to_agent": "agent-b",
-            "content": "hi",
-        })
+        result = _call_tool(
+            self.client,
+            "mansio_dm_send",
+            {
+                "to_agent": "agent-b",
+                "content": "hi",
+            },
+        )
         assert result == {"message_id": "dm-1"}
 
     def test_dm_read(self) -> None:
         self.client.dm_read.return_value = [_make_msg()]
-        result = _call_tool(self.client, "mansio_dm_read", {
-            "with_agent": "agent-b",
-        })
+        result = _call_tool(
+            self.client,
+            "mansio_dm_read",
+            {
+                "with_agent": "agent-b",
+            },
+        )
         assert len(result) == 1
 
     def test_note(self) -> None:
         self.client.note_write.return_value = "note-1"
-        result = _call_tool(self.client, "mansio_note", {
-            "content": "remember this",
-            "tags": ["todo"],
-        })
+        result = _call_tool(
+            self.client,
+            "mansio_note",
+            {
+                "content": "remember this",
+                "tags": ["todo"],
+            },
+        )
         assert result == {"message_id": "note-1"}
         self.client.note_write.assert_called_once_with("remember this", tags=["todo"])
 
@@ -251,9 +310,13 @@ class TestCallTool(unittest.TestCase):
 
     def test_memory_store(self) -> None:
         self.client.memory_store.return_value = "mem-1"
-        result = _call_tool(self.client, "mansio_memory_store", {
-            "content": "important fact",
-        })
+        result = _call_tool(
+            self.client,
+            "mansio_memory_store",
+            {
+                "content": "important fact",
+            },
+        )
         assert result == {"message_id": "mem-1"}
 
     def test_memory_recall(self) -> None:
