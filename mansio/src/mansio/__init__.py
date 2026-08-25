@@ -3,6 +3,7 @@
 __version__ = "0.2.3"
 
 from mansio.backends import MemoryBackend, SQLiteBackend
+from mansio.backends.sqlite import SCHEMA_VERSION, SchemaVersionError, backup_database
 from mansio.bus import Bus, SQLiteBus
 from mansio.client import MansioClient
 from mansio.protocols import Backend, Compactable, Deletable, Presenceable
@@ -33,9 +34,12 @@ __all__ = [
     "MansioClient",
     "MansioServer",
     "Presenceable",
+    "SCHEMA_VERSION",
     "SQLiteBackend",
     "SQLiteBus",
     "SQLiteStorage",
+    "SchemaVersionError",
     "StorageBackend",
+    "backup_database",
     "system_channel_policy",
 ]
