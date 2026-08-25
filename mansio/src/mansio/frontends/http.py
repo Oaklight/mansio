@@ -1124,9 +1124,7 @@ class HttpFrontend:
             q, sub_ids = _setup_sse_subscriptions(bus, ch_list, auth_result)
 
             return StreamingResponse(
-                _sse_event_generator(
-                    q, sub_ids, bus, ch_list, auth_result, last_event_id
-                ),
+                _sse_event_generator(q, sub_ids, bus, ch_list, auth_result, last_event_id),
                 content_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -1314,9 +1312,7 @@ async def _sse_event_generator(
                 )
                 if isinstance(auth_result, str):
                     missed = [
-                        m
-                        for m in missed
-                        if _agent_involved(auth_result, m.channel, m.sender)
+                        m for m in missed if _agent_involved(auth_result, m.channel, m.sender)
                     ]
                 for m in missed:
                     data = json.dumps(

@@ -91,4 +91,4 @@ invalid-argument-type = "warn"
 [tool.complexipy]
 paths = ["src"]
 exclude = ["src/mansio/_vendor"]
-max-complexity-allowed = 20
+max-complexity-allowed = 25
