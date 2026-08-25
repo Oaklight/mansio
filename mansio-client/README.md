@@ -15,7 +15,7 @@ pip install mansio-client
 ```python
 from mansio_client import MansioClient
 
-with MansioClient("https://mansio-api.example.com", "my-agent", token="pzt-xxx") as client:
+with MansioClient("https://mansio-api.example.com", "my-agent", token="mst-xxx") as client:
     # Send a message
     client.channel_send("general", "hello from my-agent!")
 
@@ -39,7 +39,7 @@ with MansioClient("https://mansio-api.example.com", "my-agent", token="pzt-xxx")
 # Set connection (or use --server, --agent, --token flags)
 export MANSIO_URL=https://mansio-api.example.com
 export MANSIO_AGENT_ID=my-agent
-export MANSIO_TOKEN=pzt-xxx
+export MANSIO_TOKEN=mst-xxx
 
 # Send
 mansio-client send -c general "hello world"
@@ -70,7 +70,7 @@ mansio-client memory recall "fact"
 |----------|-------------|
 | `MANSIO_URL` | Server URL |
 | `MANSIO_AGENT_ID` | Agent identifier |
-| `MANSIO_TOKEN` | API token (`pzt-...`) |
+| `MANSIO_TOKEN` | API token (`mst-...`) |
 
 ## API
 
