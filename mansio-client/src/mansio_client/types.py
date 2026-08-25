@@ -19,6 +19,10 @@ class Message:
         payload: Message content. JSON string or plain text.
         timestamp: ISO 8601 timestamp of when the message was published.
         metadata: Optional extra fields as a dict.
+        parent_id: ID of the message this is a reply to (optional).
+        thread_id: ID of the root message of the conversation thread
+            (optional). Equals parent_id for direct replies to root;
+            enables flat thread queries.
     """
 
     id: str
