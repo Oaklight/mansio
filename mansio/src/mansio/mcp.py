@@ -307,9 +307,7 @@ def _tool_note_read(client: MansioClient, args: dict[str, Any]) -> Any:
 
 
 def _tool_memory_store(client: MansioClient, args: dict[str, Any]) -> Any:
-    msg_id = client.memory_store(
-        args["content"], memory_type=args.get("memory_type", "general")
-    )
+    msg_id = client.memory_store(args["content"], memory_type=args.get("memory_type", "general"))
     return {"message_id": msg_id}
 
 
@@ -414,11 +412,14 @@ def _handle_request(client: MansioClient, req: dict[str, Any]) -> dict[str, Any]
     params = req.get("params", {})
 
     if method == "initialize":
-        return _ok(req_id, {
-            "protocolVersion": _MCP_PROTOCOL_VERSION,
-            "capabilities": _SERVER_CAPABILITIES,
-            "serverInfo": _SERVER_INFO,
-        })
+        return _ok(
+            req_id,
+            {
+                "protocolVersion": _MCP_PROTOCOL_VERSION,
+                "capabilities": _SERVER_CAPABILITIES,
+                "serverInfo": _SERVER_INFO,
+            },
+        )
 
     if method == "notifications/initialized":
         # Client acknowledgment — no response needed
@@ -435,20 +436,26 @@ def _handle_request(client: MansioClient, req: dict[str, Any]) -> dict[str, Any]
         tool_args = params.get("arguments", {})
         try:
             result = _call_tool(client, tool_name, tool_args)
-            return _ok(req_id, {
-                "content": [
-                    {"type": "text", "text": json.dumps(result, ensure_ascii=False)},
-                ],
-            })
+            return _ok(
+                req_id,
+                {
+                    "content": [
+                        {"type": "text", "text": json.dumps(result, ensure_ascii=False)},
+                    ],
+                },
+            )
         except ValueError as exc:
             return _error(req_id, _INVALID_PARAMS, str(exc))
         except Exception as exc:
-            return _ok(req_id, {
-                "content": [
-                    {"type": "text", "text": str(exc)},
-                ],
-                "isError": True,
-            })
+            return _ok(
+                req_id,
+                {
+                    "content": [
+                        {"type": "text", "text": str(exc)},
+                    ],
+                    "isError": True,
+                },
+            )
 
     return _error(req_id, _METHOD_NOT_FOUND, f"Unknown method: {method}")
 

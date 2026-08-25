@@ -360,9 +360,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
     def get_message(self, message_id: str) -> Message | None:
         """Retrieve a single message by ID."""
         with self._lock:
-            cursor = self._conn.execute(
-                "SELECT * FROM messages WHERE id = ?", (message_id,)
-            )
+            cursor = self._conn.execute("SELECT * FROM messages WHERE id = ?", (message_id,))
             row = cursor.fetchone()
             return self._row_to_message(row) if row else None
 

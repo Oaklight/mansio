@@ -200,7 +200,11 @@ class Bus:
             Messages in chronological order (oldest first).
         """
         return self._backend.query(
-            channel, after=after, limit=limit, msg_type=msg_type, order=order,
+            channel,
+            after=after,
+            limit=limit,
+            msg_type=msg_type,
+            order=order,
             thread_id=thread_id,
         )
 
