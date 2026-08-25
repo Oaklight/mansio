@@ -88,6 +88,10 @@ class ACLEntry:
     granted_by: str | None = field(default=None)
 
 
+PERMISSION_LEVELS: dict[str, int] = {"read": 0, "write": 1, "admin": 2}
+"""Permission hierarchy — admin > write > read."""
+
+
 @dataclass(frozen=True, slots=True)
 class AgentPresence:
     """Presence record for a single agent.

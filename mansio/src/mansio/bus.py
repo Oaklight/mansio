@@ -83,6 +83,7 @@ class Bus:
         self._require_auth = require_auth
         self._compaction_policy = compaction_policy or system_channel_policy
         self._subs: dict[str, dict[str, Callable[[Message], None]]] = defaultdict(dict)
+        self._ensured_channels: set[str] = set()
 
     @property
     def backend(self) -> Backend:
@@ -336,9 +337,12 @@ class Bus:
         - ``broadcast:*`` → public, owner = sender
         - ``_system:*`` → public, owner = ``_system``
         """
+        if channel in self._ensured_channels:
+            return
         if not isinstance(self._backend, ChannelStore):
             return
         if self._backend.get_channel(channel) is not None:
+            self._ensured_channels.add(channel)
             return
 
         now = _now_iso()
@@ -367,6 +371,7 @@ class Bus:
 
         with contextlib.suppress(ValueError):
             self._backend.create_channel(meta, acl)
+        self._ensured_channels.add(channel)
 
     # ── Channel metadata & ACL (optional — ChannelStore backends) ──
 
@@ -498,6 +503,8 @@ class Bus:
         count = self._backend.delete_channel(channel)
         # Clean up in-process subscriptions
         self._subs.pop(channel, None)
+        # Invalidate sugar-channel cache
+        self._ensured_channels.discard(channel)
         # Clean up channel metadata if backend supports it
         if isinstance(self._backend, ChannelStore):
             self._backend.delete_channel_meta(channel)

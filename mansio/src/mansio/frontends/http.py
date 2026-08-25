@@ -33,6 +33,7 @@ import contextlib
 import contextvars
 import json
 import re
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from mansio._vendor.httpserver import App, JSONResponse, Response, StreamingResponse
@@ -67,8 +68,6 @@ _PRIVATE_CHANNEL_PREFIXES = ("notebook:", "memory:")
 
 def _now_iso() -> str:
     """Return current UTC time as ISO 8601 string."""
-    from datetime import datetime, timezone
-
     return datetime.now(timezone.utc).isoformat()
 
 
