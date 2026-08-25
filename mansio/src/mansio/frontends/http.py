@@ -1040,12 +1040,22 @@ def _setup_sse_subscriptions(
     return q, sub_ids
 
 
-_SSE_REPLAY_LIMIT = 500  # max messages to replay per channel on reconnect
+# Max messages to replay per channel on reconnect.  For a client
+# subscribed to N channels the total replayed events can be up to
+# _SSE_REPLAY_LIMIT × N.
+_SSE_REPLAY_LIMIT = 500
 
 
 def _format_sse_event(data: str, event_id: str) -> str:
-    """Format a single SSE event with id: and data: fields."""
-    return f"id: {event_id}\ndata: {data}\n\n"
+    """Format a single SSE event with optional id: and data: fields.
+
+    If *event_id* is falsy the ``id:`` line is omitted entirely to
+    avoid resetting the client's ``lastEventId`` to the empty string
+    (which would break cursor-based resume on reconnect).
+    """
+    if event_id:
+        return f"id: {event_id}\ndata: {data}\n\n"
+    return f"data: {data}\n\n"
 
 
 async def _sse_event_generator(
@@ -1084,6 +1094,12 @@ async def _sse_event_generator(
                         ensure_ascii=False,
                     )
                     yield _format_sse_event(data, m.id)
+
+        # NOTE: Subscriptions are active during replay, so a message
+        # published in the replay window can appear in both the replay
+        # results and the live queue (duplicate).  SSE clients that track
+        # ``lastEventId`` deduplicate naturally; for others the window
+        # is small and payloads are idempotent.
 
         # ── Live stream ──────────────────────────────────────────
         while True:
