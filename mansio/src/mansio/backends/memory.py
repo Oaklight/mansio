@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from mansio.protocols import Backend, Compactable, Presenceable
+from mansio.protocols import Backend, Compactable, Deletable, Presenceable
 from mansio.types import AgentPresence, ClaimResult, Message
 
 _CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
@@ -27,7 +27,7 @@ def _infer_channel_type(name: str) -> str:
     return "user"
 
 
-class MemoryBackend(Backend, Presenceable, Compactable):
+class MemoryBackend(Backend, Presenceable, Compactable, Deletable):
     """In-memory message backend for testing.
 
     Messages are stored in plain Python lists, protected by a lock for
@@ -428,6 +428,45 @@ class MemoryBackend(Backend, Presenceable, Compactable):
 
             self._messages[channel] = msgs
             return original_count - len(msgs)
+
+    # ── Deletion ─────────────────────────────────────────────
+
+    def delete_channel(self, channel: str) -> int:
+        """Delete a channel and all its messages.
+
+        Args:
+            channel: Channel name to delete.
+
+        Returns:
+            Number of messages deleted.
+        """
+        with self._lock:
+            msgs = self._messages.pop(channel, [])
+            for m in msgs:
+                self._messages_by_id.pop(m.id, None)
+                self._queue_status_map.pop(m.id, None)
+            return len(msgs)
+
+    def delete_message(self, message_id: str) -> bool:
+        """Delete a single message by ID.
+
+        Args:
+            message_id: ID of the message to delete.
+
+        Returns:
+            True if the message was found and deleted, False otherwise.
+        """
+        with self._lock:
+            msg = self._messages_by_id.pop(message_id, None)
+            if msg is None:
+                return False
+            ch_msgs = self._messages.get(msg.channel)
+            if ch_msgs is not None:
+                self._messages[msg.channel] = [m for m in ch_msgs if m.id != message_id]
+                if not self._messages[msg.channel]:
+                    del self._messages[msg.channel]
+            self._queue_status_map.pop(message_id, None)
+            return True
 
     def info(self) -> dict:
         """Return backend type and usage info."""

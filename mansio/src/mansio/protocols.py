@@ -280,6 +280,33 @@ class Backend(ABC):
 
 
 @runtime_checkable
+class Deletable(Protocol):
+    """Optional protocol for backends that support channel/message deletion."""
+
+    def delete_channel(self, channel: str) -> int:
+        """Delete a channel and all its messages.
+
+        Args:
+            channel: Channel name to delete.
+
+        Returns:
+            Number of messages deleted.
+        """
+        ...
+
+    def delete_message(self, message_id: str) -> bool:
+        """Delete a single message by ID.
+
+        Args:
+            message_id: ID of the message to delete.
+
+        Returns:
+            True if the message was found and deleted, False otherwise.
+        """
+        ...
+
+
+@runtime_checkable
 class Presenceable(Protocol):
     """Optional protocol for backends that support agent presence tracking."""
 

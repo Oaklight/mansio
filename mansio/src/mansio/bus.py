@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Literal, overload
 
 from mansio.backends import SQLiteBackend
-from mansio.protocols import Backend, Presenceable
+from mansio.protocols import Backend, Deletable, Presenceable
 from mansio.system_policy import CompactionPolicy, system_channel_policy
 from mansio.types import AgentPresence, ClaimResult, Message
 
@@ -252,6 +252,49 @@ class Bus:
             or None if the message has no queue status.
         """
         return self._backend.queue_status(message_id)
+
+    # ── Deletion (optional — Deletable backends only) ────────
+
+    def _require_deletable(self) -> None:
+        if not isinstance(self._backend, Deletable):
+            raise NotImplementedError(
+                f"{type(self._backend).__name__} does not implement Deletable"
+            )
+
+    def delete_channel(self, channel: str) -> int:
+        """Delete a channel and all its messages.
+
+        Also removes any in-process subscriptions for the channel.
+
+        Args:
+            channel: Channel name to delete.
+
+        Returns:
+            Number of messages deleted.
+
+        Raises:
+            NotImplementedError: If backend is not Deletable.
+        """
+        self._require_deletable()
+        count = self._backend.delete_channel(channel)
+        # Clean up in-process subscriptions
+        self._subs.pop(channel, None)
+        return count
+
+    def delete_message(self, message_id: str) -> bool:
+        """Delete a single message by ID.
+
+        Args:
+            message_id: ID of the message to delete.
+
+        Returns:
+            True if the message was found and deleted.
+
+        Raises:
+            NotImplementedError: If backend is not Deletable.
+        """
+        self._require_deletable()
+        return self._backend.delete_message(message_id)
 
     # ── Presence (optional — Presenceable backends only) ─────
 

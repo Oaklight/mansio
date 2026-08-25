@@ -586,6 +586,7 @@ class HttpFrontend:
         self._bus = bus
         self._setup_middleware()
         self._setup_api_routes()
+        self._setup_deletion_routes()
         self._setup_queue_routes()
         self._setup_presence_routes()
         self._setup_sse_route()
@@ -632,7 +633,7 @@ class HttpFrontend:
                     status_code=204,
                     headers={
                         "Access-Control-Allow-Origin": cors,
-                        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
                         "Access-Control-Allow-Headers": "Content-Type, Authorization",
                     },
                 )
@@ -801,6 +802,184 @@ class HttpFrontend:
         @self._app.get("/v1/registry/lookup")
         async def registry_lookup(request: Request) -> dict | tuple:
             return await _handle_registry_lookup(request, bus)
+
+    def _setup_deletion_routes(self) -> None:
+        """Register channel and message deletion routes."""
+        self._setup_delete_channel_route()
+        self._setup_delete_message_route()
+        self._setup_admin_cleanup_route()
+
+    def _setup_delete_channel_route(self) -> None:
+        """Register DELETE /v1/channels/<channel_name>."""
+        bus = self._bus
+        assert bus is not None
+
+        @self._app.delete("/v1/channels/<channel_name>")
+        async def delete_channel(request: Request, channel_name: str = "") -> dict | tuple:
+            if not channel_name:
+                return {"error": "Bad Request", "message": "Channel name required"}, 400
+
+            auth_result = _auth_result_var.get()
+
+            # System channels: only supertoken or no-auth can delete
+            if channel_name.startswith("_system:") and isinstance(auth_result, str):
+                return {
+                    "error": "Forbidden",
+                    "message": f"Channel '{channel_name}' is a system channel; "
+                    "only admin tokens can delete system channels",
+                }, 403
+
+            # Scoped tokens: can only delete their own private channels
+            if isinstance(auth_result, str):
+                if _is_private_channel(channel_name):
+                    if auth_result not in channel_name.split(":"):
+                        return {
+                            "error": "Forbidden",
+                            "message": f"Token for '{auth_result}' cannot delete "
+                            f"channel '{channel_name}'",
+                        }, 403
+                else:
+                    # Public/user channels: scoped tokens cannot delete
+                    return {
+                        "error": "Forbidden",
+                        "message": "Only admin tokens can delete public channels",
+                    }, 403
+
+            try:
+                count = await asyncio.to_thread(bus.delete_channel, channel_name)
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support deletion",
+                }, 501
+
+            if count == 0:
+                return {
+                    "error": "Not Found",
+                    "message": f"Channel '{channel_name}' not found or already empty",
+                }, 404
+
+            return {"deleted": count, "channel": channel_name}
+
+    def _setup_delete_message_route(self) -> None:
+        """Register DELETE /v1/messages/<message_id>."""
+        bus = self._bus
+        assert bus is not None
+
+        @self._app.delete("/v1/messages/<message_id>")
+        async def delete_message(request: Request, message_id: str = "") -> dict | tuple:
+            if not message_id:
+                return {"error": "Bad Request", "message": "Message ID required"}, 400
+
+            auth_result = _auth_result_var.get()
+
+            # For scoped tokens, verify the message belongs to the agent
+            if isinstance(auth_result, str):
+                found_msg = await asyncio.to_thread(_find_message_by_id, bus, message_id)
+
+                if found_msg is None:
+                    return {
+                        "error": "Not Found",
+                        "message": f"Message '{message_id}' not found",
+                    }, 404
+
+                if found_msg.sender != auth_result:
+                    return {
+                        "error": "Forbidden",
+                        "message": f"Token for '{auth_result}' cannot delete messages "
+                        f"from sender '{found_msg.sender}'",
+                    }, 403
+
+            try:
+                deleted = await asyncio.to_thread(bus.delete_message, message_id)
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support deletion",
+                }, 501
+
+            if not deleted:
+                return {
+                    "error": "Not Found",
+                    "message": f"Message '{message_id}' not found",
+                }, 404
+
+            return {"deleted": True, "message_id": message_id}
+
+    def _setup_admin_cleanup_route(self) -> None:
+        """Register POST /v1/admin/channels/cleanup."""
+        bus = self._bus
+        assert bus is not None
+
+        @self._app.post("/v1/admin/channels/cleanup")
+        async def admin_cleanup(request: Request) -> dict | tuple:
+            auth_result = _auth_result_var.get()
+
+            # Admin only: supertoken (None) or no-auth mode (True)
+            if isinstance(auth_result, str):
+                return {
+                    "error": "Forbidden",
+                    "message": "Admin endpoints require a supertoken",
+                }, 403
+
+            try:
+                data = request.json()
+            except Exception:
+                return {
+                    "error": "Bad Request",
+                    "message": "Request body must be valid JSON",
+                }, 400
+
+            if not isinstance(data, dict):
+                return {
+                    "error": "Bad Request",
+                    "message": "Request body must be a JSON object",
+                }, 400
+
+            pattern = data.get("pattern", "").strip()
+            if not pattern:
+                return {
+                    "error": "Bad Request",
+                    "message": "'pattern' field is required (e.g. 'test:*')",
+                }, 400
+
+            older_than = data.get("older_than")
+
+            all_channels = await asyncio.to_thread(bus.channels)
+            matched = _match_channels(all_channels, pattern)
+
+            if older_than:
+                # Filter by last activity time
+                try:
+                    detail_list = await asyncio.to_thread(bus.channels_detail)
+                except NotImplementedError:
+                    detail_list = []
+                detail_map = {d["name"]: d for d in detail_list}
+                matched = [
+                    ch
+                    for ch in matched
+                    if ch in detail_map and detail_map[ch].get("last_activity", "") < older_than
+                ]
+
+            total_deleted = 0
+            channels_deleted: list[str] = []
+
+            try:
+                for ch in matched:
+                    count = await asyncio.to_thread(bus.delete_channel, ch)
+                    total_deleted += count
+                    channels_deleted.append(ch)
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support deletion",
+                }, 501
+
+            return {
+                "channels_deleted": len(channels_deleted),
+                "messages_deleted": total_deleted,
+                "channels": channels_deleted,
+            }
 
     def _setup_queue_routes(self) -> None:
         """Register queue (claim/ack/status) routes."""
@@ -974,6 +1153,41 @@ class HttpFrontend:
                     "message": "Channel name required",
                 }, 400
             return await _handle_subscribe(request, [channel])
+
+
+def _find_message_by_id(bus: Bus, message_id: str) -> Any:
+    """Look up a message across all channels by ID.
+
+    Args:
+        bus: The bus to search.
+        message_id: Message ID to find.
+
+    Returns:
+        The Message object if found, None otherwise.
+    """
+    for ch in bus.channels():
+        for m in bus.query(ch, limit=10_000):
+            if m.id == message_id:
+                return m
+    return None
+
+
+def _match_channels(channels: list[str], pattern: str) -> list[str]:
+    """Match channel names against a glob-like pattern.
+
+    Supports ``*`` as a wildcard for any sequence of characters.
+    The pattern is matched against the full channel name.
+
+    Args:
+        channels: List of channel names to match.
+        pattern: Glob pattern (e.g. ``"test:*"``, ``"*"``)
+
+    Returns:
+        List of matching channel names.
+    """
+    import fnmatch
+
+    return [ch for ch in channels if fnmatch.fnmatch(ch, pattern)]
 
 
 def _check_subscribe_access(auth_result: Any, ch_list: list[str]) -> tuple[dict, int] | None:
