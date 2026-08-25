@@ -8,7 +8,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from mansio.protocols import Backend, ChannelStore, Compactable, Deletable, Presenceable
-from mansio.types import ACLEntry, AgentPresence, ChannelMeta, ClaimResult, Message
+from mansio.types import (
+    PERMISSION_LEVELS,
+    ACLEntry,
+    AgentPresence,
+    ChannelMeta,
+    ClaimResult,
+    Message,
+)
 
 _CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
     ("dm:", "dm"),
@@ -25,9 +32,6 @@ def _infer_channel_type(name: str) -> str:
         if name.startswith(prefix):
             return ctype
     return "user"
-
-
-_PERMISSION_LEVELS = {"read": 0, "write": 1, "admin": 2}
 
 
 class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore):
@@ -617,9 +621,7 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             entry = self._acl.get(channel, {}).get(agent_id)
             if entry is None:
                 return meta.visibility == "public" and required in ("read", "write")
-            return _PERMISSION_LEVELS.get(entry.permission, 0) >= _PERMISSION_LEVELS.get(
-                required, 0
-            )
+            return PERMISSION_LEVELS.get(entry.permission, 0) >= PERMISSION_LEVELS.get(required, 0)
 
     def close(self) -> None:
         """Clear all stored messages."""

@@ -16,7 +16,14 @@ from typing import Literal
 from mansio._vendor.retry import retry
 from mansio._vendor.structlog import get_logger
 from mansio.protocols import Backend, ChannelStore, Compactable, Deletable, Presenceable
-from mansio.types import ACLEntry, AgentPresence, ChannelMeta, ClaimResult, Message
+from mansio.types import (
+    PERMISSION_LEVELS,
+    ACLEntry,
+    AgentPresence,
+    ChannelMeta,
+    ClaimResult,
+    Message,
+)
 
 _CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
     ("dm:", "dm"),
@@ -38,7 +45,7 @@ def _infer_channel_type(name: str) -> str:
 logger = get_logger(__name__)
 
 # Current schema version — bump when the schema changes.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS messages (
@@ -224,11 +231,32 @@ def check_schema(
     return "migrated"
 
 
-# Migration registry: version -> callable(conn).
-# Add entries as schema evolves: _MIGRATIONS[2] = _migrate_v1_to_v2
-_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {}
+# ── Migration registry ──────────────────────────────────────────────
 
-_PERMISSION_LEVELS = {"read": 0, "write": 1, "admin": 2}
+
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    """Add channels and channel_acl tables."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS channels (
+            name     TEXT PRIMARY KEY,
+            owner    TEXT NOT NULL,
+            visibility TEXT NOT NULL DEFAULT 'public',
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS channel_acl (
+            channel    TEXT NOT NULL REFERENCES channels(name) ON DELETE CASCADE,
+            agent_id   TEXT NOT NULL,
+            permission TEXT NOT NULL DEFAULT 'read',
+            granted_at TEXT NOT NULL DEFAULT '',
+            granted_by TEXT,
+            PRIMARY KEY (channel, agent_id)
+        );
+    """)
+
+
+_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    2: _migrate_v1_to_v2,
+}
 
 
 class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore):
@@ -943,7 +971,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             ).fetchone()
             if acl_row is None:
                 return ch_vis == "public" and required in ("read", "write")
-            return _PERMISSION_LEVELS.get(acl_row[0], 0) >= _PERMISSION_LEVELS.get(required, 0)
+            return PERMISSION_LEVELS.get(acl_row[0], 0) >= PERMISSION_LEVELS.get(required, 0)
 
     # ── Presence ──────────────────────────────────────────────
 

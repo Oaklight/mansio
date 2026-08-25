@@ -10,7 +10,14 @@ from mansio.protocols import Backend, ChannelStore, Compactable, Deletable, Pres
 from mansio.server import MansioServer
 from mansio.system_policy import CompactionPolicy, system_channel_policy
 from mansio.transport_http import HttpTransport, MansioAPIError
-from mansio.types import ACLEntry, AgentPresence, ChannelMeta, ClaimResult, Message
+from mansio.types import (
+    PERMISSION_LEVELS,
+    ACLEntry,
+    AgentPresence,
+    ChannelMeta,
+    ClaimResult,
+    Message,
+)
 
 # Backward compatibility aliases (deprecated, will be removed)
 SQLiteStorage = SQLiteBackend
@@ -19,6 +26,7 @@ StorageBackend = Backend
 
 __all__ = [
     "ACLEntry",
+    "PERMISSION_LEVELS",
     "AgentPresence",
     "Backend",
     "ChannelMeta",
