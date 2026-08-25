@@ -1423,7 +1423,6 @@ class HttpFrontend:
             return await _handle_subscribe(request, [channel])
 
 
-
 def _match_channels(channels: list[str], pattern: str) -> list[str]:
     """Match channel names against a glob-like pattern.
 
