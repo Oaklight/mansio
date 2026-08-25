@@ -28,6 +28,8 @@ class Message:
     payload: str
     timestamp: str
     metadata: dict | None = field(default=None)
+    parent_id: str | None = field(default=None)
+    thread_id: str | None = field(default=None)
 
     def payload_json(self) -> dict:
         """Parse payload as JSON. Raises ValueError if not valid JSON."""
