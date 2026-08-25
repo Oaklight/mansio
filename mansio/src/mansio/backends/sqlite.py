@@ -15,8 +15,8 @@ from typing import Literal
 
 from mansio._vendor.retry import retry
 from mansio._vendor.structlog import get_logger
-from mansio.protocols import Backend, Compactable, Deletable, Presenceable
-from mansio.types import AgentPresence, ClaimResult, Message
+from mansio.protocols import Backend, ChannelStore, Compactable, Deletable, Presenceable
+from mansio.types import ACLEntry, AgentPresence, ChannelMeta, ClaimResult, Message
 
 _CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
     ("dm:", "dm"),
@@ -56,6 +56,20 @@ CREATE TABLE IF NOT EXISTS agent_presence (
     agent_id TEXT PRIMARY KEY,
     last_seen TEXT NOT NULL,
     metadata TEXT
+);
+CREATE TABLE IF NOT EXISTS channels (
+    name TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    visibility TEXT NOT NULL DEFAULT 'public',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS channel_acl (
+    channel TEXT NOT NULL REFERENCES channels(name) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    permission TEXT NOT NULL DEFAULT 'write',
+    granted_at TEXT NOT NULL,
+    granted_by TEXT,
+    PRIMARY KEY (channel, agent_id)
 );
 """
 
@@ -214,8 +228,10 @@ def check_schema(
 # Add entries as schema evolves: _MIGRATIONS[2] = _migrate_v1_to_v2
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {}
 
+_PERMISSION_LEVELS = {"read": 0, "write": 1, "admin": 2}
 
-class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
+
+class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore):
     """SQLite-backed message backend.
 
     Supports cross-process sharing via WAL mode.
@@ -274,6 +290,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
     def _enable_wal(self) -> None:
         """Enable WAL journal mode with automatic retry on lock contention."""
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA foreign_keys=ON")
 
     def _ensure_queue_columns(self) -> None:
         existing = {row[1] for row in self._conn.execute("PRAGMA table_info(messages)").fetchall()}
@@ -778,6 +795,155 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable):
                 info_dict["wal_size_mb"] = round(os.path.getsize(wal_path) / (1024 * 1024), 2)
 
         return info_dict
+
+    # ── Channel metadata & ACL ────────────────────────────────
+
+    def create_channel(self, meta: ChannelMeta, acl: list[ACLEntry] | None = None) -> None:
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "INSERT INTO channels (name, owner, visibility, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (meta.name, meta.owner, meta.visibility, meta.created_at),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(f"Channel '{meta.name}' already exists") from exc
+            if acl:
+                self._conn.executemany(
+                    "INSERT OR REPLACE INTO channel_acl "
+                    "(channel, agent_id, permission, granted_at, granted_by) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    [
+                        (e.channel, e.agent_id, e.permission, e.granted_at, e.granted_by)
+                        for e in acl
+                    ],
+                )
+            self._conn.commit()
+
+    def get_channel(self, name: str) -> ChannelMeta | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT name, owner, visibility, created_at FROM channels WHERE name = ?",
+                (name,),
+            ).fetchone()
+            if row is None:
+                return None
+            return ChannelMeta(name=row[0], owner=row[1], visibility=row[2], created_at=row[3])
+
+    def list_channels_meta(self) -> list[ChannelMeta]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT name, owner, visibility, created_at FROM channels ORDER BY name"
+            ).fetchall()
+            return [
+                ChannelMeta(name=r[0], owner=r[1], visibility=r[2], created_at=r[3]) for r in rows
+            ]
+
+    def update_channel(
+        self, name: str, *, visibility: str | None = None, owner: str | None = None
+    ) -> bool:
+        with self._lock:
+            sets: list[str] = []
+            params: list[str] = []
+            if visibility is not None:
+                sets.append("visibility = ?")
+                params.append(visibility)
+            if owner is not None:
+                sets.append("owner = ?")
+                params.append(owner)
+            if not sets:
+                return self.get_channel(name) is not None
+            params.append(name)
+            cursor = self._conn.execute(
+                f"UPDATE channels SET {', '.join(sets)} WHERE name = ?", params
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_channel_meta(self, name: str) -> bool:
+        with self._lock:
+            # ACL entries cascade-deleted via FK
+            cursor = self._conn.execute("DELETE FROM channels WHERE name = ?", (name,))
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def set_acl(self, channel: str, entries: list[ACLEntry]) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM channel_acl WHERE channel = ?", (channel,))
+            if entries:
+                self._conn.executemany(
+                    "INSERT INTO channel_acl "
+                    "(channel, agent_id, permission, granted_at, granted_by) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    [
+                        (e.channel, e.agent_id, e.permission, e.granted_at, e.granted_by)
+                        for e in entries
+                    ],
+                )
+            self._conn.commit()
+
+    def get_acl(self, channel: str) -> list[ACLEntry]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT channel, agent_id, permission, granted_at, granted_by "
+                "FROM channel_acl WHERE channel = ? ORDER BY agent_id",
+                (channel,),
+            ).fetchall()
+            return [
+                ACLEntry(
+                    channel=r[0],
+                    agent_id=r[1],
+                    permission=r[2],
+                    granted_at=r[3],
+                    granted_by=r[4],
+                )
+                for r in rows
+            ]
+
+    def add_acl_entry(self, entry: ACLEntry) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO channel_acl "
+                "(channel, agent_id, permission, granted_at, granted_by) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    entry.channel,
+                    entry.agent_id,
+                    entry.permission,
+                    entry.granted_at,
+                    entry.granted_by,
+                ),
+            )
+            self._conn.commit()
+
+    def remove_acl_entry(self, channel: str, agent_id: str) -> bool:
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM channel_acl WHERE channel = ? AND agent_id = ?",
+                (channel, agent_id),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def check_access(self, channel: str, agent_id: str, required: str = "read") -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT owner, visibility FROM channels WHERE name = ?", (channel,)
+            ).fetchone()
+            if row is None:
+                return True  # unregistered channels are public
+            ch_owner, ch_vis = row[0], row[1]
+            if ch_owner == agent_id:
+                return True
+            if ch_vis == "public" and required == "read":
+                return True
+            acl_row = self._conn.execute(
+                "SELECT permission FROM channel_acl WHERE channel = ? AND agent_id = ?",
+                (channel, agent_id),
+            ).fetchone()
+            if acl_row is None:
+                return ch_vis == "public" and required in ("read", "write")
+            return _PERMISSION_LEVELS.get(acl_row[0], 0) >= _PERMISSION_LEVELS.get(required, 0)
 
     # ── Presence ──────────────────────────────────────────────
 

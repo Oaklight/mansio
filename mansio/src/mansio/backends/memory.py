@@ -7,8 +7,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from mansio.protocols import Backend, Compactable, Deletable, Presenceable
-from mansio.types import AgentPresence, ClaimResult, Message
+from mansio.protocols import Backend, ChannelStore, Compactable, Deletable, Presenceable
+from mansio.types import ACLEntry, AgentPresence, ChannelMeta, ClaimResult, Message
 
 _CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
     ("dm:", "dm"),
@@ -27,7 +27,10 @@ def _infer_channel_type(name: str) -> str:
     return "user"
 
 
-class MemoryBackend(Backend, Presenceable, Compactable, Deletable):
+_PERMISSION_LEVELS = {"read": 0, "write": 1, "admin": 2}
+
+
+class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore):
     """In-memory message backend for testing.
 
     Messages are stored in plain Python lists, protected by a lock for
@@ -40,6 +43,8 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable):
         self._messages_by_id: dict[str, Message] = {}
         self._queue_status_map: dict[str, dict] = {}
         self._presence: dict[str, dict] = {}  # agent_id → {last_seen, metadata}
+        self._channels: dict[str, ChannelMeta] = {}
+        self._acl: dict[str, dict[str, ACLEntry]] = defaultdict(dict)  # channel → {agent → entry}
 
     def store(self, message: Message) -> None:
         """Store a regular message in memory.
@@ -542,6 +547,80 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable):
                 metadata=rec["metadata"],
             )
 
+    # ── Channel metadata & ACL ─────────────────────────────────
+
+    def create_channel(self, meta: ChannelMeta, acl: list[ACLEntry] | None = None) -> None:
+        with self._lock:
+            if meta.name in self._channels:
+                raise ValueError(f"Channel '{meta.name}' already exists")
+            self._channels[meta.name] = meta
+            if acl:
+                for entry in acl:
+                    self._acl[meta.name][entry.agent_id] = entry
+
+    def get_channel(self, name: str) -> ChannelMeta | None:
+        with self._lock:
+            return self._channels.get(name)
+
+    def list_channels_meta(self) -> list[ChannelMeta]:
+        with self._lock:
+            return sorted(self._channels.values(), key=lambda c: c.name)
+
+    def update_channel(
+        self, name: str, *, visibility: str | None = None, owner: str | None = None
+    ) -> bool:
+        with self._lock:
+            meta = self._channels.get(name)
+            if meta is None:
+                return False
+            from dataclasses import replace
+
+            self._channels[name] = replace(
+                meta,
+                visibility=visibility if visibility is not None else meta.visibility,
+                owner=owner if owner is not None else meta.owner,
+            )
+            return True
+
+    def delete_channel_meta(self, name: str) -> bool:
+        with self._lock:
+            removed = self._channels.pop(name, None)
+            self._acl.pop(name, None)
+            return removed is not None
+
+    def set_acl(self, channel: str, entries: list[ACLEntry]) -> None:
+        with self._lock:
+            self._acl[channel] = {e.agent_id: e for e in entries}
+
+    def get_acl(self, channel: str) -> list[ACLEntry]:
+        with self._lock:
+            return sorted(self._acl.get(channel, {}).values(), key=lambda e: e.agent_id)
+
+    def add_acl_entry(self, entry: ACLEntry) -> None:
+        with self._lock:
+            self._acl[entry.channel][entry.agent_id] = entry
+
+    def remove_acl_entry(self, channel: str, agent_id: str) -> bool:
+        with self._lock:
+            entries = self._acl.get(channel, {})
+            return entries.pop(agent_id, None) is not None
+
+    def check_access(self, channel: str, agent_id: str, required: str = "read") -> bool:
+        with self._lock:
+            meta = self._channels.get(channel)
+            if meta is None:
+                return True  # unregistered channels are public
+            if meta.owner == agent_id:
+                return True
+            if meta.visibility == "public" and required == "read":
+                return True
+            entry = self._acl.get(channel, {}).get(agent_id)
+            if entry is None:
+                return meta.visibility == "public" and required in ("read", "write")
+            return _PERMISSION_LEVELS.get(entry.permission, 0) >= _PERMISSION_LEVELS.get(
+                required, 0
+            )
+
     def close(self) -> None:
         """Clear all stored messages."""
         with self._lock:
@@ -549,6 +628,8 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable):
             self._messages_by_id.clear()
             self._queue_status_map.clear()
             self._presence.clear()
+            self._channels.clear()
+            self._acl.clear()
 
     def __repr__(self) -> str:
         return "MemoryBackend()"

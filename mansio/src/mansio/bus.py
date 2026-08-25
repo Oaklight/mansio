@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import uuid
 from collections import defaultdict
@@ -11,9 +12,9 @@ from pathlib import Path
 from typing import Literal, overload
 
 from mansio.backends import SQLiteBackend
-from mansio.protocols import Backend, Deletable, Presenceable
+from mansio.protocols import Backend, ChannelStore, Deletable, Presenceable
 from mansio.system_policy import CompactionPolicy, system_channel_policy
-from mansio.types import AgentPresence, ClaimResult, Message
+from mansio.types import ACLEntry, AgentPresence, ChannelMeta, ClaimResult, Message
 
 # Thread-safe monotonic sequence for _uuid7 fallback
 _seq_lock = threading.Lock()
@@ -114,6 +115,7 @@ class Bus:
         *,
         queue: bool = False,
         parent_id: str | None = None,
+        enforce_acl: bool = False,
     ) -> str:
         """Publish a message to a channel.
 
@@ -125,6 +127,7 @@ class Bus:
             metadata: Optional extra fields.
             parent_id: Optional ID of the message being replied to.
                 Server auto-computes ``thread_id`` from the parent.
+            enforce_acl: If True, check write permission before storing.
 
         Returns:
             The message ID.
@@ -132,7 +135,16 @@ class Bus:
         Raises:
             ValueError: If parent_id references a non-existent message
                 or a message in a different channel.
+            PermissionError: If enforce_acl is True and sender lacks
+                write permission.
         """
+        # Auto-create channel metadata for sugar prefixes
+        if isinstance(self._backend, ChannelStore):
+            self._ensure_sugar_channel(channel, sender)
+
+        if enforce_acl and not self.check_access(channel, sender, "write"):
+            raise PermissionError(f"agent '{sender}' lacks write permission on '{channel}'")
+
         msg_id = _uuid7()
         timestamp = _now_iso()
 
@@ -184,6 +196,8 @@ class Bus:
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
         thread_id: str | None = None,
+        *,
+        agent_id: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -195,10 +209,17 @@ class Bus:
             order: ``"oldest"`` returns the first *limit* messages;
                 ``"newest"`` returns the last *limit* messages.
             thread_id: If provided, only return messages in this thread.
+            agent_id: If provided, enforce read ACL for this agent.
 
         Returns:
             Messages in chronological order (oldest first).
+
+        Raises:
+            PermissionError: If agent_id is provided and the agent
+                lacks read permission.
         """
+        if agent_id is not None and not self.check_access(channel, agent_id, "read"):
+            raise PermissionError(f"agent '{agent_id}' lacks read permission on '{channel}'")
         return self._backend.query(
             channel,
             after=after,
@@ -212,6 +233,8 @@ class Bus:
         self,
         channel: str,
         callback: Callable[[Message], None],
+        *,
+        agent_id: str | None = None,
     ) -> str:
         """Register an in-process callback for new messages on a channel.
 
@@ -221,10 +244,17 @@ class Bus:
         Args:
             channel: Channel to watch.
             callback: Function called with each new Message.
+            agent_id: If provided, enforce read ACL for this agent.
 
         Returns:
             Subscription ID for use with unsubscribe().
+
+        Raises:
+            PermissionError: If agent_id is provided and the agent
+                lacks read permission.
         """
+        if agent_id is not None and not self.check_access(channel, agent_id, "read"):
+            raise PermissionError(f"agent '{agent_id}' lacks read permission on '{channel}'")
         sub_id = uuid.uuid4().hex[:8]
         self._subs[channel][sub_id] = callback
         return sub_id
@@ -295,6 +325,148 @@ class Bus:
         """
         return self._backend.queue_status(message_id)
 
+    # ── Sugar channel auto-creation ──────────────────────────
+
+    def _ensure_sugar_channel(self, channel: str, sender: str) -> None:
+        """Auto-create channel metadata for well-known prefixes.
+
+        - ``dm:alice:bob`` → private, owner = sender, ACL = both agents
+        - ``notebook:alice`` → private, owner = alice, ACL = owner-only
+        - ``memory:alice`` → private, owner = alice, ACL = owner-only
+        - ``broadcast:*`` → public, owner = sender
+        - ``_system:*`` → public, owner = ``_system``
+        """
+        if not isinstance(self._backend, ChannelStore):
+            return
+        if self._backend.get_channel(channel) is not None:
+            return
+
+        now = _now_iso()
+
+        if channel.startswith("dm:"):
+            parts = channel.split(":")
+            agents = sorted(parts[1:])  # canonicalize
+            acl = [
+                ACLEntry(channel=channel, agent_id=a, permission="write", granted_at=now)
+                for a in agents
+            ]
+            meta = ChannelMeta(name=channel, owner=sender, visibility="private", created_at=now)
+        elif channel.startswith(("notebook:", "memory:")):
+            owner = channel.split(":", 1)[1]
+            meta = ChannelMeta(name=channel, owner=owner, visibility="private", created_at=now)
+            acl = [ACLEntry(channel=channel, agent_id=owner, permission="admin", granted_at=now)]
+        elif channel.startswith("broadcast:"):
+            meta = ChannelMeta(name=channel, owner=sender, visibility="public", created_at=now)
+            acl = None
+        elif channel.startswith("_system:"):
+            meta = ChannelMeta(name=channel, owner="_system", visibility="public", created_at=now)
+            acl = None
+        else:
+            # Regular user channels — no auto-creation
+            return
+
+        with contextlib.suppress(ValueError):
+            self._backend.create_channel(meta, acl)
+
+    # ── Channel metadata & ACL (optional — ChannelStore backends) ──
+
+    def _require_channel_store(self) -> None:
+        if not isinstance(self._backend, ChannelStore):
+            raise NotImplementedError(
+                f"{type(self._backend).__name__} does not implement ChannelStore"
+            )
+
+    def create_channel(
+        self,
+        name: str,
+        owner: str,
+        *,
+        visibility: str = "public",
+        acl: list[ACLEntry] | None = None,
+    ) -> ChannelMeta:
+        """Create a channel with explicit metadata.
+
+        Args:
+            name: Channel name.
+            owner: Agent ID of the channel creator.
+            visibility: ``"public"`` or ``"private"``.
+            acl: Optional initial ACL entries.
+
+        Returns:
+            The created ChannelMeta.
+
+        Raises:
+            NotImplementedError: If backend is not ChannelStore.
+            ValueError: If the channel already exists.
+        """
+        self._require_channel_store()
+        meta = ChannelMeta(name=name, owner=owner, visibility=visibility, created_at=_now_iso())
+        self._backend.create_channel(meta, acl)
+        return meta
+
+    def ensure_channel(
+        self,
+        name: str,
+        owner: str,
+        *,
+        visibility: str = "public",
+        acl: list[ACLEntry] | None = None,
+    ) -> ChannelMeta:
+        """Get or create a channel. Idempotent.
+
+        If the channel already exists, returns existing metadata
+        (ignores the owner/visibility/acl arguments).
+
+        Returns:
+            The ChannelMeta (existing or newly created).
+        """
+        self._require_channel_store()
+        existing = self._backend.get_channel(name)
+        if existing is not None:
+            return existing
+        meta = ChannelMeta(name=name, owner=owner, visibility=visibility, created_at=_now_iso())
+        try:
+            self._backend.create_channel(meta, acl)
+        except ValueError:
+            # Race: channel created between get and create
+            return self._backend.get_channel(name) or meta
+        return meta
+
+    def get_channel_meta(self, name: str) -> ChannelMeta | None:
+        """Return channel metadata, or None."""
+        self._require_channel_store()
+        return self._backend.get_channel(name)
+
+    def check_access(self, channel: str, agent_id: str, required: str = "read") -> bool:
+        """Check if an agent has the required permission on a channel.
+
+        Returns True for backends that don't implement ChannelStore
+        (backward compatible: no ACL = open access).
+        """
+        if not isinstance(self._backend, ChannelStore):
+            return True
+        return self._backend.check_access(channel, agent_id, required)
+
+    def get_acl(self, channel: str) -> list[ACLEntry]:
+        """Return ACL entries for a channel."""
+        self._require_channel_store()
+        return self._backend.get_acl(channel)
+
+    def set_acl(self, channel: str, entries: list[ACLEntry]) -> None:
+        """Replace ACL for a channel."""
+        self._require_channel_store()
+        self._backend.set_acl(channel, entries)
+
+    def add_acl_entry(self, entry: ACLEntry) -> None:
+        """Add or update a single ACL entry."""
+        self._require_channel_store()
+        self._backend.add_acl_entry(entry)
+
+    def remove_acl_entry(self, channel: str, agent_id: str) -> bool:
+        """Remove an ACL entry."""
+        self._require_channel_store()
+        return self._backend.remove_acl_entry(channel, agent_id)
+
     # ── Deletion (optional — Deletable backends only) ────────
 
     def _require_deletable(self) -> None:
@@ -303,39 +475,62 @@ class Bus:
                 f"{type(self._backend).__name__} does not implement Deletable"
             )
 
-    def delete_channel(self, channel: str) -> int:
+    def delete_channel(self, channel: str, *, agent_id: str | None = None) -> int:
         """Delete a channel and all its messages.
 
         Also removes any in-process subscriptions for the channel.
 
         Args:
             channel: Channel name to delete.
+            agent_id: If provided, enforce admin ACL for this agent.
 
         Returns:
             Number of messages deleted.
 
         Raises:
             NotImplementedError: If backend is not Deletable.
+            PermissionError: If agent_id is provided and the agent
+                lacks admin permission.
         """
         self._require_deletable()
+        if agent_id is not None and not self.check_access(channel, agent_id, "admin"):
+            raise PermissionError(f"agent '{agent_id}' lacks admin permission on '{channel}'")
         count = self._backend.delete_channel(channel)
         # Clean up in-process subscriptions
         self._subs.pop(channel, None)
+        # Clean up channel metadata if backend supports it
+        if isinstance(self._backend, ChannelStore):
+            self._backend.delete_channel_meta(channel)
         return count
 
-    def delete_message(self, message_id: str) -> bool:
+    def delete_message(self, message_id: str, *, agent_id: str | None = None) -> bool:
         """Delete a single message by ID.
+
+        When *agent_id* is provided, the agent must either be the
+        message sender (write-level) or have admin permission on
+        the message's channel.
 
         Args:
             message_id: ID of the message to delete.
+            agent_id: If provided, enforce ownership or admin ACL.
 
         Returns:
             True if the message was found and deleted.
 
         Raises:
             NotImplementedError: If backend is not Deletable.
+            PermissionError: If agent_id is provided and the agent
+                is neither the sender nor a channel admin.
         """
         self._require_deletable()
+        if agent_id is not None:
+            msg = self._backend.get_message(message_id)
+            if (
+                msg is not None
+                and msg.sender != agent_id
+                and not self.check_access(msg.channel, agent_id, "admin")
+            ):
+                raise PermissionError(f"agent '{agent_id}' cannot delete message '{message_id}'")
         return self._backend.delete_message(message_id)
 
     # ── Presence (optional — Presenceable backends only) ─────
