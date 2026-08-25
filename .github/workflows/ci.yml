@@ -91,3 +91,30 @@ jobs:
 
       - name: Run tests
         run: python -m pytest mansio/tests/ -v
+
+  client-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install mansio-client
+        run: |
+          python -m pip install --upgrade pip
+          pip install mansio-client/
+
+      - name: Verify package imports
+        run: |
+          python -c "from mansio_client import MansioClient, HttpTransport, MansioAPIError, Message, AgentPresence, ClaimResult, __version__; print(f'mansio-client {__version__} OK')"
+
+      - name: Verify CLI entry point
+        run: mansio-client --version
+
+      - name: Verify package builds cleanly
+        run: |
+          pip install build
+          python -m build mansio-client/

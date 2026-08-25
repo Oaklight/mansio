@@ -1,0 +1,88 @@
+name: Release mansio-client
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.1.0)"
+        required: true
+        type: string
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify version matches package
+        run: |
+          PKG_VER=$(python -c "import re; m=re.search(r'__version__\s*=\s*\"(.+?)\"', open('mansio-client/src/mansio_client/__init__.py').read()); print(m.group(1))")
+          echo "Package version: $PKG_VER"
+          echo "Requested version: ${{ inputs.version }}"
+          [ "$PKG_VER" = "${{ inputs.version }}" ] || \
+            (echo "::error::Version mismatch: __init__.py has $PKG_VER but release requested ${{ inputs.version }}"; exit 1)
+
+      - name: Create and push git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "client-v${{ inputs.version }}"
+          git push origin "client-v${{ inputs.version }}"
+
+  build-publish:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: client-v${{ inputs.version }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel + sdist
+        run: |
+          pip install --upgrade pip build
+          python -m build mansio-client/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: mansio-client/dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: mansio-client/dist/*
+          retention-days: 7
+
+  github-release:
+    needs: build-publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: dist/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "client-v${{ inputs.version }}" dist/* \
+            --repo "${{ github.repository }}" \
+            --title "mansio-client v${{ inputs.version }}" \
+            --generate-notes
