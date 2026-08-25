@@ -425,6 +425,10 @@ class NATSBackend(Backend, Presenceable, Compactable):
         """Look up a message by ID from the in-memory index.
 
         Only messages stored through this backend instance are indexed.
+        Messages that exist in JetStream but were published before this
+        process started (or by another process) will not be found.
+        This means replying to a pre-restart message will return None.
+
         Returns None if the message is not found.
         """
         return self._messages_by_id.get(message_id)
