@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 
 class _RollingWindow:
@@ -36,6 +37,9 @@ class _RollingWindow:
         key = int(time.monotonic())
         with self._lock:
             self._buckets[key] = self._buckets.get(key, 0) + count
+            if len(self._buckets) > self._window * 2:
+                cutoff = key - self._window
+                self._buckets = {k: v for k, v in self._buckets.items() if k > cutoff}
 
     def get_series(self, seconds: int | None = None) -> list[int]:
         """Return per-second counts for the last *seconds* seconds.
@@ -103,7 +107,6 @@ class MetricsCollector:
             List of ``{"time": "HH:MM:SS", "count": N}`` dicts,
             oldest first, same shape as the existing endpoint.
         """
-        from datetime import datetime, timedelta, timezone
 
         series = self._throughput.get_series(seconds)
         now = datetime.now(timezone.utc)
