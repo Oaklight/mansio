@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from typing import Any
 
 from mansio_client import MansioClient
@@ -244,16 +245,111 @@ def _msg_to_dict(msg: Message) -> dict[str, Any]:
         "payload": msg.payload,
         "timestamp": msg.timestamp,
     }
-    if msg.metadata:
+    if msg.metadata is not None:
         d["metadata"] = msg.metadata
-    if msg.parent_id:
+    if msg.parent_id is not None:
         d["parent_id"] = msg.parent_id
-    if msg.thread_id:
+    if msg.thread_id is not None:
         d["thread_id"] = msg.thread_id
     return d
 
 
 # ── Tool Dispatch ─────────────────────────────────────────────────
+
+
+# ── Tool Handlers ─────────────────────────────────────────────────
+
+
+def _tool_channels(client: MansioClient, args: dict[str, Any]) -> Any:
+    return client.channel_list(detail=args.get("detail", False))
+
+
+def _tool_send(client: MansioClient, args: dict[str, Any]) -> Any:
+    msg_id = client.channel_send(
+        args["channel"],
+        args["content"],
+        msg_type=args.get("msg_type", "chat"),
+        parent_id=args.get("parent_id"),
+    )
+    return {"message_id": msg_id}
+
+
+def _tool_read(client: MansioClient, args: dict[str, Any]) -> Any:
+    msgs = client.channel_read(
+        args["channel"],
+        limit=args.get("limit", 10),
+        order=args.get("order", "newest"),
+        thread_id=args.get("thread_id"),
+    )
+    return [_msg_to_dict(m) for m in msgs]
+
+
+def _tool_poll(client: MansioClient, args: dict[str, Any]) -> Any:
+    return [_msg_to_dict(m) for m in client.channel_poll(args["channel"])]
+
+
+def _tool_dm_send(client: MansioClient, args: dict[str, Any]) -> Any:
+    return {"message_id": client.dm_send(args["to_agent"], args["content"])}
+
+
+def _tool_dm_read(client: MansioClient, args: dict[str, Any]) -> Any:
+    msgs = client.dm_read(args["with_agent"], limit=args.get("limit", 10))
+    return [_msg_to_dict(m) for m in msgs]
+
+
+def _tool_note(client: MansioClient, args: dict[str, Any]) -> Any:
+    return {"message_id": client.note_write(args["content"], tags=args.get("tags"))}
+
+
+def _tool_note_read(client: MansioClient, args: dict[str, Any]) -> Any:
+    msgs = client.note_read(tags=args.get("tags"), limit=args.get("limit", 10))
+    return [_msg_to_dict(m) for m in msgs]
+
+
+def _tool_memory_store(client: MansioClient, args: dict[str, Any]) -> Any:
+    msg_id = client.memory_store(
+        args["content"], memory_type=args.get("memory_type", "general")
+    )
+    return {"message_id": msg_id}
+
+
+def _tool_memory_recall(client: MansioClient, args: dict[str, Any]) -> Any:
+    msgs = client.memory_recall(args["query"], limit=args.get("limit", 5))
+    return [_msg_to_dict(m) for m in msgs]
+
+
+def _tool_agents(client: MansioClient, args: dict[str, Any]) -> Any:
+    agents = client.agents(timeout_seconds=args.get("timeout_seconds", 120))
+    return [
+        {
+            "agent_id": a.agent_id,
+            "status": a.status,
+            "last_seen": a.last_seen,
+            **(a.metadata or {}),
+        }
+        for a in agents
+    ]
+
+
+def _tool_heartbeat(client: MansioClient, args: dict[str, Any]) -> Any:
+    client.heartbeat()
+    return {"status": "ok"}
+
+
+_DISPATCH: dict[str, Callable[[MansioClient, dict[str, Any]], Any]] = {
+    "mansio_channels": _tool_channels,
+    "mansio_send": _tool_send,
+    "mansio_read": _tool_read,
+    "mansio_poll": _tool_poll,
+    "mansio_dm_send": _tool_dm_send,
+    "mansio_dm_read": _tool_dm_read,
+    "mansio_note": _tool_note,
+    "mansio_note_read": _tool_note_read,
+    "mansio_memory_store": _tool_memory_store,
+    "mansio_memory_recall": _tool_memory_recall,
+    "mansio_agents": _tool_agents,
+    "mansio_heartbeat": _tool_heartbeat,
+}
 
 
 def _call_tool(client: MansioClient, name: str, args: dict[str, Any]) -> Any:
@@ -270,91 +366,26 @@ def _call_tool(client: MansioClient, name: str, args: dict[str, Any]) -> Any:
     Raises:
         ValueError: If tool name is unknown.
     """
-    if name == "mansio_channels":
-        result = client.channel_list(detail=args.get("detail", False))
-        return result
-
-    if name == "mansio_send":
-        msg_id = client.channel_send(
-            args["channel"],
-            args["content"],
-            msg_type=args.get("msg_type", "chat"),
-            parent_id=args.get("parent_id"),
-        )
-        return {"message_id": msg_id}
-
-    if name == "mansio_read":
-        msgs = client.channel_read(
-            args["channel"],
-            limit=args.get("limit", 10),
-            order=args.get("order", "newest"),
-            thread_id=args.get("thread_id"),
-        )
-        return [_msg_to_dict(m) for m in msgs]
-
-    if name == "mansio_poll":
-        msgs = client.channel_poll(args["channel"])
-        return [_msg_to_dict(m) for m in msgs]
-
-    if name == "mansio_dm_send":
-        msg_id = client.dm_send(args["to_agent"], args["content"])
-        return {"message_id": msg_id}
-
-    if name == "mansio_dm_read":
-        msgs = client.dm_read(args["with_agent"], limit=args.get("limit", 10))
-        return [_msg_to_dict(m) for m in msgs]
-
-    if name == "mansio_note":
-        msg_id = client.note_write(args["content"], tags=args.get("tags"))
-        return {"message_id": msg_id}
-
-    if name == "mansio_note_read":
-        msgs = client.note_read(tags=args.get("tags"), limit=args.get("limit", 10))
-        return [_msg_to_dict(m) for m in msgs]
-
-    if name == "mansio_memory_store":
-        msg_id = client.memory_store(
-            args["content"], memory_type=args.get("memory_type", "general")
-        )
-        return {"message_id": msg_id}
-
-    if name == "mansio_memory_recall":
-        msgs = client.memory_recall(args["query"], limit=args.get("limit", 5))
-        return [_msg_to_dict(m) for m in msgs]
-
-    if name == "mansio_agents":
-        agents = client.agents(timeout_seconds=args.get("timeout_seconds", 120))
-        return [
-            {
-                "agent_id": a.agent_id,
-                "status": a.status,
-                "last_seen": a.last_seen,
-                **(a.metadata or {}),
-            }
-            for a in agents
-        ]
-
-    if name == "mansio_heartbeat":
-        client.heartbeat()
-        return {"status": "ok"}
-
-    raise ValueError(f"Unknown tool: {name}")
+    handler = _DISPATCH.get(name)
+    if handler is None:
+        raise ValueError(f"Unknown tool: {name}")
+    return handler(client, args)
 
 
 # ── JSON-RPC Helpers ──────────────────────────────────────────────
 
 
-def _ok(id: Any, result: Any) -> dict[str, Any]:
+def _ok(req_id: Any, result: Any) -> dict[str, Any]:
     """Build a JSON-RPC success response."""
-    return {"jsonrpc": _JSONRPC, "id": id, "result": result}
+    return {"jsonrpc": _JSONRPC, "id": req_id, "result": result}
 
 
-def _error(id: Any, code: int, message: str, data: Any = None) -> dict[str, Any]:
+def _error(req_id: Any, code: int, message: str, data: Any = None) -> dict[str, Any]:
     """Build a JSON-RPC error response."""
     err: dict[str, Any] = {"code": code, "message": message}
     if data is not None:
         err["data"] = data
-    return {"jsonrpc": _JSONRPC, "id": id, "error": err}
+    return {"jsonrpc": _JSONRPC, "id": req_id, "error": err}
 
 
 # Standard JSON-RPC error codes
@@ -456,6 +487,8 @@ def serve(
                 sys.stdout.flush()
                 continue
 
+            # TODO: JSON-RPC batch requests (arrays) are not yet supported.
+            # Most MCP clients send one request at a time, so this is fine for v1.
             if not isinstance(req, dict):
                 resp = _error(None, _INVALID_REQUEST, "Request must be a JSON object")
                 sys.stdout.write(json.dumps(resp) + "\n")
