@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, overload
 
+from mansio.admin.metrics import MetricsCollector
 from mansio.backends import SQLiteBackend
 from mansio.protocols import Backend, ChannelStore, Deletable, Presenceable
 from mansio.system_policy import CompactionPolicy, system_channel_policy
@@ -84,6 +85,7 @@ class Bus:
         self._compaction_policy = compaction_policy or system_channel_policy
         self._subs: dict[str, dict[str, Callable[[Message], None]]] = defaultdict(dict)
         self._ensured_channels: set[str] = set()
+        self._metrics = MetricsCollector()
 
     @property
     def backend(self) -> Backend:
@@ -94,6 +96,11 @@ class Bus:
     def require_auth(self) -> bool:
         """Whether this bus requires client authentication."""
         return self._require_auth
+
+    @property
+    def metrics(self) -> MetricsCollector:
+        """In-process metrics collector for throughput tracking."""
+        return self._metrics
 
     def get_message(self, message_id: str) -> Message | None:
         """Look up a single message by ID.
@@ -181,6 +188,7 @@ class Bus:
         else:
             self._backend.store(msg)
 
+        self._metrics.record()
         self._compaction_policy(self._backend, channel)
 
         # Notify in-process subscribers (snapshot to avoid mutation during iteration)

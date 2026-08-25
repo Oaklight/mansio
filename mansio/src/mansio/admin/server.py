@@ -13,7 +13,6 @@ import socket
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 from mansio._vendor.httpserver import App, JSONResponse, Response
@@ -333,18 +332,7 @@ class AdminServer:
         @self._app.get("/api/stats/throughput")
         def throughput(request: Any) -> dict:
             window = 60
-            timestamps = bus.backend.recent_timestamps(window)
-            now = datetime.now(timezone.utc)
-            buckets = []
-            for i in range(window):
-                t = now - timedelta(seconds=window - 1 - i)
-                t_str = t.strftime("%H:%M:%S")
-                count = sum(
-                    1
-                    for ts in timestamps
-                    if abs((t - datetime.fromisoformat(ts)).total_seconds()) < 1
-                )
-                buckets.append({"time": t_str, "count": count})
+            buckets = bus.metrics.get_throughput(window)
             return {"window_seconds": window, "buckets": buckets}
 
     def _setup_channel_routes(self) -> None:
