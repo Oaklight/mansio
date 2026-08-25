@@ -38,6 +38,7 @@ def server_url(bus):
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
     import time
+
     time.sleep(0.3)
     host, port = frontend.address
     url = f"http://{host}:{port}"
@@ -54,17 +55,26 @@ class TestMessageFields:
 
     def test_defaults_none(self):
         m = Message(
-            id="1", channel="ch", sender="a",
-            msg_type="text", payload="hello", timestamp="t",
+            id="1",
+            channel="ch",
+            sender="a",
+            msg_type="text",
+            payload="hello",
+            timestamp="t",
         )
         assert m.parent_id is None
         assert m.thread_id is None
 
     def test_explicit_values(self):
         m = Message(
-            id="2", channel="ch", sender="a",
-            msg_type="text", payload="hi", timestamp="t",
-            parent_id="1", thread_id="1",
+            id="2",
+            channel="ch",
+            sender="a",
+            msg_type="text",
+            payload="hi",
+            timestamp="t",
+            parent_id="1",
+            thread_id="1",
         )
         assert m.parent_id == "1"
         assert m.thread_id == "1"
@@ -79,7 +89,7 @@ class TestBusPublishThreading:
     """Bus.publish() with parent_id auto-computes thread_id."""
 
     def test_publish_without_parent(self, bus):
-        mid = bus.publish(_CH, "alice", "text", "root msg")
+        bus.publish(_CH, "alice", "text", "root msg")
         msgs = bus.query(_CH)
         assert len(msgs) == 1
         assert msgs[0].parent_id is None
@@ -183,13 +193,20 @@ class TestMemoryBackendThreading:
 
     def test_store_and_query(self):
         backend = MemoryBackend()
-        m1 = Message(id="1", channel="ch", sender="a", msg_type="t",
-                      payload="root", timestamp="t1")
-        m2 = Message(id="2", channel="ch", sender="b", msg_type="t",
-                      payload="reply", timestamp="t2",
-                      parent_id="1", thread_id="1")
-        m3 = Message(id="3", channel="ch", sender="c", msg_type="t",
-                      payload="other", timestamp="t3")
+        m1 = Message(id="1", channel="ch", sender="a", msg_type="t", payload="root", timestamp="t1")
+        m2 = Message(
+            id="2",
+            channel="ch",
+            sender="b",
+            msg_type="t",
+            payload="reply",
+            timestamp="t2",
+            parent_id="1",
+            thread_id="1",
+        )
+        m3 = Message(
+            id="3", channel="ch", sender="c", msg_type="t", payload="other", timestamp="t3"
+        )
         backend.store(m1)
         backend.store(m2)
         backend.store(m3)
@@ -200,8 +217,7 @@ class TestMemoryBackendThreading:
 
     def test_get_message(self):
         backend = MemoryBackend()
-        m = Message(id="x", channel="ch", sender="a", msg_type="t",
-                    payload="data", timestamp="t")
+        m = Message(id="x", channel="ch", sender="a", msg_type="t", payload="data", timestamp="t")
         backend.store(m)
         assert backend.get_message("x") is not None
         assert backend.get_message("y") is None
@@ -217,8 +233,7 @@ class TestSQLiteBackendThreading:
 
     def test_store_and_retrieve(self, tmp_path):
         backend = SQLiteBackend(str(tmp_path / "test.db"))
-        m = Message(id="1", channel="ch", sender="a", msg_type="t",
-                    payload="root", timestamp="t")
+        m = Message(id="1", channel="ch", sender="a", msg_type="t", payload="root", timestamp="t")
         backend.store(m)
         msgs = backend.query("ch")
         assert msgs[0].parent_id is None
@@ -227,9 +242,16 @@ class TestSQLiteBackendThreading:
 
     def test_thread_fields_roundtrip(self, tmp_path):
         backend = SQLiteBackend(str(tmp_path / "test.db"))
-        m = Message(id="2", channel="ch", sender="a", msg_type="t",
-                    payload="reply", timestamp="t",
-                    parent_id="1", thread_id="1")
+        m = Message(
+            id="2",
+            channel="ch",
+            sender="a",
+            msg_type="t",
+            payload="reply",
+            timestamp="t",
+            parent_id="1",
+            thread_id="1",
+        )
         backend.store(m)
         msgs = backend.query("ch")
         assert msgs[0].parent_id == "1"
@@ -238,13 +260,24 @@ class TestSQLiteBackendThreading:
 
     def test_query_thread_filter(self, tmp_path):
         backend = SQLiteBackend(str(tmp_path / "test.db"))
-        backend.store(Message(id="1", channel="ch", sender="a", msg_type="t",
-                              payload="root", timestamp="t1"))
-        backend.store(Message(id="2", channel="ch", sender="b", msg_type="t",
-                              payload="r1", timestamp="t2",
-                              parent_id="1", thread_id="1"))
-        backend.store(Message(id="3", channel="ch", sender="c", msg_type="t",
-                              payload="other", timestamp="t3"))
+        backend.store(
+            Message(id="1", channel="ch", sender="a", msg_type="t", payload="root", timestamp="t1")
+        )
+        backend.store(
+            Message(
+                id="2",
+                channel="ch",
+                sender="b",
+                msg_type="t",
+                payload="r1",
+                timestamp="t2",
+                parent_id="1",
+                thread_id="1",
+            )
+        )
+        backend.store(
+            Message(id="3", channel="ch", sender="c", msg_type="t", payload="other", timestamp="t3")
+        )
         result = backend.query("ch", thread_id="1")
         assert len(result) == 1
         assert result[0].id == "2"
@@ -252,8 +285,9 @@ class TestSQLiteBackendThreading:
 
     def test_get_message(self, tmp_path):
         backend = SQLiteBackend(str(tmp_path / "test.db"))
-        backend.store(Message(id="x", channel="ch", sender="a", msg_type="t",
-                              payload="data", timestamp="t"))
+        backend.store(
+            Message(id="x", channel="ch", sender="a", msg_type="t", payload="data", timestamp="t")
+        )
         assert backend.get_message("x") is not None
         assert backend.get_message("y") is None
         backend.close()
@@ -277,6 +311,7 @@ class TestHTTPThreading:
 
     def _publish(self, url, channel, sender, payload, parent_id=None):
         import urllib.request
+
         body: dict = {
             "channel": channel,
             "sender": sender,
@@ -294,7 +329,9 @@ class TestHTTPThreading:
             return json.loads(resp.read())
 
     def _query(self, url, channel, thread_id=None):
-        import urllib.request, urllib.parse
+        import urllib.parse
+        import urllib.request
+
         params = {"channel": channel}
         if thread_id:
             params["thread_id"] = thread_id
@@ -325,14 +362,18 @@ class TestHTTPThreading:
         assert data["messages"][0]["thread_id"] == root_id
 
     def test_parent_not_found_404(self, server_url):
-        import urllib.request, urllib.error
-        body = json.dumps({
-            "channel": _CH,
-            "sender": "alice",
-            "msg_type": "text",
-            "payload": "orphan",
-            "parent_id": "nonexistent",
-        }).encode()
+        import urllib.error
+        import urllib.request
+
+        body = json.dumps(
+            {
+                "channel": _CH,
+                "sender": "alice",
+                "msg_type": "text",
+                "payload": "orphan",
+                "parent_id": "nonexistent",
+            }
+        ).encode()
         req = urllib.request.Request(
             f"{server_url}/v1/publish",
             data=body,
@@ -343,16 +384,20 @@ class TestHTTPThreading:
         assert exc_info.value.code == 404
 
     def test_parent_wrong_channel_400(self, server_url):
-        import urllib.request, urllib.error
+        import urllib.error
+        import urllib.request
+
         root = self._publish(server_url, "other-ch", "alice", "root")
         root_id = root["message_id"]
-        body = json.dumps({
-            "channel": _CH,
-            "sender": "alice",
-            "msg_type": "text",
-            "payload": "cross",
-            "parent_id": root_id,
-        }).encode()
+        body = json.dumps(
+            {
+                "channel": _CH,
+                "sender": "alice",
+                "msg_type": "text",
+                "payload": "cross",
+                "parent_id": root_id,
+            }
+        ).encode()
         req = urllib.request.Request(
             f"{server_url}/v1/publish",
             data=body,
@@ -381,6 +426,7 @@ class TestTransportThreading:
 
     def test_publish_parent_id(self, server_url):
         from mansio.transport_http import HttpTransport
+
         t = HttpTransport(server_url)
         root_id = t.publish(_CH, "alice", "text", "root")
         reply_id = t.publish(_CH, "bob", "text", "reply", parent_id=root_id)
@@ -391,6 +437,7 @@ class TestTransportThreading:
 
     def test_query_thread_filter(self, server_url):
         from mansio.transport_http import HttpTransport
+
         t = HttpTransport(server_url)
         root_id = t.publish(_CH, "alice", "text", "root")
         t.publish(_CH, "bob", "text", "reply", parent_id=root_id)
@@ -414,10 +461,18 @@ class TestMaildirBackendThreading:
 
     def test_roundtrip(self, tmp_path):
         from mansio.backends.maildir import MaildirBackend
+
         backend = MaildirBackend(str(tmp_path / "md"))
-        m = Message(id="1", channel="ch", sender="a", msg_type="t",
-                    payload="reply", timestamp="2026-01-01T00:00:00Z",
-                    parent_id="root", thread_id="root")
+        m = Message(
+            id="1",
+            channel="ch",
+            sender="a",
+            msg_type="t",
+            payload="reply",
+            timestamp="2026-01-01T00:00:00Z",
+            parent_id="root",
+            thread_id="root",
+        )
         backend.store(m)
         msgs = backend.query("ch")
         assert len(msgs) == 1
@@ -427,9 +482,16 @@ class TestMaildirBackendThreading:
 
     def test_no_thread_fields(self, tmp_path):
         from mansio.backends.maildir import MaildirBackend
+
         backend = MaildirBackend(str(tmp_path / "md"))
-        m = Message(id="2", channel="ch", sender="a", msg_type="t",
-                    payload="root", timestamp="2026-01-01T00:00:00Z")
+        m = Message(
+            id="2",
+            channel="ch",
+            sender="a",
+            msg_type="t",
+            payload="root",
+            timestamp="2026-01-01T00:00:00Z",
+        )
         backend.store(m)
         msgs = backend.query("ch")
         assert msgs[0].parent_id is None
@@ -438,14 +500,26 @@ class TestMaildirBackendThreading:
 
     def test_query_thread_filter(self, tmp_path):
         from mansio.backends.maildir import MaildirBackend
+
         backend = MaildirBackend(str(tmp_path / "md"))
-        backend.store(Message(id="1", channel="ch", sender="a", msg_type="t",
-                              payload="root", timestamp="t1"))
-        backend.store(Message(id="2", channel="ch", sender="b", msg_type="t",
-                              payload="r1", timestamp="t2",
-                              parent_id="1", thread_id="1"))
-        backend.store(Message(id="3", channel="ch", sender="c", msg_type="t",
-                              payload="other", timestamp="t3"))
+        backend.store(
+            Message(id="1", channel="ch", sender="a", msg_type="t", payload="root", timestamp="t1")
+        )
+        backend.store(
+            Message(
+                id="2",
+                channel="ch",
+                sender="b",
+                msg_type="t",
+                payload="r1",
+                timestamp="t2",
+                parent_id="1",
+                thread_id="1",
+            )
+        )
+        backend.store(
+            Message(id="3", channel="ch", sender="c", msg_type="t", payload="other", timestamp="t3")
+        )
         result = backend.query("ch", thread_id="1")
         assert len(result) == 1
         assert result[0].id == "2"
@@ -453,9 +527,11 @@ class TestMaildirBackendThreading:
 
     def test_get_message(self, tmp_path):
         from mansio.backends.maildir import MaildirBackend
+
         backend = MaildirBackend(str(tmp_path / "md"))
-        backend.store(Message(id="x", channel="ch", sender="a", msg_type="t",
-                              payload="data", timestamp="t"))
+        backend.store(
+            Message(id="x", channel="ch", sender="a", msg_type="t", payload="data", timestamp="t")
+        )
         assert backend.get_message("x") is not None
         assert backend.get_message("y") is None
         backend.close()
