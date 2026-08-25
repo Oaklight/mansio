@@ -87,6 +87,8 @@ invalid-assignment = "warn"
 unresolved-import = "warn"
 # nats-py type stubs are incomplete (e.g. opt_start_time expects datetime but str works at runtime)
 invalid-argument-type = "warn"
+# ACL enforcement adds parameters to backend overrides
+invalid-method-override = "warn"
 
 [tool.complexipy]
 paths = ["src"]

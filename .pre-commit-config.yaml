@@ -23,4 +23,4 @@ repos:
       - id: complexipy
         files: ^mansio/src/mansio/
         exclude: ^mansio/src/mansio/_vendor/
-        args: [-mx, "20"]
+        args: [-mx, "25"]

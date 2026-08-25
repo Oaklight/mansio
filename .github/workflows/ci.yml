@@ -21,6 +21,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e "mansio[dev,test,irc]"
+          pip install -e "mansio-client/"
 
       - name: Run pre-commit checks
         uses: pre-commit/action@v3.0.1
@@ -88,6 +89,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e "mansio[dev,test,irc]"
+          pip install -e "mansio-client/"
 
       - name: Run tests
         run: python -m pytest mansio/tests/ -v
