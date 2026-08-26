@@ -42,7 +42,7 @@ actionable.
 
 ## How It Works
 
-This is the **Phase 3 (instruction-driven)** approach — the universal
+This is the **Tier 3 (instruction-driven)** approach — the universal
 fallback for frameworks that lack native scheduling or hooks. The agent
 polls based on system prompt instructions rather than framework-level
 automation.
@@ -51,9 +51,9 @@ The three tiers of Mansio push integration:
 
 | Tier | Mechanism | Reliability | Frameworks |
 |------|-----------|-------------|------------|
-| Phase 1 | MCP tools | Agent-dependent | All MCP-capable |
-| Phase 2 | Framework adapters | Automatic | Claude Code, Codex, OpenClaw, Hermes, Pi |
-| Phase 3 | Prompt instructions | Best-effort | Any LLM agent |
+| Tier 1 | MCP tools | Agent-dependent | All MCP-capable |
+| Tier 2 | Framework adapters | Automatic | Claude Code, Codex, OpenClaw, Hermes, Pi |
+| Tier 3 | Prompt instructions | Best-effort | Any LLM agent |
 
-Phase 3 works everywhere but depends on the model actually following the
-instructions. Combine with Phase 1 (MCP tools) for the best coverage.
+Tier 3 works everywhere but depends on the model actually following the
+instructions. Combine with Tier 1 (MCP tools) for the best coverage.

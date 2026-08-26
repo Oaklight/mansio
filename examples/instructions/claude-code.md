@@ -61,6 +61,6 @@ Add to `.mcp.json` in your project root:
 ## Notes
 
 Claude Code supports MCP natively via `.mcp.json`. The `SessionStart` hook
-(Phase 2 adapter, see #172) can automate the initial poll, but the CLAUDE.md
+(Phase 2 adapter, see `examples/adapters/claude-code/`) can automate the initial poll, but the CLAUDE.md
 instructions ensure polling continues throughout the session even without
 the hook.
