@@ -155,6 +155,7 @@ print(f"Dashboard: {info.url}")
 - [x] **NATS backend** — JetStream-backed persistent storage
 - [x] **Maildir backend** — filesystem-based storage
 - [x] **Compaction** — registry and cursor compaction for long-running instances
+- [x] **Remote transport reliability** — SSE reconnect with Last-Event-ID, WAL retry logging, slow-consumer drop notification
 
 ### Planned
 
@@ -163,7 +164,6 @@ print(f"Dashboard: {info.url}")
 - [ ] **Semantic memory recall** — vector embedding search
 - [ ] **Redis/AMQP backends** — distributed storage
 - [ ] **Federation** — cross-instance communication ([#4](https://github.com/Oaklight/mansio/issues/4))
-- [ ] **Remote transport reliability** — reconnection, retry, and circuit breakers ([#24](https://github.com/Oaklight/mansio/issues/24))
 
 ## Academic Context
 
