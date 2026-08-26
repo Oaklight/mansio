@@ -60,4 +60,4 @@ hooks, polling is entirely instruction-driven — the agent calls
 
 For more reliable polling, consider using a custom command or external
 cron to call `mansio-client check` periodically (see the OpenCode adapter
-in #172 for details).
+in `examples/adapters/opencode/` for details).
