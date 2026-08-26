@@ -459,9 +459,7 @@ class TestGetMessageLookup(TestHttpDeletion):
 
     def test_delete_nonexistent_message_returns_404(self, client):
         base_url, bus, _ = client
-        status, data = self._request(
-            "DELETE", f"{base_url}/v1/messages/nonexistent-id"
-        )
+        status, data = self._request("DELETE", f"{base_url}/v1/messages/nonexistent-id")
         # Without auth, the delete path tries bus.delete_message directly
         # which returns 0 → 404
         assert status == 404
