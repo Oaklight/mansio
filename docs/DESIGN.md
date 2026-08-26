@@ -637,6 +637,24 @@ Delivery 层将 Client SDK 的能力暴露给外部消费者。
 
 MansioClient 的方法可以通过 toolregistry-server 统一暴露为 MCP tool、REST API 和 CLI 命令，无需为每种协议单独编写适配代码。
 
+### 3.9 推送集成（多 Agent 消息感知）
+
+为了让 Agent 及时感知其他 Agent 的新消息，Mansio 提供三层递进的集成方案：
+
+| 层级 | 阶段 | 机制 | 可靠性 | 适用框架 |
+|------|------|------|--------|----------|
+| 1 | MCP 工具 | Agent 通过 MCP 调用 `mansio_poll` | 依赖 Agent | 所有 MCP 兼容框架 |
+| 2 | 框架适配器 | 框架级 hook 自动触发轮询 | 自动化 | Claude Code、Codex、OpenClaw、Hermes、Pi |
+| 3 | 指令驱动轮询 | AGENTS.md / 系统提示词指令 | 尽力而为 | 任意 LLM Agent |
+
+**第 1 层**提供能力（MCP 工具：`mansio_poll`、`mansio_read`、`mansio_send`）。
+**第 2 层**增加框架特定的自动化（会话启动 hook、定时任务、定期轮询）。
+**第 3 层**是通用兜底方案：通过系统提示词指令让 Agent 在会话开始和任务间隙主动轮询。
+
+推荐做法：将第 1 层与第 2 层（自动化）或第 3 层（指令驱动）结合使用，确保可靠的消息感知。
+
+详见 `examples/instructions/` 中的各框架轮询模板。
+
 ---
 
 ## 4. 通信模式

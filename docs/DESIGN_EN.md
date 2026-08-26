@@ -635,6 +635,28 @@ The Delivery Layer exposes Client SDK capabilities to external consumers.
 
 MansioClient methods can be uniformly exposed as MCP tools, REST APIs, and CLI commands via toolregistry-server, without writing separate adapter code for each protocol.
 
+### 3.9 Push Integration (Multi-Agent Message Awareness)
+
+For agents to stay aware of new messages from other agents, Mansio provides
+a three-tier integration approach with increasing automation:
+
+| Tier | Phase | Mechanism | Reliability | Frameworks |
+|------|-------|-----------|-------------|------------|
+| 1 | MCP Tools | Agent calls `mansio_poll` via MCP | Agent-dependent | All MCP-capable |
+| 2 | Framework Adapters | Per-framework hooks automate polling | Automatic | Claude Code, Codex, OpenClaw, Hermes, Pi |
+| 3 | Prompt Instructions | AGENTS.md / system prompt directives | Best-effort | Any LLM agent |
+
+**Tier 1** provides the capability (MCP tools like `mansio_poll`, `mansio_read`,
+`mansio_send`). **Tier 2** adds framework-specific automation (session-start
+hooks, cron jobs, scheduled polling). **Tier 3** is the universal fallback:
+system prompt instructions that tell the agent to poll at session start and
+between tasks.
+
+Recommended approach: combine Tier 1 with either Tier 2 (automated) or
+Tier 3 (instruction-driven) for reliable message awareness.
+
+See `examples/instructions/` for per-framework polling templates.
+
 ---
 
 ## 4. Communication Patterns
