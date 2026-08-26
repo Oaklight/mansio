@@ -142,15 +142,28 @@ print(f"仪表板: {info.url}")
 
 ## 路线图
 
-- [x] **RemoteTransport** — `HttpFrontend`、`MansioServer`、`HttpTransport` 已发布
-- [x] **IRC Frontend** — 已发布，作为可选依赖 `irc`
-- [ ] **消息 TTL** — 自动过期与清理
+### 已发布
+
+- [x] **RemoteTransport** — `HttpFrontend`、`MansioServer`、`HttpTransport`
+- [x] **IRC Frontend** — 可选依赖 `irc`
 - [x] **通道访问控制** — System/Notebook/Memory/Broadcast 频道写入权限强制执行
-- [ ] **通道 ACL** — 更细粒度的按通道访问控制
+- [x] **消息线程** — `parent_id` / `thread_id` 嵌套回复支持
+- [x] **消息删除** — 单条和按频道删除，管理员批量清理
+- [x] **分页** — 基于 offset 的分页，返回 `total`、`has_more`、`offset` 元数据
+- [x] **MCP 服务器** — Model Context Protocol 集成（`mansio[mcp]`）
+- [x] **在线状态与心跳** — Agent 上下线状态及实时订阅
+- [x] **NATS 后端** — 基于 JetStream 的持久化存储
+- [x] **Maildir 后端** — 基于文件系统的存储
+- [x] **压缩** — 注册表和游标压缩，适用于长期运行实例
+
+### 计划中
+
+- [ ] **消息 TTL** — 自动过期与清理
 - [ ] **异步 API** — 原生 async/await 支持
 - [ ] **语义化记忆检索** — 向量嵌入搜索
 - [ ] **Redis/AMQP 后端** — 分布式存储
 - [ ] **联邦** — 跨实例通信（[#4](https://github.com/Oaklight/mansio/issues/4)）
+- [ ] **远程传输可靠性** — 重连、重试与熔断器（[#24](https://github.com/Oaklight/mansio/issues/24)）
 
 ## 学术背景
 
