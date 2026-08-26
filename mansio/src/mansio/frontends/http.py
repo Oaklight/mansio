@@ -731,9 +731,19 @@ class HttpFrontend:
             if path in _PUBLIC_PATHS:
                 return None
 
-            if token_store is None or not await asyncio.to_thread(token_store.has_tokens):
+            if token_store is None:
                 _auth_result_var.set(True)
                 return None
+
+            if not await asyncio.to_thread(token_store.has_tokens):
+                return JSONResponse(
+                    {
+                        "error": "Service Unavailable",
+                        "message": "No API tokens configured. "
+                        "Create a token via the admin panel before connecting.",
+                    },
+                    status_code=403,
+                )
 
             auth_header = request.headers.get("authorization", "")
             if not auth_header:
