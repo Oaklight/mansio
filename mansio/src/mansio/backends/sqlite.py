@@ -208,9 +208,7 @@ def check_schema(
         )
 
     # stored < SCHEMA_VERSION — migration needed.
-    # For now there are no migrations (v1 is the first and only version),
-    # but the framework is ready. Future versions add migration functions
-    # to _MIGRATIONS and they run sequentially.
+    # Migration functions in _MIGRATIONS run sequentially (v1→v2, v2→v3, etc.).
     if str(db_path) != ":memory:":
         backup_database(db_path)
 
