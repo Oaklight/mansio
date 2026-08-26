@@ -172,6 +172,7 @@ class HttpTransport:
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
         thread_id: str | None = None,
+        offset: int = 0,
     ) -> list[Message]:
         """Query messages from a channel via the remote server."""
         params: dict[str, str] = {"channel": channel, "limit": str(limit)}
@@ -183,6 +184,8 @@ class HttpTransport:
             params["order"] = order
         if thread_id:
             params["thread_id"] = thread_id
+        if offset:
+            params["offset"] = str(offset)
 
         url = f"{self._base_url}/v1/query?{urllib.parse.urlencode(params)}"
         resp = self._http.get(url)
