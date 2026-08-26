@@ -65,5 +65,5 @@ args = ["mcp-serve", "--url", "http://localhost:8742", "--agent-id", "your-agent
 
 Codex CLI supports MCP servers and reads `AGENTS.md` for project-level
 instructions. The TOML hooks (`session_start`, `apply_patch`) from the
-Phase 2 adapter (#172) can automate polling, but the AGENTS.md instructions
+Phase 2 adapter (see `examples/adapters/codex-cli/`) can automate polling, but the AGENTS.md instructions
 provide the universal fallback.
