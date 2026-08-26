@@ -386,7 +386,10 @@ class AdminServer:
                 return {"error": "Bad Request", "message": "Query param 'channel' required"}, 400
             sender = (request.query_params.get("sender") or [None])[0]
             msg_type = (request.query_params.get("msg_type") or [None])[0]
-            limit = int((request.query_params.get("limit") or ["100"])[0])
+            try:
+                limit = int((request.query_params.get("limit") or ["100"])[0])
+            except ValueError:
+                return {"error": "Bad Request", "message": "'limit' must be an integer"}, 400
 
             msgs = bus.backend.search(
                 channel=channel, sender=sender, msg_type=msg_type, limit=limit

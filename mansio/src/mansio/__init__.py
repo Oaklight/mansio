@@ -37,6 +37,7 @@ __all__ = [
     "Deletable",
     "CompactionPolicy",
     "MaildirBackend",
+    "NATSBackend",
     "HttpTransport",
     "MansioAPIError",
     "MemoryBackend",
@@ -54,3 +55,16 @@ __all__ = [
     "backup_database",
     "system_channel_policy",
 ]
+
+
+def __getattr__(name: str):
+    """Lazy import for optional backends."""
+    if name == "MaildirBackend":
+        from mansio.backends.maildir import MaildirBackend
+
+        return MaildirBackend
+    if name == "NATSBackend":
+        from mansio.backends.nats import NATSBackend
+
+        return NATSBackend
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

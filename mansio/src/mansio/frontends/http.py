@@ -447,6 +447,26 @@ def _parse_query_offset(raw: str | None) -> int | tuple[dict, int]:
     return offset
 
 
+def _parse_query_timeout(raw: str | None, default: int = 120) -> int | tuple[dict, int]:
+    """Parse and validate query timeout parameter.
+
+    Returns int timeout on success, or (error_dict, status) tuple.
+    """
+    try:
+        timeout = int(raw or str(default))
+    except ValueError:
+        return {
+            "error": "Bad Request",
+            "message": "'timeout' must be an integer",
+        }, 400
+    if timeout < 1:
+        return {
+            "error": "Bad Request",
+            "message": "'timeout' must be at least 1",
+        }, 400
+    return timeout
+
+
 def _parse_query_params(request: Any, max_limit: int) -> dict:
     """Extract and validate query parameters (channel, after, limit, order, offset).
 
@@ -1138,8 +1158,11 @@ class HttpFrontend:
             return {"ok": True}
 
         @self._app.get("/v1/presence")
-        async def presence_list(request: Request) -> dict:
-            timeout = int((request.query_params.get("timeout") or ["120"])[0])
+        async def presence_list(request: Request) -> dict | tuple:
+            raw_timeout = (request.query_params.get("timeout") or ["120"])[0]
+            timeout = _parse_query_timeout(raw_timeout)
+            if isinstance(timeout, tuple):
+                return timeout
             agents = await asyncio.to_thread(bus.agents, timeout)
             return {
                 "agents": [
@@ -1156,7 +1179,10 @@ class HttpFrontend:
         @self._app.get("/v1/presence/<agent_id>")
         async def presence_agent(request: Request) -> dict | tuple:
             agent_id = request.path_params.get("agent_id", "")
-            timeout = int((request.query_params.get("timeout") or ["120"])[0])
+            raw_timeout = (request.query_params.get("timeout") or ["120"])[0]
+            timeout = _parse_query_timeout(raw_timeout)
+            if isinstance(timeout, tuple):
+                return timeout
             result = await asyncio.to_thread(bus.agent_status, agent_id, timeout)
             if result is None:
                 return {"error": "agent not found"}, 404
