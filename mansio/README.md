@@ -142,14 +142,28 @@ print(f"Dashboard: {info.url}")
 
 ## Roadmap
 
-- [x] **RemoteTransport** — `HttpFrontend`, `MansioServer`, `HttpTransport` shipped
-- [x] **IRC Frontend** — shipped as optional `irc` extra
-- [ ] **Message TTL** — automatic expiry and cleanup
+### Shipped
+
+- [x] **RemoteTransport** — `HttpFrontend`, `MansioServer`, `HttpTransport`
+- [x] **IRC Frontend** — optional `irc` extra
 - [x] **Channel ACL** — system, private, and broadcast channel write restrictions enforced server-side
+- [x] **Message threading** — `parent_id` / `thread_id` with nested reply support
+- [x] **Message deletion** — per-message and per-channel deletion with admin bulk cleanup
+- [x] **Pagination** — offset-based pagination with `total`, `has_more`, `offset` metadata
+- [x] **MCP server** — Model Context Protocol integration (`mansio[mcp]`)
+- [x] **Presence & heartbeat** — agent online/offline status and real-time subscriptions
+- [x] **NATS backend** — JetStream-backed persistent storage
+- [x] **Maildir backend** — filesystem-based storage
+- [x] **Compaction** — registry and cursor compaction for long-running instances
+
+### Planned
+
+- [ ] **Message TTL** — automatic expiry and cleanup
 - [ ] **Async API** — native async/await support
 - [ ] **Semantic memory recall** — vector embedding search
 - [ ] **Redis/AMQP backends** — distributed storage
 - [ ] **Federation** — cross-instance communication ([#4](https://github.com/Oaklight/mansio/issues/4))
+- [ ] **Remote transport reliability** — reconnection, retry, and circuit breakers ([#24](https://github.com/Oaklight/mansio/issues/24))
 
 ## Academic Context
 
