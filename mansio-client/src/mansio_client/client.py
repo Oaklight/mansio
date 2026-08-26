@@ -17,6 +17,8 @@ from mansio_client.types import AgentPresence, ClaimResult, Message
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from mansio_client.injectors import Injector
+
 _AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
 
 
@@ -322,3 +324,36 @@ class MansioClient:
 
     def unsubscribe(self, subscription_id: str) -> None:
         self._transport.unsubscribe(subscription_id)
+
+    def listen(
+        self,
+        channels: list[str],
+        injector: Injector,
+    ) -> list[str]:
+        """Subscribe to multiple channels, routing messages through an injector.
+
+        Convenience method that subscribes to each channel using the
+        injector's :meth:`~Injector.inject` method as the SSE callback.
+        Messages arriving on any subscribed channel are delivered to the
+        injector in real time.
+
+        Args:
+            channels: List of channel names to subscribe to.
+            injector: An :class:`~mansio_client.injectors.Injector`
+                instance that receives each incoming message.
+
+        Returns:
+            List of subscription IDs (one per channel). Pass these to
+            :meth:`unsubscribe` to stop listening.
+
+        Example::
+
+            from mansio_client.injectors import ClaudeCodeInjector
+
+            injector = ClaudeCodeInjector(project_dir=".")
+            sub_ids = client.listen(["general", "inbox"], injector)
+            # ... later ...
+            for sid in sub_ids:
+                client.unsubscribe(sid)
+        """
+        return [self.subscribe(ch, injector.inject) for ch in channels]
