@@ -42,6 +42,8 @@ def _msg_to_dict(msg: Message) -> dict[str, Any]:
         d["parent_id"] = msg.parent_id
     if msg.thread_id is not None:
         d["thread_id"] = msg.thread_id
+    if msg.intent is not None:
+        d["intent"] = msg.intent
     return d
 
 
@@ -127,7 +129,12 @@ class MailboxInjector:
                 self._rotate()
 
     def _rotate(self) -> None:
-        """Keep only the most recent half of max_lines entries."""
+        """Keep only the most recent half of max_lines entries.
+
+        Note: truncates the file under the internal lock, which is safe
+        for concurrent inject() calls.  External readers (e.g. a polling
+        script) should handle partial reads gracefully.
+        """
         keep = self._max_lines // 2
         with open(self._path, encoding="utf-8") as f:
             lines = f.readlines()
@@ -304,8 +311,11 @@ class WebhookInjector:
             with urllib.request.urlopen(req, timeout=self._timeout):
                 pass
         except Exception:
-            # Best-effort: don't block the subscription loop on webhook failures
-            pass
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "Webhook delivery failed for %s", self._url, exc_info=True
+            )
 
     def close(self) -> None:
         """No-op — each request is independent."""

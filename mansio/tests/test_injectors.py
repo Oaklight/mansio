@@ -37,6 +37,7 @@ def _make_msg(
     metadata: dict | None = None,
     parent_id: str | None = None,
     thread_id: str | None = None,
+    intent: str | None = None,
 ) -> Message:
     return Message(
         id=msg_id,
@@ -48,6 +49,7 @@ def _make_msg(
         metadata=metadata,
         parent_id=parent_id,
         thread_id=thread_id,
+        intent=intent,
     )
 
 
@@ -177,6 +179,28 @@ class TestMailboxInjector:
         assert data["metadata"] == {"key": "value"}
         assert data["parent_id"] == "parent-123"
         assert data["thread_id"] == "thread-456"
+
+    def test_intent_preserved(self, tmp_path):
+        path = str(tmp_path / "inbox.jsonl")
+        injector = MailboxInjector(path)
+        msg = _make_msg(intent="summarize")
+
+        injector.inject(msg)
+
+        with open(path) as f:
+            data = json.loads(f.readline())
+        assert data["intent"] == "summarize"
+
+    def test_intent_omitted_when_none(self, tmp_path):
+        path = str(tmp_path / "inbox.jsonl")
+        injector = MailboxInjector(path)
+        msg = _make_msg()  # intent defaults to None
+
+        injector.inject(msg)
+
+        with open(path) as f:
+            data = json.loads(f.readline())
+        assert "intent" not in data
 
     def test_close_is_noop(self, tmp_path):
         injector = MailboxInjector(str(tmp_path / "inbox.jsonl"))
