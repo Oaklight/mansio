@@ -71,6 +71,8 @@ def _msg_to_email(message: Message) -> email.message.EmailMessage:
         em["X-Mansio-ParentId"] = message.parent_id
     if message.thread_id:
         em["X-Mansio-ThreadId"] = message.thread_id
+    if message.intent:
+        em["X-Mansio-Intent"] = message.intent
     em["From"] = f"{message.sender}@mansio.local"
     em["Subject"] = f"[{message.channel}] {message.msg_type}"
     em["Date"] = message.timestamp
@@ -127,6 +129,7 @@ def _email_to_msg(em: email.message.Message) -> Message | None:
 
     parent_id = em.get("X-Mansio-ParentId") or None
     thread_id = em.get("X-Mansio-ThreadId") or None
+    intent = em.get("X-Mansio-Intent") or None
 
     return Message(
         id=msg_id,
@@ -138,6 +141,7 @@ def _email_to_msg(em: email.message.Message) -> Message | None:
         metadata=metadata,
         parent_id=parent_id,
         thread_id=thread_id,
+        intent=intent,
     )
 
 
@@ -316,6 +320,7 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
         thread_id: str | None = None,
+        intent: str | None = None,
         offset: int = 0,
     ) -> list[Message]:
         """Retrieve messages from a channel.
@@ -328,6 +333,7 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
             order: ``"oldest"`` (default) returns from the beginning;
                 ``"newest"`` returns the last *limit* messages.
             thread_id: If provided, only return messages in this thread.
+            intent: If provided, only return messages with this intent.
             offset: Number of messages to skip before returning results.
 
         Returns:
@@ -341,6 +347,8 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
             messages = [m for m in messages if m.msg_type == msg_type]
         if thread_id is not None:
             messages = [m for m in messages if m.thread_id == thread_id]
+        if intent is not None:
+            messages = [m for m in messages if m.intent == intent]
         if order == "newest":
             if offset:
                 messages = messages[: len(messages) - offset] if offset < len(messages) else []

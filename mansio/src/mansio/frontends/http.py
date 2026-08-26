@@ -469,6 +469,7 @@ def _parse_query_params(request: Any, max_limit: int) -> dict:
         }
 
     thread_id = (request.query_params.get("thread_id") or [None])[0]
+    intent = (request.query_params.get("intent") or [None])[0]
 
     return {
         "channel": channel,
@@ -477,6 +478,7 @@ def _parse_query_params(request: Any, max_limit: int) -> dict:
         "msg_type": msg_type,
         "order": order,
         "thread_id": thread_id,
+        "intent": intent,
         "offset": offset,
     }
 
@@ -581,6 +583,8 @@ def _msg_to_dict(m: Message) -> dict[str, Any]:
         d["parent_id"] = m.parent_id
     if m.thread_id is not None:
         d["thread_id"] = m.thread_id
+    if m.intent is not None:
+        d["intent"] = m.intent
     return d
 
 
@@ -774,6 +778,7 @@ class HttpFrontend:
                     metadata=data.get("metadata"),
                     queue=bool(data.get("queue")),
                     parent_id=data.get("parent_id"),
+                    intent=data.get("intent"),
                 )
             except ValueError as e:
                 return {
@@ -805,6 +810,7 @@ class HttpFrontend:
                 msg_type=qp.get("msg_type"),
                 order=qp.get("order", "oldest"),
                 thread_id=qp.get("thread_id"),
+                intent=qp.get("intent"),
                 offset=offset,
             )
 

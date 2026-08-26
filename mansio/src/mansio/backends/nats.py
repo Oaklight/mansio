@@ -161,6 +161,7 @@ class NATSBackend(Backend, Presenceable, Compactable):
             "metadata": message.metadata,
             "parent_id": message.parent_id,
             "thread_id": message.thread_id,
+            "intent": message.intent,
         }
         return json.dumps(data).encode("utf-8")
 
@@ -178,6 +179,7 @@ class NATSBackend(Backend, Presenceable, Compactable):
             metadata=d.get("metadata"),
             parent_id=d.get("parent_id"),
             thread_id=d.get("thread_id"),
+            intent=d.get("intent"),
         )
 
     # ── Event loop bridge ─────────────────────────────────────
@@ -439,6 +441,7 @@ class NATSBackend(Backend, Presenceable, Compactable):
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
         thread_id: str | None = None,
+        intent: str | None = None,
         offset: int = 0,
     ) -> list[Message]:
         """Retrieve messages from a channel via JetStream.
@@ -451,6 +454,7 @@ class NATSBackend(Backend, Presenceable, Compactable):
             order: ``"oldest"`` (default) or ``"newest"``.
                 Currently only ``"oldest"`` is implemented.
             thread_id: If provided, only return messages in this thread.
+            intent: If provided, only return messages with this intent.
             offset: Number of messages to skip before returning results.
 
         Returns:
@@ -465,14 +469,17 @@ class NATSBackend(Backend, Presenceable, Compactable):
             )
         self._ensure_connected()
         subject = self._subject(channel)
-        # NATS JetStream doesn't support server-side thread_id/offset filtering,
+        # NATS JetStream doesn't support server-side thread_id/intent/offset filtering,
         # so we fetch more and filter client-side when needed.
-        fetch_limit = limit + offset if thread_id is None else (limit + offset) * 5
+        needs_client_filter = thread_id is not None or intent is not None
+        fetch_limit = limit + offset if not needs_client_filter else (limit + offset) * 5
         msgs = self._run_async(
             self._fetch_all(subject, limit=fetch_limit, after=after, msg_type=msg_type)
         )
         if thread_id is not None:
             msgs = [m for m in msgs if m.thread_id == thread_id]
+        if intent is not None:
+            msgs = [m for m in msgs if m.intent == intent]
         if offset:
             msgs = msgs[offset:]
         return msgs[:limit]

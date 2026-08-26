@@ -88,6 +88,7 @@ class HttpTransport:
         *,
         queue: bool = False,
         parent_id: str | None = None,
+        intent: str | None = None,
     ) -> str:
         """Publish a message via the remote server.
 
@@ -106,6 +107,8 @@ class HttpTransport:
             body["queue"] = True
         if parent_id:
             body["parent_id"] = parent_id
+        if intent:
+            body["intent"] = intent
 
         resp = self._http.post(f"{self._base_url}/v1/publish", json=body)
         self._check_response(resp)
@@ -172,6 +175,7 @@ class HttpTransport:
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
         thread_id: str | None = None,
+        intent: str | None = None,
         offset: int = 0,
     ) -> list[Message]:
         """Query messages from a channel via the remote server."""
@@ -184,6 +188,8 @@ class HttpTransport:
             params["order"] = order
         if thread_id:
             params["thread_id"] = thread_id
+        if intent:
+            params["intent"] = intent
         if offset:
             params["offset"] = str(offset)
 
@@ -435,6 +441,7 @@ class HttpTransport:
             metadata=d.get("metadata"),
             parent_id=d.get("parent_id"),
             thread_id=d.get("thread_id"),
+            intent=d.get("intent"),
         )
 
     def __repr__(self) -> str:

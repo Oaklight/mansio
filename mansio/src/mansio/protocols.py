@@ -60,6 +60,7 @@ class Backend(ABC):
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
         thread_id: str | None = None,
+        intent: str | None = None,
         offset: int = 0,
     ) -> list[Message]:
         """Retrieve messages from a channel.
@@ -74,6 +75,7 @@ class Backend(ABC):
                 ``"newest"`` selects the last *limit* messages instead of
                 the first *limit*.
             thread_id: If provided, only return messages in this thread.
+            intent: If provided, only return messages with this intent.
             offset: Number of messages to skip before returning results.
 
         Returns:
