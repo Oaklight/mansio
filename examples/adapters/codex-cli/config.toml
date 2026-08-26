@@ -1,0 +1,26 @@
+# Codex CLI configuration with mansio MCP server and polling hook.
+#
+# Place in .codex/config.toml (per-project) or ~/.codex/config.toml (per-user).
+
+[mcp_servers.mansio]
+command = "mansio"
+args = [
+  "mcp-serve",
+  "--url", "http://localhost:8742",
+  "--agent-id", "codex-agent",
+  "--token", "mst-your-token-here"
+]
+
+# Poll mansio inbox at session start and resume.
+[[hooks.SessionStart]]
+matcher = "startup|resume"
+
+[[hooks.SessionStart.hooks]]
+type = "mcp_tool"
+server = "mansio"
+tool = "mansio_poll"
+timeout = 10
+statusMessage = "Checking mansio inbox"
+
+[hooks.SessionStart.hooks.input]
+channel = "inbox"
