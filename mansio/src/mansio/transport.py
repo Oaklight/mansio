@@ -28,6 +28,8 @@ class Transport(Protocol):
         metadata: dict | None = None,
         *,
         queue: bool = False,
+        parent_id: str | None = None,
+        intent: str | None = None,
     ) -> str:
         """Publish a message. Returns message ID."""
         ...

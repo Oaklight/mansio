@@ -151,7 +151,7 @@ class TestMetricsCollector:
         mc.record()
         buckets = mc.get_throughput(seconds=1)
         # Should be HH:MM:SS format
-        t = buckets[0]["time"]
+        t = str(buckets[0]["time"])
         parts = t.split(":")
         assert len(parts) == 3
         assert all(len(p) == 2 for p in parts)

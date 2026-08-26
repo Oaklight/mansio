@@ -370,7 +370,8 @@ class Bus:
             return
         if not isinstance(self._backend, ChannelStore):
             return
-        if self._backend.get_channel(channel) is not None:
+        cs = self._backend
+        if cs.get_channel(channel) is not None:
             self._ensured_channels.add(channel)
             return
 
@@ -399,16 +400,17 @@ class Bus:
             return
 
         with contextlib.suppress(ValueError):
-            self._backend.create_channel(meta, acl)
+            cs.create_channel(meta, acl)
         self._ensured_channels.add(channel)
 
     # ── Channel metadata & ACL (optional — ChannelStore backends) ──
 
-    def _require_channel_store(self) -> None:
+    def _require_channel_store(self) -> ChannelStore:
         if not isinstance(self._backend, ChannelStore):
             raise NotImplementedError(
                 f"{type(self._backend).__name__} does not implement ChannelStore"
             )
+        return self._backend
 
     def create_channel(
         self,
@@ -433,9 +435,9 @@ class Bus:
             NotImplementedError: If backend is not ChannelStore.
             ValueError: If the channel already exists.
         """
-        self._require_channel_store()
+        cs = self._require_channel_store()
         meta = ChannelMeta(name=name, owner=owner, visibility=visibility, created_at=_now_iso())
-        self._backend.create_channel(meta, acl)
+        cs.create_channel(meta, acl)
         return meta
 
     def ensure_channel(
@@ -454,22 +456,22 @@ class Bus:
         Returns:
             The ChannelMeta (existing or newly created).
         """
-        self._require_channel_store()
-        existing = self._backend.get_channel(name)
+        cs = self._require_channel_store()
+        existing = cs.get_channel(name)
         if existing is not None:
             return existing
         meta = ChannelMeta(name=name, owner=owner, visibility=visibility, created_at=_now_iso())
         try:
-            self._backend.create_channel(meta, acl)
+            cs.create_channel(meta, acl)
         except ValueError:
             # Race: channel created between get and create
-            return self._backend.get_channel(name) or meta
+            return cs.get_channel(name) or meta
         return meta
 
     def get_channel_meta(self, name: str) -> ChannelMeta | None:
         """Return channel metadata, or None."""
-        self._require_channel_store()
-        return self._backend.get_channel(name)
+        cs = self._require_channel_store()
+        return cs.get_channel(name)
 
     def check_access(self, channel: str, agent_id: str, required: str = "read") -> bool:
         """Check if an agent has the required permission on a channel.
@@ -483,31 +485,32 @@ class Bus:
 
     def get_acl(self, channel: str) -> list[ACLEntry]:
         """Return ACL entries for a channel."""
-        self._require_channel_store()
-        return self._backend.get_acl(channel)
+        cs = self._require_channel_store()
+        return cs.get_acl(channel)
 
     def set_acl(self, channel: str, entries: list[ACLEntry]) -> None:
         """Replace ACL for a channel."""
-        self._require_channel_store()
-        self._backend.set_acl(channel, entries)
+        cs = self._require_channel_store()
+        cs.set_acl(channel, entries)
 
     def add_acl_entry(self, entry: ACLEntry) -> None:
         """Add or update a single ACL entry."""
-        self._require_channel_store()
-        self._backend.add_acl_entry(entry)
+        cs = self._require_channel_store()
+        cs.add_acl_entry(entry)
 
     def remove_acl_entry(self, channel: str, agent_id: str) -> bool:
         """Remove an ACL entry."""
-        self._require_channel_store()
-        return self._backend.remove_acl_entry(channel, agent_id)
+        cs = self._require_channel_store()
+        return cs.remove_acl_entry(channel, agent_id)
 
     # ── Deletion (optional — Deletable backends only) ────────
 
-    def _require_deletable(self) -> None:
+    def _require_deletable(self) -> Deletable:
         if not isinstance(self._backend, Deletable):
             raise NotImplementedError(
                 f"{type(self._backend).__name__} does not implement Deletable"
             )
+        return self._backend
 
     def delete_channel(self, channel: str, *, agent_id: str | None = None) -> int:
         """Delete a channel and all its messages.
@@ -526,10 +529,10 @@ class Bus:
             PermissionError: If agent_id is provided and the agent
                 lacks admin permission.
         """
-        self._require_deletable()
+        dl = self._require_deletable()
         if agent_id is not None and not self.check_access(channel, agent_id, "admin"):
             raise PermissionError(f"agent '{agent_id}' lacks admin permission on '{channel}'")
-        count = self._backend.delete_channel(channel)
+        count = dl.delete_channel(channel)
         # Clean up in-process subscriptions
         self._subs.pop(channel, None)
         # Invalidate sugar-channel cache
@@ -558,7 +561,7 @@ class Bus:
             PermissionError: If agent_id is provided and the agent
                 is neither the sender nor a channel admin.
         """
-        self._require_deletable()
+        dl = self._require_deletable()
         if agent_id is not None:
             msg = self._backend.get_message(message_id)
             if (
@@ -567,15 +570,16 @@ class Bus:
                 and not self.check_access(msg.channel, agent_id, "admin")
             ):
                 raise PermissionError(f"agent '{agent_id}' cannot delete message '{message_id}'")
-        return self._backend.delete_message(message_id)
+        return dl.delete_message(message_id)
 
     # ── Presence (optional — Presenceable backends only) ─────
 
-    def _require_presence(self) -> None:
+    def _require_presence(self) -> Presenceable:
         if not isinstance(self._backend, Presenceable):
             raise NotImplementedError(
                 f"{type(self._backend).__name__} does not implement Presenceable"
             )
+        return self._backend
 
     def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
         """Record a heartbeat for *agent_id*.
@@ -583,8 +587,8 @@ class Bus:
         Raises:
             NotImplementedError: If backend is not Presenceable.
         """
-        self._require_presence()
-        self._backend.heartbeat(agent_id, metadata)
+        pr = self._require_presence()
+        pr.heartbeat(agent_id, metadata)
 
     def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
         """Return all known agents with computed online/offline status.
@@ -592,8 +596,8 @@ class Bus:
         Raises:
             NotImplementedError: If backend is not Presenceable.
         """
-        self._require_presence()
-        return self._backend.agents(timeout_seconds)
+        pr = self._require_presence()
+        return pr.agents(timeout_seconds)
 
     def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
         """Return presence for a single agent, or ``None`` if unknown.
@@ -601,8 +605,8 @@ class Bus:
         Raises:
             NotImplementedError: If backend is not Presenceable.
         """
-        self._require_presence()
-        return self._backend.agent_status(agent_id, timeout_seconds)
+        pr = self._require_presence()
+        return pr.agent_status(agent_id, timeout_seconds)
 
     def close(self) -> None:
         """Release resources held by the backend."""

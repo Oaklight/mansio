@@ -703,6 +703,20 @@ class StreamingResponse:
         if not self.ok:
             raise HTTPError(self.status_code, "", self.url)
 
+    @property
+    def content(self) -> bytes:
+        """Read entire body. Prefer iter_bytes() for large responses."""
+        return self.read()
+
+    @property
+    def text(self) -> str:
+        """Decode body as text."""
+        return self.content.decode(self._encoding)
+
+    def json(self) -> Any:
+        """Parse body as JSON."""
+        return _json.loads(self.content)
+
     # ── Sync iteration ──
 
     def iter_bytes(self, chunk_size: int = 4096) -> Iterator[bytes]:

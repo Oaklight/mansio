@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 from io import StringIO
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from mansio_client.types import AgentPresence, Message
@@ -18,7 +19,7 @@ from mansio.mcp import (
 )
 
 
-def _make_msg(**overrides: object) -> Message:
+def _make_msg(**overrides: Any) -> Message:
     """Create a Message with sensible defaults."""
     defaults = {
         "id": "msg-1",

@@ -109,7 +109,7 @@ class TestClaim:
         t2.join()
 
         assert len(results) == 10
-        ids = [r.message.id for r in results]
+        ids = [r.message.id for r in results if r is not None]
         assert len(set(ids)) == 10
 
 

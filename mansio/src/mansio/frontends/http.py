@@ -36,7 +36,7 @@ import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from mansio._vendor.httpserver import App, JSONResponse, Response, StreamingResponse
 
@@ -863,7 +863,7 @@ class HttpFrontend:
                     ]
                 return {"channels": all_detail}
 
-            all_channels: list[str] = await asyncio.to_thread(bus.channels)
+            all_channels = cast(list[str], await asyncio.to_thread(bus.channels, detail=False))
             if isinstance(auth_result, str):
                 all_channels = [
                     ch
@@ -1028,7 +1028,7 @@ class HttpFrontend:
 
             older_than = data.get("older_than")
 
-            all_channels = await asyncio.to_thread(bus.channels)
+            all_channels = cast(list[str], await asyncio.to_thread(bus.channels, detail=False))
             matched = _match_channels(all_channels, pattern)
 
             # Protect system channels from bulk deletion

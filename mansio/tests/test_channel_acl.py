@@ -14,6 +14,7 @@ from mansio import (
     ChannelMeta,
     ChannelStore,
     MemoryBackend,
+    Message,
     SQLiteBackend,
 )
 from mansio.frontends.http import HttpFrontend
@@ -123,7 +124,9 @@ class TestMemoryChannelStore:
         b = MemoryBackend()
         b.create_channel(ChannelMeta(name="ch", owner="alice", visibility="public", created_at="t"))
         assert b.update_channel("ch", visibility="private")
-        assert b.get_channel("ch").visibility == "private"
+        meta = b.get_channel("ch")
+        assert meta is not None
+        assert meta.visibility == "private"
         assert not b.update_channel("nonexistent", visibility="private")
         b.close()
 
@@ -217,6 +220,7 @@ class TestSQLiteChannelStore:
         b.create_channel(ChannelMeta(name="ch", owner="alice", visibility="public", created_at="t"))
         assert b.update_channel("ch", visibility="private", owner="bob")
         ch = b.get_channel("ch")
+        assert ch is not None
         assert ch.visibility == "private"
         assert ch.owner == "bob"
         b.close()
@@ -346,10 +350,10 @@ class TestBusChannelManagement:
         from mansio.protocols import Backend
 
         class MinimalBackend(Backend):
-            def store(self, msg):
+            def store(self, message: Message) -> None:
                 pass
 
-            def store_queue(self, msg):
+            def store_queue(self, message: Message) -> None:
                 pass
 
             def query(self, *a, **kw):
@@ -364,7 +368,7 @@ class TestBusChannelManagement:
             def queue_ack(self, *a, **kw):
                 return None
 
-            def queue_status(self, mid):
+            def queue_status(self, message_id: str) -> dict | None:
                 return None
 
         bus = Bus(MinimalBackend())
