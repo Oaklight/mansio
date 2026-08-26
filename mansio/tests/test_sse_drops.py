@@ -24,6 +24,7 @@ from mansio.frontends.http import (
     _format_sse_event,
     _setup_sse_subscriptions,
     _sse_event_generator,
+    _SSESession,
 )
 
 
@@ -95,14 +96,16 @@ class TestDropWarningInGenerator(unittest.TestCase):
 
             events = []
             async for chunk in _sse_event_generator(
-                q,
-                [],
-                bus,
-                ["test-ch"],
-                None,
-                None,
-                drop_lock,
-                drop_counter,
+                _SSESession(
+                    queue=q,
+                    sub_ids=[],
+                    bus=bus,
+                    channels=["test-ch"],
+                    auth_result=None,
+                    last_event_id=None,
+                    drop_lock=drop_lock,
+                    drop_counter=drop_counter,
+                )
             ):
                 events.append(chunk)
 
@@ -148,14 +151,16 @@ class TestDropWarningInGenerator(unittest.TestCase):
 
             events = []
             async for chunk in _sse_event_generator(
-                q,
-                [],
-                bus,
-                ["test-ch"],
-                None,
-                None,
-                drop_lock,
-                drop_counter,
+                _SSESession(
+                    queue=q,
+                    sub_ids=[],
+                    bus=bus,
+                    channels=["test-ch"],
+                    auth_result=None,
+                    last_event_id=None,
+                    drop_lock=drop_lock,
+                    drop_counter=drop_counter,
+                )
             ):
                 events.append(chunk)
 

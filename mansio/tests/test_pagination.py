@@ -178,6 +178,87 @@ class TestSQLiteBackendPagination:
         backend.close()
 
 
+class TestMaildirBackendPagination:
+    """Test offset parameter on MaildirBackend.query()."""
+
+    def test_offset_skips_messages(self, tmp_path):
+        from mansio.backends.maildir import MaildirBackend
+
+        backend = MaildirBackend(str(tmp_path / "mdir"))
+        bus = Bus(backend=backend)
+        _publish_n(bus, 5)
+
+        result = backend.query("ch", limit=3, offset=2)
+        assert len(result) == 3
+        assert [m.payload for m in result] == ["msg-2", "msg-3", "msg-4"]
+        backend.close()
+
+    def test_offset_zero_is_default(self, tmp_path):
+        from mansio.backends.maildir import MaildirBackend
+
+        backend = MaildirBackend(str(tmp_path / "mdir"))
+        bus = Bus(backend=backend)
+        _publish_n(bus, 5)
+
+        result = backend.query("ch", limit=3, offset=0)
+        assert [m.payload for m in result] == ["msg-0", "msg-1", "msg-2"]
+        backend.close()
+
+    def test_offset_beyond_total_returns_empty(self, tmp_path):
+        from mansio.backends.maildir import MaildirBackend
+
+        backend = MaildirBackend(str(tmp_path / "mdir"))
+        bus = Bus(backend=backend)
+        _publish_n(bus, 3)
+
+        result = backend.query("ch", limit=10, offset=5)
+        assert result == []
+        backend.close()
+
+    def test_offset_with_newest_order(self, tmp_path):
+        from mansio.backends.maildir import MaildirBackend
+
+        backend = MaildirBackend(str(tmp_path / "mdir"))
+        bus = Bus(backend=backend)
+        _publish_n(bus, 6)
+
+        result = backend.query("ch", limit=2, order="newest", offset=2)
+        assert len(result) == 2
+        assert [m.payload for m in result] == ["msg-2", "msg-3"]
+        backend.close()
+
+    def test_offset_with_after_cursor(self, tmp_path):
+        from mansio.backends.maildir import MaildirBackend
+
+        backend = MaildirBackend(str(tmp_path / "mdir"))
+        bus = Bus(backend=backend)
+        ids = _publish_n(bus, 6)
+
+        result = backend.query("ch", after=ids[1], limit=2, offset=2)
+        assert len(result) == 2
+        assert [m.payload for m in result] == ["msg-4", "msg-5"]
+        backend.close()
+
+    def test_full_page_walk(self, tmp_path):
+        from mansio.backends.maildir import MaildirBackend
+
+        backend = MaildirBackend(str(tmp_path / "mdir"))
+        bus = Bus(backend=backend)
+        _publish_n(bus, 7)
+
+        collected = []
+        offset = 0
+        while True:
+            page = backend.query("ch", limit=3, offset=offset)
+            if not page:
+                break
+            collected.extend(m.payload for m in page)
+            offset += len(page)
+
+        assert collected == [f"msg-{i}" for i in range(7)]
+        backend.close()
+
+
 # ── Bus.query() ───────────────────────────────────────────────
 
 
