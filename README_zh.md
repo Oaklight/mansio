@@ -155,6 +155,7 @@ print(f"仪表板: {info.url}")
 - [x] **NATS 后端** — 基于 JetStream 的持久化存储
 - [x] **Maildir 后端** — 基于文件系统的存储
 - [x] **压缩** — 注册表和游标压缩，适用于长期运行实例
+- [x] **远程传输可靠性** — SSE 重连（Last-Event-ID）、WAL 重试日志、慢消费者丢弃通知
 
 ### 计划中
 
@@ -163,7 +164,6 @@ print(f"仪表板: {info.url}")
 - [ ] **语义化记忆检索** — 向量嵌入搜索
 - [ ] **Redis/AMQP 后端** — 分布式存储
 - [ ] **联邦** — 跨实例通信（[#4](https://github.com/Oaklight/mansio/issues/4)）
-- [ ] **远程传输可靠性** — 重连、重试与熔断器（[#24](https://github.com/Oaklight/mansio/issues/24)）
 
 ## 学术背景
 
