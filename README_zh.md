@@ -29,6 +29,13 @@ Backend（存储）  →  Bus（路由）  →  Client SDK（智能体 API）
 - **访问控制** — `_system:*` 频道受限写入；`notebook:`/`memory:` 频道仅所属 agent 可写；`broadcast:*` 仅 supertoken 可写
 - **管理面板** — 内置 HTTP 仪表板，REST API 可查看统计数据、浏览通道、检查消息、监控吞吐量；模块化 `admin/routes/` 子包，字典分发架构
 - **灵活连接** — 通过 Bus 对象、文件路径（SQLite）或 `:memory:` 字符串连接；URL 协议（`http://`、`redis://`）预留给未来的传输层
+- **MCP 服务器** — `mansio mcp-serve` 将所有客户端操作暴露为 MCP 工具，通过 JSON-RPC stdio 通信，支持任何 MCP 兼容的智能体
+- **实时订阅** — 基于 SSE 的 `subscribe(channel, callback)`，支持推送式消息投递
+- **消息线程** — `parent_id` 和 `thread_id` 字段支持回复链和对话上下文
+- **工作队列** — `queue_publish`、`queue_claim`、`queue_ack` 模式，支持基于租约的任务分发
+- **智能体在线状态** — `heartbeat()`、`agents()`、`agent_status()` 用于上下线检测
+- **推送集成** — 三层方案（MCP 工具 → 框架适配器 → 提示指令），`examples/` 中提供各框架示例
+- **NATS 后端** — 通过 NATS JetStream 实现分布式消息传递（可选 `nats` 依赖）
 - **零运行时依赖** — 纯 Python，仅使用标准库
 
 ## 快速开始
@@ -100,9 +107,9 @@ pip install -e ".[dev]"
 | 方法 | 描述 |
 |------|------|
 | `channel_send(channel, content)` | 向通道发送消息 |
-| `channel_read(channel)` | 读取消息（不推进游标） |
+| `channel_read(channel)` | 读取消息（不推进游标）；支持 `order`（"oldest"/"newest"）和 `thread_id` 参数 |
 | `channel_poll(channel)` | 轮询新消息（推进游标） |
-| `channel_list()` | 列出所有通道 |
+| `channel_list()` | 列出所有通道；支持 `detail=True` 获取元数据 |
 
 ### 语义化 API
 
@@ -118,6 +125,30 @@ pip install -e ".[dev]"
 | `memory_recall(query)` | 按关键词检索记忆 |
 | `broadcast_list()` / `broadcast_read(topic)` | 浏览广播通道 |
 | `notification_check()` | 轮询通知 |
+
+### 实时订阅
+
+| 方法 | 描述 |
+|------|------|
+| `subscribe(channel, callback)` | 通过 SSE 订阅实时消息 |
+| `unsubscribe(subscription_id)` | 取消订阅 |
+
+### 工作队列
+
+| 方法 | 描述 |
+|------|------|
+| `queue_publish(channel, content)` | 向工作队列发布任务 |
+| `queue_claim(channel)` | 认领下一个可用任务（带租约） |
+| `queue_ack(message_id)` | 确认任务完成 |
+| `queue_status(message_id)` | 查询任务认领状态 |
+
+### 在线状态
+
+| 方法 | 描述 |
+|------|------|
+| `heartbeat()` | 发送在线心跳 |
+| `agents()` | 列出智能体及其在线状态 |
+| `agent_status(agent_id)` | 查询指定智能体的在线状态 |
 
 ### 认证
 
@@ -140,6 +171,14 @@ print(f"仪表板: {info.url}")
 # 访问 http://localhost:8741 查看 Web UI
 ```
 
+### MCP 服务器
+
+```bash
+mansio mcp-serve --url http://localhost:8742 --agent-id my-agent --token mst-xxx
+```
+
+将所有 `MansioClient` 操作暴露为 MCP 工具，通过 JSON-RPC stdio 通信。兼容 Claude Code、Codex 及任何 MCP 兼容的智能体框架。详见 `examples/adapters/` 中的各框架配置指南。
+
 ## 路线图
 
 ### 已发布
@@ -156,6 +195,8 @@ print(f"仪表板: {info.url}")
 - [x] **Maildir 后端** — 基于文件系统的存储
 - [x] **压缩** — 注册表和游标压缩，适用于长期运行实例
 - [x] **远程传输可靠性** — SSE 重连（Last-Event-ID）、WAL 重试日志、慢消费者丢弃通知
+- [x] **工作队列** — publish/claim/ack，基于租约的任务分发
+- [x] **推送集成** — MCP 工具 + 框架适配器 + 轮询模板
 
 ### 计划中
 

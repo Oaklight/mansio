@@ -29,6 +29,13 @@ Backend (storage)  →  Bus (routing)  →  Client SDK (agent API)
 - **Semantic APIs** — DMs, broadcast channels, notes (with tags), thoughts (chain-of-thought logging), memory (store/recall), notifications
 - **Admin panel** — built-in HTTP dashboard with REST API for stats, channel browsing, message inspection, and throughput monitoring; modular `admin/routes/` subpackage with dict-based dispatch
 - **Flexible connection** — connect via Bus object, file path (SQLite), or `:memory:` string; URL schemes (`http://`, `redis://`) reserved for future transports
+- **MCP server** — `mansio mcp-serve` exposes all client operations as MCP tools over JSON-RPC stdio, enabling any MCP-capable agent to interact with mansio
+- **Real-time subscriptions** — SSE-based `subscribe(channel, callback)` for push-style message delivery
+- **Message threading** — `parent_id` and `thread_id` fields for reply chains and conversation context
+- **Work queues** — `queue_publish`, `queue_claim`, `queue_ack` pattern for task distribution with lease-based claiming
+- **Agent presence** — `heartbeat()`, `agents()`, `agent_status()` for online/offline detection
+- **Push integration** — three-tier approach (MCP tools → framework adapters → prompt instructions) with per-framework examples in `examples/`
+- **NATS backend** — distributed messaging via NATS JetStream (optional `nats` extra)
 - **Zero runtime dependencies** — pure Python, stdlib only
 
 ## Quick Start
@@ -100,9 +107,9 @@ pip install -e ".[dev]"
 | Method | Description |
 |--------|-------------|
 | `channel_send(channel, content)` | Send message to a channel |
-| `channel_read(channel)` | Read messages (no cursor advance) |
+| `channel_read(channel)` | Read messages (no cursor advance); supports `order` ("oldest"/"newest") and `thread_id` params |
 | `channel_poll(channel)` | Poll new messages (advances cursor) |
-| `channel_list()` | List all channels |
+| `channel_list()` | List all channels; supports `detail=True` for metadata |
 
 ### Semantic APIs
 
@@ -118,6 +125,30 @@ pip install -e ".[dev]"
 | `memory_recall(query)` | Recall memories by keyword |
 | `broadcast_list()` / `broadcast_read(topic)` | Browse broadcast channels |
 | `notification_check()` | Poll notifications |
+
+### Real-Time
+
+| Method | Description |
+|--------|-------------|
+| `subscribe(channel, callback)` | Subscribe to real-time messages via SSE |
+| `unsubscribe(subscription_id)` | Cancel a subscription |
+
+### Work Queue
+
+| Method | Description |
+|--------|-------------|
+| `queue_publish(channel, content)` | Publish a task to a work queue |
+| `queue_claim(channel)` | Claim the next available task (with lease) |
+| `queue_ack(message_id)` | Acknowledge task completion |
+| `queue_status(message_id)` | Check task claim status |
+
+### Presence
+
+| Method | Description |
+|--------|-------------|
+| `heartbeat()` | Send presence heartbeat |
+| `agents()` | List agents with presence info |
+| `agent_status(agent_id)` | Check specific agent's presence |
 
 ### Authentication
 
@@ -140,6 +171,14 @@ print(f"Dashboard: {info.url}")
 # Visit http://localhost:8741 for the web UI
 ```
 
+### MCP Server
+
+```bash
+mansio mcp-serve --url http://localhost:8742 --agent-id my-agent --token mst-xxx
+```
+
+Exposes all `MansioClient` operations as MCP tools over JSON-RPC stdio. Compatible with Claude Code, Codex, and any MCP-capable agent framework. See `examples/adapters/` for per-framework setup guides.
+
 ## Roadmap
 
 ### Shipped
@@ -156,9 +195,11 @@ print(f"Dashboard: {info.url}")
 - [x] **Maildir Backend** — filesystem-based storage
 - [x] **Compaction** — registry and cursor compaction for long-running instances
 - [x] **Remote Transport Reliability** — SSE reconnect (Last-Event-ID), WAL retry logging, slow-consumer drop notification
+- [x] **Work Queues** — publish/claim/ack with lease-based task distribution
+- [x] **Push Integration** — MCP tools + framework adapters + polling templates
+- [x] **Client-side Injection** — per-framework message injection adapters
 
 ### Planned
-
 - [ ] **Message TTL** — automatic expiry and cleanup
 - [ ] **Async API** — native async/await support
 - [ ] **Semantic memory recall** — vector embedding search

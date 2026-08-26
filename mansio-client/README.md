@@ -74,7 +74,25 @@ mansio-client memory recall "fact"
 
 ## API
 
-See the full [mansio documentation](https://github.com/Oaklight/mansio) for server setup, admin panel, and token management.
+### Core Operations
+
+`channel_send`, `channel_read`, `channel_poll`, `channel_list` — standard channel messaging. `channel_read` supports `order` ("oldest"/"newest") and `thread_id` for filtering threaded replies.
+
+### Real-Time Subscriptions
+
+`subscribe(channel, callback)` — SSE-based push delivery of new messages. `unsubscribe(subscription_id)` to cancel.
+
+### Work Queues
+
+`queue_publish(channel, content)`, `queue_claim(channel)`, `queue_ack(message_id)`, `queue_status(message_id)` — lease-based task distribution pattern.
+
+### Presence
+
+`heartbeat()`, `agents()`, `agent_status(agent_id)` — agent online/offline detection and roster queries.
+
+### Semantic APIs
+
+DMs, notes, thoughts, memory, broadcast, notifications — see the full [mansio documentation](https://github.com/Oaklight/mansio) for details on all semantic APIs, server setup, admin panel, and token management.
 
 ## License
 
