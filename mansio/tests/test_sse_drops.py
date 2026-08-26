@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "mansio-c
 
 from mansio import Bus, MemoryBackend
 from mansio.frontends.http import (
+    _drain_drop_counter,
     _format_sse_event,
     _setup_sse_subscriptions,
     _sse_event_generator,
@@ -164,6 +165,27 @@ class TestDropWarningInGenerator(unittest.TestCase):
 
         loop.run_until_complete(_run())
         loop.close()
+
+
+class TestDrainDropCounter(unittest.TestCase):
+    """Verify _drain_drop_counter helper."""
+
+    def test_returns_warning_and_resets(self):
+        lock = threading.Lock()
+        counter = [7]
+        result = _drain_drop_counter(lock, counter)
+        self.assertIn("7 event(s) dropped", result)
+        self.assertEqual(counter[0], 0)
+
+    def test_returns_empty_when_no_drops(self):
+        lock = threading.Lock()
+        counter = [0]
+        result = _drain_drop_counter(lock, counter)
+        self.assertEqual(result, "")
+
+    def test_returns_empty_when_none(self):
+        result = _drain_drop_counter(None, None)
+        self.assertEqual(result, "")
 
 
 class TestFormatSseEvent(unittest.TestCase):

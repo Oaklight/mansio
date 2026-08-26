@@ -1597,6 +1597,21 @@ def _format_sse_event(data: str, event_id: str) -> str:
     return f"data: {data}\n\n"
 
 
+def _drain_drop_counter(
+    drop_lock: threading.Lock | None,
+    drop_counter: list[int] | None,
+) -> str:
+    """Return an SSE warning comment if events were dropped, else empty string."""
+    if drop_lock is None or drop_counter is None:
+        return ""
+    with drop_lock:
+        dropped = drop_counter[0]
+        drop_counter[0] = 0
+    if dropped:
+        return f": warning: {dropped} event(s) dropped (slow consumer), re-query for gaps\n\n"
+    return ""
+
+
 async def _sse_event_generator(
     q: asyncio.Queue[str | None],
     sub_ids: list[str],
@@ -1661,12 +1676,9 @@ async def _sse_event_generator(
             yield _format_sse_event(data, event_id)
 
             # Notify client about dropped events (slow consumer)
-            if drop_lock is not None and drop_counter is not None:
-                with drop_lock:
-                    dropped = drop_counter[0]
-                    drop_counter[0] = 0
-                if dropped:
-                    yield f": warning: {dropped} event(s) dropped (slow consumer), re-query for gaps\n\n"
+            warning = _drain_drop_counter(drop_lock, drop_counter)
+            if warning:
+                yield warning
     finally:
         for sid in sub_ids:
             bus.unsubscribe(sid)
