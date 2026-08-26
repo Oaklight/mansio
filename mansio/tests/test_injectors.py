@@ -362,8 +362,8 @@ class TestWebhookInjector:
                 self.send_response(200)
                 self.end_headers()
 
-            def log_message(self, *args):
-                pass  # suppress logs
+            def log_message(self, format: str, *args: object) -> None:
+                pass
 
         server = HTTPServer(("127.0.0.1", 0), Handler)
         port = server.server_address[1]
@@ -396,7 +396,7 @@ class TestWebhookInjector:
                 self.send_response(200)
                 self.end_headers()
 
-            def log_message(self, *args):
+            def log_message(self, format: str, *args: object) -> None:
                 pass
 
         server = HTTPServer(("127.0.0.1", 0), Handler)

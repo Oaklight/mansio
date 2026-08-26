@@ -68,6 +68,7 @@ class TestNoteWrite:
             assert len(notes) == 1
             assert notes[0].payload == "tagged note"
             assert notes[0].msg_type == "note"
+            assert notes[0].metadata is not None
             assert notes[0].metadata.get("tags") == ["test", "important"]
 
             client.close()
