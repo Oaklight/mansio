@@ -123,6 +123,7 @@ class Bus:
         *,
         queue: bool = False,
         parent_id: str | None = None,
+        intent: str | None = None,
         enforce_acl: bool = False,
     ) -> str:
         """Publish a message to a channel.
@@ -135,6 +136,7 @@ class Bus:
             metadata: Optional extra fields.
             parent_id: Optional ID of the message being replied to.
                 Server auto-computes ``thread_id`` from the parent.
+            intent: Optional intent label for semantic filtering.
             enforce_acl: If True, check write permission before storing.
 
         Returns:
@@ -181,6 +183,7 @@ class Bus:
             metadata=metadata,
             parent_id=parent_id,
             thread_id=thread_id,
+            intent=intent,
         )
 
         if queue:
@@ -205,6 +208,7 @@ class Bus:
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
         thread_id: str | None = None,
+        intent: str | None = None,
         offset: int = 0,
         *,
         agent_id: str | None = None,
@@ -219,6 +223,7 @@ class Bus:
             order: ``"oldest"`` returns the first *limit* messages;
                 ``"newest"`` returns the last *limit* messages.
             thread_id: If provided, only return messages in this thread.
+            intent: If provided, only return messages with this intent.
             offset: Number of messages to skip before returning results.
             agent_id: If provided, enforce read ACL for this agent.
 
@@ -238,6 +243,7 @@ class Bus:
             msg_type=msg_type,
             order=order,
             thread_id=thread_id,
+            intent=intent,
             offset=offset,
         )
 

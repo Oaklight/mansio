@@ -94,6 +94,9 @@ class Message:
     payload: str         # Message content (JSON string or plain text)
     timestamp: str       # ISO 8601 timestamp
     metadata: dict | None  # Optional extension fields
+    parent_id: str | None  # ID of the message being replied to
+    thread_id: str | None  # Root message ID for flat thread queries
+    intent: str | None     # Semantic intent label (see §3.10)
 ```
 
 **Design Decisions**:
@@ -102,6 +105,8 @@ class Message:
 - `id` uses UUID v7 for time-ordering, serving as the poll cursor
 - `msg_type` is a free-form string; semantics defined at the Client SDK layer
 - `metadata` carries structured extension information (e.g., display_name, tags)
+- `parent_id` / `thread_id` enable reply chains and flat thread queries (§3.2)
+- `intent` is a free-form string for semantic turn-taking hints (§3.10)
 
 ### 3.2 Backend Layer
 
@@ -656,6 +661,49 @@ Recommended approach: combine Tier 1 with either Tier 2 (automated) or
 Tier 3 (instruction-driven) for reliable message awareness.
 
 See `examples/instructions/` for per-framework polling templates.
+
+### 3.10 Intent Headers (Semantic Race Condition Mitigation)
+
+When multiple agents communicate through shared channels, **semantic race
+conditions** emerge from timing mismatches: cross-talk (an agent replies to
+a stale message while the sender has moved on), avalanche effects (one
+message triggers simultaneous responses from every agent in a group), and
+context drift (agents enter politeness loops or circular corrections).
+
+The `intent` field on `Message` provides lightweight turn-taking hints that
+agents and orchestrators can use to reduce these problems.
+
+**Suggested values** (free-form string, not enforced):
+
+| Intent | Meaning |
+|---|---|
+| `REQUIRES_RESPONSE` | Sender expects a reply from one or more recipients |
+| `DIRECT_QUESTION` | Message is a question directed at a specific agent |
+| `FYI_ONLY` | Informational; no response expected |
+| `PASS_FLOOR` | Sender is yielding the conversational floor |
+
+**Usage**:
+
+- Set via `intent` parameter on `Bus.publish()` and the HTTP `/v1/publish`
+  endpoint
+- Query filtering via `intent` parameter on `Bus.query()` and
+  `/v1/query?intent=...`
+- Stored as a first-class field, indexed in SQLite for efficient filtering
+- All backends support intent in both storage and query
+
+**Design Decisions**:
+
+- Intent is a free-form string rather than an enum so that applications can
+  define domain-specific values without protocol changes
+- The field is optional and defaults to `None` — existing clients are
+  unaffected
+- Intent is a *hint*, not an enforcement mechanism; orchestrators and agents
+  can choose whether to respect it
+
+This is Phase 1 of the semantic race condition mitigation design documented
+in [GitHub issue #102](https://github.com/Oaklight/mansio/issues/102).
+Future phases may add floor control (turn locking), debounced delivery,
+and loop detection.
 
 ---
 

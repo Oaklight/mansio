@@ -89,6 +89,7 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
         thread_id: str | None = None,
+        intent: str | None = None,
         offset: int = 0,
     ) -> list[Message]:
         """Retrieve messages from a channel.
@@ -102,6 +103,7 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                 ``"newest"`` returns the last *limit* messages.  Both
                 return results in chronological (ascending ID) order.
             thread_id: If provided, only return messages in this thread.
+            intent: If provided, only return messages with this intent.
             offset: Number of messages to skip before returning results.
 
         Returns:
@@ -115,6 +117,8 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             msgs = [m for m in msgs if m.msg_type == msg_type]
         if thread_id is not None:
             msgs = [m for m in msgs if m.thread_id == thread_id]
+        if intent is not None:
+            msgs = [m for m in msgs if m.intent == intent]
         if order == "newest":
             if offset:
                 msgs = msgs[: len(msgs) - offset] if offset < len(msgs) else []

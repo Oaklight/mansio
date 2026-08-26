@@ -23,6 +23,10 @@ class Message:
         thread_id: ID of the root message of the conversation thread
             (optional). Equals parent_id for direct replies to root;
             enables flat thread queries.
+        intent: Application-defined intent label (optional). Suggested
+            values: ``REQUIRES_RESPONSE``, ``DIRECT_QUESTION``,
+            ``FYI_ONLY``, ``PASS_FLOOR``.  Free-form string; not
+            restricted to these values.
     """
 
     id: str
@@ -34,6 +38,7 @@ class Message:
     metadata: dict | None = field(default=None)
     parent_id: str | None = field(default=None)
     thread_id: str | None = field(default=None)
+    intent: str | None = field(default=None)
 
     def payload_json(self) -> dict:
         """Parse payload as JSON. Raises ValueError if not valid JSON."""

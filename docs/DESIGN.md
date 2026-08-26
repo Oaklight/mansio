@@ -90,6 +90,9 @@ class Message:
     payload: str         # 消息内容（JSON 字符串或纯文本）
     timestamp: str       # ISO 8601 时间戳
     metadata: dict | None  # 可选扩展字段
+    parent_id: str | None  # 被回复消息的 ID
+    thread_id: str | None  # 线程根消息 ID，用于扁平化线程查询
+    intent: str | None     # 语义意图标签（见 §3.10）
 ```
 
 **设计决策**：
@@ -98,6 +101,8 @@ class Message:
 - `id` 使用 UUID v7 保证时间有序，作为 poll 的 cursor
 - `msg_type` 是自由字符串，语义由 Client SDK 层定义
 - `metadata` 用于携带结构化扩展信息（如 display_name、tags 等）
+- `parent_id` / `thread_id` 支持回复链和扁平化线程查询（§3.2）
+- `intent` 是自由字符串，用于语义层面的轮次协调提示（§3.10）
 
 ### 3.2 Backend 层
 
@@ -654,6 +659,40 @@ MansioClient 的方法可以通过 toolregistry-server 统一暴露为 MCP tool�
 推荐做法：将第 1 层与第 2 层（自动化）或第 3 层（指令驱动）结合使用，确保可靠的消息感知。
 
 详见 `examples/instructions/` 中的各框架轮询模板。
+
+### 3.10 意图标头（语义竞态缓解）
+
+当多个 Agent 通过共享频道通信时，**语义竞态条件**会因时序不匹配而出现：
+串话（Agent 回复了过时消息）、雪崩效应（一条消息触发所有 Agent 同时响应）、
+以及上下文漂移（Agent 陷入礼貌循环或循环纠正）。
+
+`Message` 上的 `intent` 字段提供轻量级的轮次协调提示，
+Agent 和编排器可以用它来减少这些问题。
+
+**建议值**（自由字符串，不强制）：
+
+| Intent | 含义 |
+|---|---|
+| `REQUIRES_RESPONSE` | 发送者期望接收者回复 |
+| `DIRECT_QUESTION` | 消息是针对特定 Agent 的提问 |
+| `FYI_ONLY` | 仅通知，不需要回复 |
+| `PASS_FLOOR` | 发送者主动让出发言权 |
+
+**用法**：
+
+- 通过 `Bus.publish()` 和 HTTP `/v1/publish` 端点的 `intent` 参数设置
+- 通过 `Bus.query()` 和 `/v1/query?intent=...` 的 `intent` 参数过滤查询
+- 作为一等字段存储，在 SQLite 中建索引以支持高效过滤
+- 所有后端均支持 intent 的存储和查询
+
+**设计决策**：
+
+- intent 是自由字符串而非枚举，以便应用可以定义领域特定的值而无需修改协议
+- 字段可选，默认为 `None` —— 现有客户端不受影响
+- intent 是*提示*而非强制机制；编排器和 Agent 可以自行决定是否遵守
+
+这是 [GitHub issue #102](https://github.com/Oaklight/mansio/issues/102) 中语义竞态缓解设计的
+第一阶段。后续阶段可能增加发言权控制（turn locking）、延迟批量投递和循环检测。
 
 ---
 
