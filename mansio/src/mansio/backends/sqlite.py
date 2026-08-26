@@ -299,7 +299,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
 
         self._conn.executescript(_SCHEMA)
         self._ensure_queue_columns()
-        self._ensure_threading_columns()
+        self._ensure_message_extensions()
         if result == "fresh":
             _set_schema_version(self._conn, SCHEMA_VERSION)
         self._conn.commit()
@@ -335,7 +335,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             "CREATE INDEX IF NOT EXISTS idx_channel_status ON messages (channel, status, id)"
         )
 
-    def _ensure_threading_columns(self) -> None:
+    def _ensure_message_extensions(self) -> None:
         """Idempotent migration: add parent_id, thread_id, and intent columns."""
         existing = {row[1] for row in self._conn.execute("PRAGMA table_info(messages)").fetchall()}
         for col in ("parent_id", "thread_id", "intent"):
@@ -471,11 +471,8 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                 )
             else:
                 params.append(limit)
-                if offset:
-                    sql = f"SELECT * FROM messages WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?"
-                    params.append(offset)
-                else:
-                    sql = f"SELECT * FROM messages WHERE {where} ORDER BY id ASC LIMIT ?"
+                sql = f"SELECT * FROM messages WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?"
+                params.append(offset)
             cursor = self._conn.execute(sql, params)
             return [self._row_to_message(row) for row in cursor.fetchall()]
 

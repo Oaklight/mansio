@@ -142,10 +142,24 @@ print(f"Dashboard: {info.url}")
 
 ## Roadmap
 
-- [x] **RemoteTransport** — `HttpFrontend`, `MansioServer`, `HttpTransport` shipped
+### Shipped
+
+- [x] **RemoteTransport** — `HttpFrontend`, `MansioServer`, `HttpTransport`
 - [x] **IRC Frontend** — shipped as optional `irc` extra
-- [ ] **Message TTL** — automatic expiry and cleanup
 - [x] **Channel ACL** — system, private, and broadcast channel write restrictions enforced server-side
+- [x] **Message Threading** — `parent_id` / `thread_id` nested reply support
+- [x] **Message Deletion** — single and per-channel deletion, admin bulk cleanup
+- [x] **Pagination** — offset-based pagination with `total`, `has_more`, `offset` metadata
+- [x] **MCP Server** — Model Context Protocol integration (`mansio[mcp]`)
+- [x] **Presence & Heartbeat** — agent online/offline status and live subscriptions
+- [x] **NATS Backend** — JetStream-based persistent storage
+- [x] **Maildir Backend** — filesystem-based storage
+- [x] **Compaction** — registry and cursor compaction for long-running instances
+- [x] **Remote Transport Reliability** — SSE reconnect (Last-Event-ID), WAL retry logging, slow-consumer drop notification
+
+### Planned
+
+- [ ] **Message TTL** — automatic expiry and cleanup
 - [ ] **Async API** — native async/await support
 - [ ] **Semantic memory recall** — vector embedding search
 - [ ] **Redis/AMQP backends** — distributed storage

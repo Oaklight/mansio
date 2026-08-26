@@ -819,7 +819,7 @@ class HttpFrontend:
                 msgs = [m for m in msgs if _agent_involved(auth_result, m.channel, m.sender)]
 
             total = await asyncio.to_thread(bus.message_count, channel)
-            has_more = (offset + len(msgs)) < total
+            has_more = len(msgs) == limit
 
             return {
                 "messages": [_msg_to_dict(m) for m in msgs],
@@ -1607,7 +1607,12 @@ def _drain_drop_counter(
     drop_lock: threading.Lock | None,
     drop_counter: list[int] | None,
 ) -> str:
-    """Return an SSE warning comment if events were dropped, else empty string."""
+    """Return an SSE warning comment if events were dropped, else empty string.
+
+    Note: the warning is emitted piggy-backed on the next live event,
+    not immediately when drops occur. If the stream goes quiet after
+    drops, the client is not notified until the next event arrives.
+    """
     if drop_lock is None or drop_counter is None:
         return ""
     with drop_lock:
