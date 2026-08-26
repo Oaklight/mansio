@@ -1,0 +1,20 @@
+{
+  "description": "Mansio message polling for Codex sessions",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "mansio",
+            "tool": "mansio_poll",
+            "input": { "channel": "inbox" },
+            "timeout": 10,
+            "statusMessage": "Checking mansio inbox"
+          }
+        ]
+      }
+    ]
+  }
+}

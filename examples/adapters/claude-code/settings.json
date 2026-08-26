@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "mansio": {
+      "command": "mansio",
+      "args": [
+        "mcp-serve",
+        "--url", "http://localhost:8742",
+        "--agent-id", "claude-code",
+        "--token", "mst-your-token-here"
+      ]
+    }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "mansio",
+            "tool": "mansio_poll",
+            "input": { "channel": "inbox" },
+            "timeout": 10,
+            "statusMessage": "Checking mansio inbox"
+          }
+        ]
+      }
+    ]
+  }
+}

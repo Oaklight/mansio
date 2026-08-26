@@ -1,0 +1,24 @@
+# Hermes config.yaml — mansio integration
+#
+# MCP skill for tool access + pulse job for periodic polling.
+
+skills:
+  mansio:
+    type: mcp
+    command: mansio
+    args:
+      - mcp-serve
+      - --url
+      - ${MANSIO_URL}
+      - --agent-id
+      - ${MANSIO_AGENT_ID}
+      - --token
+      - ${MANSIO_TOKEN}
+
+cron:
+  mansio-poll:
+    kind: pulse
+    every: 300
+    prompt: "Check mansio for new messages: use mansio_poll tool"
+    skills:
+      - mansio

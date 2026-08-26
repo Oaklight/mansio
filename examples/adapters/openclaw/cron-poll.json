@@ -1,0 +1,19 @@
+{
+  "name": "mansio-poll",
+  "description": "Poll mansio for new messages every 5 minutes",
+  "schedule": {
+    "kind": "every",
+    "everyMs": 300000
+  },
+  "sessionTarget": "isolated",
+  "payload": {
+    "kind": "agentTurn",
+    "message": "Check mansio for new messages. Use mansio_poll on channels 'inbox' and 'general'. If there are unread messages, summarize them briefly. If nothing new, respond with NO_REPLY.",
+    "timeoutSeconds": 30
+  },
+  "delivery": {
+    "mode": "announce",
+    "bestEffort": true
+  },
+  "enabled": true
+}
