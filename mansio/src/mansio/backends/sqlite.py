@@ -461,11 +461,8 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                 )
             else:
                 params.append(limit)
-                if offset:
-                    sql = f"SELECT * FROM messages WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?"
-                    params.append(offset)
-                else:
-                    sql = f"SELECT * FROM messages WHERE {where} ORDER BY id ASC LIMIT ?"
+                params.append(offset)
+                sql = f"SELECT * FROM messages WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?"
             cursor = self._conn.execute(sql, params)
             return [self._row_to_message(row) for row in cursor.fetchall()]
 

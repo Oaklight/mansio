@@ -812,7 +812,10 @@ class HttpFrontend:
                 msgs = [m for m in msgs if _agent_involved(auth_result, m.channel, m.sender)]
 
             total = await asyncio.to_thread(bus.message_count, channel)
-            has_more = (offset + len(msgs)) < total
+            # has_more uses len(msgs) == limit: reliable even when filters
+            # (msg_type, thread_id, after, auth) reduce the result set.
+            # total is unfiltered per-channel count — best-effort context.
+            has_more = len(msgs) == limit
 
             return {
                 "messages": [_msg_to_dict(m) for m in msgs],
