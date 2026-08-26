@@ -346,6 +346,9 @@ class MansioClient:
             List of subscription IDs (one per channel). Pass these to
             :meth:`unsubscribe` to stop listening.
 
+        The caller is responsible for calling ``injector.close()`` when
+        done to release any resources held by the injector.
+
         Example::
 
             from mansio_client.injectors import ClaudeCodeInjector
