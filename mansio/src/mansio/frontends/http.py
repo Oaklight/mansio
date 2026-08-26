@@ -408,10 +408,32 @@ def _parse_query_limit(raw: str | None, max_limit: int) -> int | tuple[dict, int
     return min(limit, max_limit)
 
 
-def _parse_query_params(request: Any, max_limit: int) -> dict:
-    """Extract and validate query parameters (channel, after, limit, order).
+def _parse_query_offset(raw: str | None) -> int | tuple[dict, int]:
+    """Parse and validate query offset parameter.
 
-    Returns dict with 'channel', 'after', 'limit', 'order' on success,
+    Returns int offset on success, or (error_dict, status) tuple.
+    """
+    if raw is None:
+        return 0
+    try:
+        offset = int(raw)
+    except ValueError:
+        return {
+            "error": "Bad Request",
+            "message": "'offset' must be an integer",
+        }, 400
+    if offset < 0:
+        return {
+            "error": "Bad Request",
+            "message": "'offset' must be non-negative",
+        }, 400
+    return offset
+
+
+def _parse_query_params(request: Any, max_limit: int) -> dict:
+    """Extract and validate query parameters (channel, after, limit, order, offset).
+
+    Returns dict with 'channel', 'after', 'limit', 'order', 'offset' on success,
     or dict with 'error' key and '_status' key on failure.
     """
     channel = (request.query_params.get("channel") or [None])[0]
@@ -431,6 +453,12 @@ def _parse_query_params(request: Any, max_limit: int) -> dict:
     if not isinstance(limit, int):
         return {"error": limit[0]["error"], "message": limit[0]["message"], "_status": 400}
 
+    offset = _parse_query_offset(
+        (request.query_params.get("offset") or [None])[0],
+    )
+    if not isinstance(offset, int):
+        return {"error": offset[0]["error"], "message": offset[0]["message"], "_status": 400}
+
     order = (request.query_params.get("order") or ["oldest"])[0]
     if order not in ("oldest", "newest"):
         return {
@@ -448,6 +476,7 @@ def _parse_query_params(request: Any, max_limit: int) -> dict:
         "msg_type": msg_type,
         "order": order,
         "thread_id": thread_id,
+        "offset": offset,
     }
 
 
@@ -765,6 +794,7 @@ class HttpFrontend:
                 status = qp.pop("_status", 400)
                 return qp, status
             channel, after, limit = qp["channel"], qp["after"], qp["limit"]
+            offset = qp.get("offset", 0)
 
             msgs = await asyncio.to_thread(
                 bus.query,
@@ -774,15 +804,22 @@ class HttpFrontend:
                 msg_type=qp.get("msg_type"),
                 order=qp.get("order", "oldest"),
                 thread_id=qp.get("thread_id"),
+                offset=offset,
             )
 
             auth_result = _auth_result_var.get()
             if isinstance(auth_result, str):
                 msgs = [m for m in msgs if _agent_involved(auth_result, m.channel, m.sender)]
 
+            total = await asyncio.to_thread(bus.message_count, channel)
+            has_more = (offset + len(msgs)) < total
+
             return {
                 "messages": [_msg_to_dict(m) for m in msgs],
                 "count": len(msgs),
+                "total": total,
+                "offset": offset,
+                "has_more": has_more,
             }
 
         @self._app.get("/v1/channels")

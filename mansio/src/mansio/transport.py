@@ -58,6 +58,8 @@ class Transport(Protocol):
         limit: int = 100,
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
+        thread_id: str | None = None,
+        offset: int = 0,
     ) -> list[Message]:
         """Query messages from a channel."""
         ...

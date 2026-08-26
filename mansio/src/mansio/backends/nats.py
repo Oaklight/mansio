@@ -439,6 +439,7 @@ class NATSBackend(Backend, Presenceable, Compactable):
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
         thread_id: str | None = None,
+        offset: int = 0,
     ) -> list[Message]:
         """Retrieve messages from a channel via JetStream.
 
@@ -449,6 +450,8 @@ class NATSBackend(Backend, Presenceable, Compactable):
             msg_type: If provided, only return messages of this type.
             order: ``"oldest"`` (default) or ``"newest"``.
                 Currently only ``"oldest"`` is implemented.
+            thread_id: If provided, only return messages in this thread.
+            offset: Number of messages to skip before returning results.
 
         Returns:
             Messages in chronological order (oldest first).
@@ -462,15 +465,17 @@ class NATSBackend(Backend, Presenceable, Compactable):
             )
         self._ensure_connected()
         subject = self._subject(channel)
-        # NATS JetStream doesn't support server-side thread_id filtering,
+        # NATS JetStream doesn't support server-side thread_id/offset filtering,
         # so we fetch more and filter client-side when needed.
-        fetch_limit = limit if thread_id is None else limit * 5
+        fetch_limit = limit + offset if thread_id is None else (limit + offset) * 5
         msgs = self._run_async(
             self._fetch_all(subject, limit=fetch_limit, after=after, msg_type=msg_type)
         )
         if thread_id is not None:
-            msgs = [m for m in msgs if m.thread_id == thread_id][:limit]
-        return msgs
+            msgs = [m for m in msgs if m.thread_id == thread_id]
+        if offset:
+            msgs = msgs[offset:]
+        return msgs[:limit]
 
     def list_channels(self) -> list[str]:
         """List all channels using JetStream stream info.
