@@ -316,6 +316,7 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
         thread_id: str | None = None,
+        offset: int = 0,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -327,6 +328,7 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
             order: ``"oldest"`` (default) returns from the beginning;
                 ``"newest"`` returns the last *limit* messages.
             thread_id: If provided, only return messages in this thread.
+            offset: Number of messages to skip before returning results.
 
         Returns:
             Messages in chronological order.
@@ -340,8 +342,10 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
         if thread_id is not None:
             messages = [m for m in messages if m.thread_id == thread_id]
         if order == "newest":
+            if offset:
+                messages = messages[: len(messages) - offset] if offset < len(messages) else []
             return messages[-limit:]
-        return messages[:limit]
+        return messages[offset : offset + limit]
 
     def list_channels(self) -> list[str]:
         """List all channels that have at least one message.

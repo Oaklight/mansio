@@ -205,6 +205,7 @@ class Bus:
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
         thread_id: str | None = None,
+        offset: int = 0,
         *,
         agent_id: str | None = None,
     ) -> list[Message]:
@@ -218,6 +219,7 @@ class Bus:
             order: ``"oldest"`` returns the first *limit* messages;
                 ``"newest"`` returns the last *limit* messages.
             thread_id: If provided, only return messages in this thread.
+            offset: Number of messages to skip before returning results.
             agent_id: If provided, enforce read ACL for this agent.
 
         Returns:
@@ -236,7 +238,20 @@ class Bus:
             msg_type=msg_type,
             order=order,
             thread_id=thread_id,
+            offset=offset,
         )
+
+    def message_count(self, channel: str | None = None) -> int:
+        """Return the number of stored messages.
+
+        Args:
+            channel: If provided, count only messages in this channel.
+                Otherwise count all messages across all channels.
+
+        Returns:
+            Message count.
+        """
+        return self._backend.message_count(channel)
 
     def subscribe(
         self,

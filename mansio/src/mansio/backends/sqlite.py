@@ -417,6 +417,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
         msg_type: str | None = None,
         order: Literal["oldest", "newest"] = "oldest",
         thread_id: str | None = None,
+        offset: int = 0,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -429,6 +430,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                 ``"newest"`` returns the last *limit* messages.  Both
                 return results in chronological (ascending ID) order.
             thread_id: If provided, only return messages in this thread.
+            offset: Number of messages to skip before returning results.
 
         Returns:
             Messages in chronological order (oldest first).
@@ -446,15 +448,24 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                 clauses.append("thread_id = ?")
                 params.append(thread_id)
             where = " AND ".join(clauses)
-            params.append(limit)
             if order == "newest":
+                # For newest+offset: skip `offset` most-recent rows,
+                # then return next `limit` in chronological order.
+                params.append(limit)
+                params.append(offset)
                 sql = (
                     f"SELECT * FROM ("
-                    f"SELECT * FROM messages WHERE {where} ORDER BY id DESC LIMIT ?"
+                    f"SELECT * FROM messages WHERE {where} "
+                    f"ORDER BY id DESC LIMIT ? OFFSET ?"
                     f") sub ORDER BY id ASC"
                 )
             else:
-                sql = f"SELECT * FROM messages WHERE {where} ORDER BY id ASC LIMIT ?"
+                params.append(limit)
+                if offset:
+                    sql = f"SELECT * FROM messages WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?"
+                    params.append(offset)
+                else:
+                    sql = f"SELECT * FROM messages WHERE {where} ORDER BY id ASC LIMIT ?"
             cursor = self._conn.execute(sql, params)
             return [self._row_to_message(row) for row in cursor.fetchall()]
 
