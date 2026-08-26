@@ -33,6 +33,7 @@ import contextlib
 import contextvars
 import json
 import re
+import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -1412,10 +1413,21 @@ class HttpFrontend:
             # Parse Last-Event-ID for cursor-based resume
             last_event_id = request.headers.get("last-event-id", "").strip() or None
 
-            q, sub_ids = _setup_sse_subscriptions(bus, ch_list, auth_result)
+            q, sub_ids, drop_lock, drop_counter = _setup_sse_subscriptions(
+                bus, ch_list, auth_result
+            )
 
             return StreamingResponse(
-                _sse_event_generator(q, sub_ids, bus, ch_list, auth_result, last_event_id),
+                _sse_event_generator(
+                    q,
+                    sub_ids,
+                    bus,
+                    ch_list,
+                    auth_result,
+                    last_event_id,
+                    drop_lock,
+                    drop_counter,
+                ),
                 content_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -1517,16 +1529,22 @@ def _check_subscribe_access(auth_result: Any, ch_list: list[str]) -> tuple[dict,
 
 def _setup_sse_subscriptions(
     bus: Bus, ch_list: list[str], auth_result: Any
-) -> tuple[asyncio.Queue[str | None], list[str]]:
-    """Subscribe to bus channels and return (queue, subscription_ids).
+) -> tuple[asyncio.Queue[str | None], list[str], threading.Lock, list[int]]:
+    """Subscribe to bus channels and return (queue, subscription_ids, drop_lock, drop_counter).
 
     Bus callbacks are sync and may run on any thread (the publisher's
     thread). We use ``loop.call_soon_threadsafe`` to safely enqueue
     data into the asyncio.Queue from non-event-loop threads.
+
+    Returns a ``[dropped_count]`` list (mutable single-element) and
+    a lock protecting it, so the async generator can report and reset
+    the counter.
     """
     loop = asyncio.get_running_loop()
     q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=256)
     sub_ids: list[str] = []
+    drop_lock = threading.Lock()
+    drop_counter: list[int] = [0]  # mutable single-element for cross-thread access
 
     for ch in ch_list:
 
@@ -1540,6 +1558,8 @@ def _setup_sse_subscriptions(
                         q.get_nowait()
                     with contextlib.suppress(asyncio.QueueFull):
                         q.put_nowait(data)
+                    with drop_lock:
+                        drop_counter[0] += 1
 
             def _cb(msg: Message) -> None:
                 if isinstance(auth_result, str) and not _agent_involved(
@@ -1556,7 +1576,7 @@ def _setup_sse_subscriptions(
         sid = bus.subscribe(ch, _make_callback(ch))
         sub_ids.append(sid)
 
-    return q, sub_ids
+    return q, sub_ids, drop_lock, drop_counter
 
 
 # Max messages to replay per channel on reconnect.  For a client
@@ -1584,6 +1604,8 @@ async def _sse_event_generator(
     ch_list: list[str],
     auth_result: Any,
     last_event_id: str | None,
+    drop_lock: threading.Lock | None = None,
+    drop_counter: list[int] | None = None,
 ) -> Any:
     """Async generator that yields SSE events from the queue.
 
@@ -1591,6 +1613,9 @@ async def _sse_event_generator(
     missed messages from the bus before switching to live streaming.
     Each event includes an ``id:`` field (the message ID) so the
     W3C SSE client can resume on reconnect.
+
+    When events are dropped due to slow consumption, a warning SSE
+    comment is emitted so the client knows to re-query for any gaps.
     """
     try:
         yield ": connected\n\n"
@@ -1634,6 +1659,14 @@ async def _sse_event_generator(
             except (json.JSONDecodeError, AttributeError):
                 event_id = ""
             yield _format_sse_event(data, event_id)
+
+            # Notify client about dropped events (slow consumer)
+            if drop_lock is not None and drop_counter is not None:
+                with drop_lock:
+                    dropped = drop_counter[0]
+                    drop_counter[0] = 0
+                if dropped:
+                    yield f": warning: {dropped} event(s) dropped (slow consumer), re-query for gaps\n\n"
     finally:
         for sid in sub_ids:
             bus.unsubscribe(sid)
