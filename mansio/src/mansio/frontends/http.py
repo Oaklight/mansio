@@ -34,6 +34,7 @@ import contextvars
 import json
 import re
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -47,6 +48,21 @@ if TYPE_CHECKING:
 
 # Paths that skip token auth
 _PUBLIC_PATHS = frozenset({"/health", "/v1/auth/check"})
+
+
+@dataclass
+class _SSESession:
+    """Bundles per-connection SSE state to reduce parameter sprawl."""
+
+    queue: asyncio.Queue[str | None]
+    sub_ids: list[str]
+    bus: Any
+    channels: list[str]
+    auth_result: Any
+    last_event_id: str | None = None
+    drop_lock: threading.Lock | None = None
+    drop_counter: list[int] | None = None
+
 
 # Channel naming rules:
 # - User channels: 3-64 chars, must contain a letter, start with [a-z],
@@ -1425,14 +1441,16 @@ class HttpFrontend:
 
             return StreamingResponse(
                 _sse_event_generator(
-                    q,
-                    sub_ids,
-                    bus,
-                    ch_list,
-                    auth_result,
-                    last_event_id,
-                    drop_lock,
-                    drop_counter,
+                    _SSESession(
+                        queue=q,
+                        sub_ids=sub_ids,
+                        bus=bus,
+                        channels=ch_list,
+                        auth_result=auth_result,
+                        last_event_id=last_event_id,
+                        drop_lock=drop_lock,
+                        drop_counter=drop_counter,
+                    )
                 ),
                 content_type="text/event-stream",
                 headers={
@@ -1623,16 +1641,7 @@ def _drain_drop_counter(
     return ""
 
 
-async def _sse_event_generator(
-    q: asyncio.Queue[str | None],
-    sub_ids: list[str],
-    bus: Bus,
-    ch_list: list[str],
-    auth_result: Any,
-    last_event_id: str | None,
-    drop_lock: threading.Lock | None = None,
-    drop_counter: list[int] | None = None,
-) -> Any:
+async def _sse_event_generator(session: _SSESession) -> Any:
     """Async generator that yields SSE events from the queue.
 
     If *last_event_id* is set (via ``Last-Event-ID`` header), replays
@@ -1647,14 +1656,16 @@ async def _sse_event_generator(
         yield ": connected\n\n"
 
         # ── Replay missed messages on reconnect ──────────────────
-        if last_event_id:
-            for ch in ch_list:
+        if session.last_event_id:
+            for ch in session.channels:
                 missed = await asyncio.to_thread(
-                    bus.query, ch, after=last_event_id, limit=_SSE_REPLAY_LIMIT
+                    session.bus.query, ch, after=session.last_event_id, limit=_SSE_REPLAY_LIMIT
                 )
-                if isinstance(auth_result, str):
+                if isinstance(session.auth_result, str):
                     missed = [
-                        m for m in missed if _agent_involved(auth_result, m.channel, m.sender)
+                        m
+                        for m in missed
+                        if _agent_involved(session.auth_result, m.channel, m.sender)
                     ]
                 for m in missed:
                     data = json.dumps(
@@ -1672,7 +1683,7 @@ async def _sse_event_generator(
         # ── Live stream ──────────────────────────────────────────
         while True:
             try:
-                data = await asyncio.wait_for(q.get(), timeout=15)
+                data = await asyncio.wait_for(session.queue.get(), timeout=15)
             except asyncio.TimeoutError:
                 yield ": keepalive\n\n"
                 continue
@@ -1687,9 +1698,9 @@ async def _sse_event_generator(
             yield _format_sse_event(data, event_id)
 
             # Notify client about dropped events (slow consumer)
-            warning = _drain_drop_counter(drop_lock, drop_counter)
+            warning = _drain_drop_counter(session.drop_lock, session.drop_counter)
             if warning:
                 yield warning
     finally:
-        for sid in sub_ids:
-            bus.unsubscribe(sid)
+        for sid in session.sub_ids:
+            session.bus.unsubscribe(sid)
