@@ -55,6 +55,11 @@ class ClaimResult:
     claimed_at: str
     lease_until: str | None = None
 
+    @property
+    def id(self) -> str:
+        """Shortcut for ``self.message.id``."""
+        return self.message.id
+
 
 @dataclass(frozen=True, slots=True)
 class ChannelMeta:

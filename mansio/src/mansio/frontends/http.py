@@ -1124,7 +1124,7 @@ class HttpFrontend:
 
         @self._app.post("/v1/presence/heartbeat")
         async def presence_heartbeat(request: Request) -> dict | tuple:
-            body = request.json
+            body = request.json()
             if not body or not isinstance(body, dict):
                 return {"error": "JSON body required"}, 400
             agent_id = body.get("agent_id", "").strip()

@@ -135,6 +135,7 @@ class MansioClient:
         msg_type: str = "chat",
         metadata: dict | None = None,
         parent_id: str | None = None,
+        intent: str | None = None,
     ) -> str:
         return self._transport.publish(
             channel,
@@ -143,6 +144,7 @@ class MansioClient:
             content,
             metadata,
             parent_id=parent_id,
+            intent=intent,
         )
 
     def channel_read(
