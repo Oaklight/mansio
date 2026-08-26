@@ -52,12 +52,17 @@ class FederationLink:
         local_instance: str = "local",
         remote_instance: str = "remote",
     ) -> None:
+        if local_instance == remote_instance:
+            raise ValueError(
+                f"local_instance and remote_instance must differ, "
+                f"got {local_instance!r} for both"
+            )
         self._local = local
         self._remote = remote
         self._local_instance = local_instance
         self._remote_instance = remote_instance
 
-        # channel -> {"mode": str, "sub_ids": list[str]}
+        # channel -> {"mode": str, "subs": list[tuple[str, MansioClient]]}
         self._replications: dict[str, dict] = {}
         self._lock = threading.Lock()
 
@@ -106,7 +111,9 @@ class FederationLink:
                     )
 
             for ch in channels:
-                sub_ids: list[str] = []
+                # Track (sub_id, owning_client) tuples so we
+                # unsubscribe from the correct client on stop.
+                subs: list[tuple[str, MansioClient]] = []
 
                 if mode in ("bidirectional", "pull"):
                     # remote → local
@@ -117,7 +124,7 @@ class FederationLink:
                             source_instance=self._remote_instance,
                         ),
                     )
-                    sub_ids.append(sub_id)
+                    subs.append((sub_id, self._remote))
 
                 if mode in ("bidirectional", "push"):
                     # local → remote
@@ -128,9 +135,9 @@ class FederationLink:
                             source_instance=self._local_instance,
                         ),
                     )
-                    sub_ids.append(sub_id)
+                    subs.append((sub_id, self._local))
 
-                self._replications[ch] = {"mode": mode, "sub_ids": sub_ids}
+                self._replications[ch] = {"mode": mode, "subs": subs}
 
     def stop_replication(self, channels: list[str] | None = None) -> None:
         """Stop replication for the given channels, or all if None.
@@ -144,10 +151,11 @@ class FederationLink:
                 info = self._replications.pop(ch, None)
                 if info is None:
                     continue
-                for sub_id in info["sub_ids"]:
-                    # Determine which client owns this subscription
-                    # and unsubscribe from the correct one
-                    self._safe_unsubscribe(sub_id)
+                for sub_id, client in info["subs"]:
+                    try:
+                        client.unsubscribe(sub_id)
+                    except Exception:
+                        pass
 
     @property
     def replicating(self) -> dict[str, str]:
@@ -228,7 +236,13 @@ class FederationLink:
     ):
         """Create a callback that bridges messages to the target instance.
 
-        The callback skips messages that are already bridged (anti-loop).
+        The callback skips messages that already carry ``bridged=True``
+        in their metadata (anti-loop).  This boolean approach prevents
+        infinite loops between two instances, but intentionally does
+        **not** support multi-hop mesh routing (A → B → C): a message
+        bridged from A to B will not be forwarded onward to C.  Mesh
+        topologies require a ``visited_instances`` list instead of a
+        boolean; this is deferred to Phase 2.
         """
 
         def _bridge(msg: Message) -> None:
@@ -254,14 +268,3 @@ class FederationLink:
             )
 
         return _bridge
-
-    def _safe_unsubscribe(self, sub_id: str) -> None:
-        """Unsubscribe from both clients (only one will have it)."""
-        try:
-            self._local.unsubscribe(sub_id)
-        except Exception:
-            pass
-        try:
-            self._remote.unsubscribe(sub_id)
-        except Exception:
-            pass

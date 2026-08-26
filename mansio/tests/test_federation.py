@@ -321,6 +321,20 @@ class TestProperties:
         with pytest.raises(ValueError, match="already being replicated"):
             link.replicate(["dup-ch"], mode="push")
 
+    def test_self_loop_raises(self, two_servers) -> None:
+        url_a, url_b = two_servers
+        client_a = MansioClient(url_a, "loop-a")
+        client_b = MansioClient(url_b, "loop-b")
+        with pytest.raises(ValueError, match="must differ"):
+            FederationLink(
+                client_a,
+                client_b,
+                local_instance="same",
+                remote_instance="same",
+            )
+        client_a.close()
+        client_b.close()
+
     def test_instance_ids(self, linked) -> None:
         link, client_a, client_b = linked
         assert link.local_instance == "instance-a"
