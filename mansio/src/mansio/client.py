@@ -301,6 +301,7 @@ class MansioClient:
         inst._agent_id = agent_id
         inst._display_name = display_name or agent_id
         inst._secret = secret
+        inst._token = None
         inst._cursors = {}
         inst._bus = None
         inst._owns_bus = False
@@ -376,6 +377,9 @@ class MansioClient:
         content: str,
         msg_type: str = "chat",
         metadata: dict | None = None,
+        *,
+        parent_id: str | None = None,
+        intent: str | None = None,
     ) -> str:
         """Send a message to a channel.
 
@@ -384,11 +388,21 @@ class MansioClient:
             content: Message content (text or JSON string).
             msg_type: Message type. Defaults to "chat".
             metadata: Optional extra fields.
+            parent_id: Optional parent message ID for threading.
+            intent: Optional intent label (e.g. "request", "response").
 
         Returns:
             The message ID.
         """
-        return self._transport.publish(channel, self._agent_id, msg_type, content, metadata)
+        return self._transport.publish(
+            channel,
+            self._agent_id,
+            msg_type,
+            content,
+            metadata,
+            parent_id=parent_id,
+            intent=intent,
+        )
 
     def channel_read(
         self,
