@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from mansio_client.types import AgentPresence, Message
 
-from mansio.mcp import (
+from mansio_client.mcp import (
     _TOOLS,
     _call_tool,
     _handle_request,
@@ -371,7 +371,7 @@ class TestToolDefinitions(unittest.TestCase):
 class TestServeLoop(unittest.TestCase):
     """Integration test for the stdio serve loop."""
 
-    @patch("mansio.mcp.MansioClient")
+    @patch("mansio_client.mcp.MansioClient")
     def test_serve_processes_lines(self, mock_cls: MagicMock) -> None:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
@@ -399,7 +399,7 @@ class TestServeLoop(unittest.TestCase):
 
         mock_client.close.assert_called_once()
 
-    @patch("mansio.mcp.MansioClient")
+    @patch("mansio_client.mcp.MansioClient")
     def test_serve_handles_parse_error(self, mock_cls: MagicMock) -> None:
         mock_cls.return_value = MagicMock()
 

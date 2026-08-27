@@ -450,9 +450,7 @@ class DigestAuth(Auth):
         """Not usable without a server challenge."""
         raise NotImplementedError("DigestAuth requires a server challenge")
 
-    def auth_headers_from_challenge(
-        self, method: str, path: str, challenge: str
-    ) -> dict[str, str]:
+    def auth_headers_from_challenge(self, method: str, path: str, challenge: str) -> dict[str, str]:
         """Compute Digest auth headers from a WWW-Authenticate challenge.
 
         Args:
@@ -483,9 +481,7 @@ class DigestAuth(Auth):
         ha2 = hash_fn(f"{method}:{path}".encode()).hexdigest()
 
         if qop == "auth":
-            response = hash_fn(
-                f"{ha1}:{nonce}:{nc_hex}:{cnonce}:{qop}:{ha2}".encode()
-            ).hexdigest()
+            response = hash_fn(f"{ha1}:{nonce}:{nc_hex}:{cnonce}:{qop}:{ha2}".encode()).hexdigest()
         else:
             response = hash_fn(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
 
@@ -647,9 +643,7 @@ class StreamingResponse:
         obj.headers = headers
         obj.url = url
         obj._encoding = _guess_encoding_from_headers(headers)
-        obj._decompressor = (
-            _make_decompressor(content_encoding) if content_encoding else None
-        )
+        obj._decompressor = _make_decompressor(content_encoding) if content_encoding else None
         obj._sync_resp = resp
         obj._sync_conn = conn
         obj._async_reader = None
@@ -679,9 +673,7 @@ class StreamingResponse:
         obj.headers = headers
         obj.url = url
         obj._encoding = _guess_encoding_from_headers(headers)
-        obj._decompressor = (
-            _make_decompressor(content_encoding) if content_encoding else None
-        )
+        obj._decompressor = _make_decompressor(content_encoding) if content_encoding else None
         obj._sync_resp = None
         obj._sync_conn = None
         obj._async_reader = reader
@@ -830,13 +822,9 @@ class StreamingResponse:
                 break
             chunk_size = int(size_str, 16)
             if chunk_size == 0:
-                await asyncio.wait_for(
-                    reader.readline(), timeout=timeout
-                )  # trailing \r\n
+                await asyncio.wait_for(reader.readline(), timeout=timeout)  # trailing \r\n
                 break
-            data = await asyncio.wait_for(
-                reader.readexactly(chunk_size), timeout=timeout
-            )
+            data = await asyncio.wait_for(reader.readexactly(chunk_size), timeout=timeout)
             await asyncio.wait_for(reader.readline(), timeout=timeout)  # trailing \r\n
             yield data
 
@@ -1263,9 +1251,7 @@ def _socks5_handshake_sync(
     # Phase 2: username/password auth (RFC 1929)
     if method == _SOCKS5_METHOD_USERPASS:
         if not username or not password:
-            raise Socks5Error(
-                "SOCKS5 proxy requires authentication but no credentials provided"
-            )
+            raise Socks5Error("SOCKS5 proxy requires authentication but no credentials provided")
         uname = username.encode()
         passwd = password.encode()
         sock.sendall(
@@ -1283,9 +1269,7 @@ def _socks5_handshake_sync(
     if len(host_bytes) > 255:
         raise Socks5Error(f"SOCKS5 target hostname too long: {len(host_bytes)} bytes")
     sock.sendall(
-        struct.pack(
-            "BBBB", _SOCKS5_VER, _SOCKS5_CMD_CONNECT, 0x00, _SOCKS5_ATYPE_DOMAIN
-        )
+        struct.pack("BBBB", _SOCKS5_VER, _SOCKS5_CMD_CONNECT, 0x00, _SOCKS5_ATYPE_DOMAIN)
         + struct.pack("B", len(host_bytes))
         + host_bytes
         + struct.pack("!H", port)
@@ -1360,13 +1344,9 @@ async def _socks5_handshake_async(
         # Phase 3: connect request
         host_bytes = host.encode()
         if len(host_bytes) > 255:
-            raise Socks5Error(
-                f"SOCKS5 target hostname too long: {len(host_bytes)} bytes"
-            )
+            raise Socks5Error(f"SOCKS5 target hostname too long: {len(host_bytes)} bytes")
         writer.write(
-            struct.pack(
-                "BBBB", _SOCKS5_VER, _SOCKS5_CMD_CONNECT, 0x00, _SOCKS5_ATYPE_DOMAIN
-            )
+            struct.pack("BBBB", _SOCKS5_VER, _SOCKS5_CMD_CONNECT, 0x00, _SOCKS5_ATYPE_DOMAIN)
             + struct.pack("B", len(host_bytes))
             + host_bytes
             + struct.pack("!H", port)
@@ -1404,9 +1384,7 @@ def _build_url(url: str, params: dict[str, Any] | None = None) -> str:
     if not params:
         return url
     sep = "&" if "?" in url else "?"
-    encoded = urlencode(
-        {k: v for k, v in params.items() if v is not None}, quote_via=quote
-    )
+    encoded = urlencode({k: v for k, v in params.items() if v is not None}, quote_via=quote)
     return f"{url}{sep}{encoded}"
 
 
@@ -1425,9 +1403,7 @@ def _parse_url(url: str) -> tuple[str, str, int, str, bool]:
 # -- Shared request preparation helpers --
 
 
-def _headers_set_default(
-    req_headers: CaseInsensitiveDict, key: str, value: str
-) -> None:
+def _headers_set_default(req_headers: CaseInsensitiveDict, key: str, value: str) -> None:
     """Set *key*/*value* only when the key is not already present.
 
     With ``CaseInsensitiveDict``, ``setdefault`` already handles case
@@ -1593,9 +1569,7 @@ def _sync_connect_via_proxy(
     if not is_https:
         conn = http.client.HTTPConnection(proxy_host, proxy_port, timeout=timeout)
         if proxy_user and proxy_pass:
-            req_headers["Proxy-Authorization"] = _proxy_auth_header(
-                proxy_user, proxy_pass
-            )
+            req_headers["Proxy-Authorization"] = _proxy_auth_header(proxy_user, proxy_pass)
         # For HTTP proxies, the full URL is used as the request path
         return conn, url
 
@@ -1603,9 +1577,7 @@ def _sync_connect_via_proxy(
     tunnel_conn = http.client.HTTPConnection(proxy_host, proxy_port, timeout=timeout)
     connect_headers: dict[str, str] = {"Host": f"{host}:{port}"}
     if proxy_user and proxy_pass:
-        connect_headers["Proxy-Authorization"] = _proxy_auth_header(
-            proxy_user, proxy_pass
-        )
+        connect_headers["Proxy-Authorization"] = _proxy_auth_header(proxy_user, proxy_pass)
     tunnel_conn.request("CONNECT", f"{host}:{port}", headers=connect_headers)
     tunnel_resp = tunnel_conn.getresponse()
     if tunnel_resp.status != 200:
@@ -1677,9 +1649,7 @@ def _sync_acquire_connection(
     """
     if proxy:
         if _is_socks_proxy(proxy):
-            return _sync_connect_via_socks5(
-                host, port, path, is_https, timeout, verify, proxy
-            )
+            return _sync_connect_via_socks5(host, port, path, is_https, timeout, verify, proxy)
         return _sync_connect_via_proxy(
             host, port, path, is_https, timeout, verify, proxy, req_headers, url
         )
@@ -1723,12 +1693,7 @@ def _sync_release_or_close(
     """
     if not close_conn:
         return
-    if (
-        _pool
-        and not proxy
-        and not stream
-        and resp_headers.get("connection", "").lower() != "close"
-    ):
+    if _pool and not proxy and not stream and resp_headers.get("connection", "").lower() != "close":
         _pool.release(host, port, is_https, conn)
     else:
         conn.close()
@@ -1866,14 +1831,10 @@ def _sync_request(
                     redirects += 1
                     continue
 
-                if _should_attempt_digest(
-                    auth_obj, status, resp_headers, _digest_attempted
-                ):
+                if _should_attempt_digest(auth_obj, status, resp_headers, _digest_attempted):
                     resp.read()
                     www_auth = resp_headers["www-authenticate"]
-                    req_headers.update(
-                        auth_obj.auth_headers_from_challenge(method, path, www_auth)
-                    )
+                    req_headers.update(auth_obj.auth_headers_from_challenge(method, path, www_auth))
                     _digest_attempted = True
                     conn.close()
                     continue
@@ -2034,9 +1995,7 @@ async def _async_connect_via_proxy_tunnel(
     connect_line = f"CONNECT {host}:{port} HTTP/1.1\r\n"
     connect_headers = f"Host: {host}:{port}\r\n"
     if proxy_user and proxy_pass:
-        connect_headers += (
-            f"Proxy-Authorization: {_proxy_auth_header(proxy_user, proxy_pass)}\r\n"
-        )
+        connect_headers += f"Proxy-Authorization: {_proxy_auth_header(proxy_user, proxy_pass)}\r\n"
     connect_headers += "\r\n"
     proxy_writer.write((connect_line + connect_headers).encode("latin-1"))
     await asyncio.wait_for(proxy_writer.drain(), timeout=timeout)
@@ -2083,9 +2042,7 @@ async def _async_connect_via_socks5(
         timeout=timeout,
     )
     try:
-        await _socks5_handshake_async(
-            reader, writer, host, port, timeout, proxy_user, proxy_pass
-        )
+        await _socks5_handshake_async(reader, writer, host, port, timeout, proxy_user, proxy_pass)
     except Exception:
         writer.close()
         try:
@@ -2139,9 +2096,7 @@ async def _async_acquire_connection(
                     timeout=timeout,
                 )
                 if proxy_user and proxy_pass:
-                    req_headers["Proxy-Authorization"] = _proxy_auth_header(
-                        proxy_user, proxy_pass
-                    )
+                    req_headers["Proxy-Authorization"] = _proxy_auth_header(proxy_user, proxy_pass)
                 return reader, writer, url
             reader, writer = await _async_connect_via_proxy_tunnel(
                 host, port, timeout, verify, proxy
@@ -2231,12 +2186,7 @@ async def _async_release_or_close(
     """
     if not close_writer:
         return
-    if (
-        _pool
-        and not proxy
-        and not stream
-        and resp_headers.get("connection", "").lower() != "close"
-    ):
+    if _pool and not proxy and not stream and resp_headers.get("connection", "").lower() != "close":
         await _pool.release(host, port, is_https, reader, writer)
     else:
         writer.close()
@@ -2364,14 +2314,10 @@ async def _async_request(
                 redirects += 1
                 continue
 
-            if _should_attempt_digest(
-                auth_obj, status, resp_headers, _digest_attempted
-            ):
+            if _should_attempt_digest(auth_obj, status, resp_headers, _digest_attempted):
                 await _async_read_body(reader, resp_headers, timeout)
                 www_auth = resp_headers["www-authenticate"]
-                req_headers.update(
-                    auth_obj.auth_headers_from_challenge(method, path, www_auth)
-                )
+                req_headers.update(auth_obj.auth_headers_from_challenge(method, path, www_auth))
                 _digest_attempted = True
                 await _async_close_writer_silent(writer)
                 close_writer = False
@@ -2507,10 +2453,7 @@ def _encode_multipart(
     if data:
         for name, value in data.items():
             part = (
-                f"--{boundary}\r\n"
-                f'Content-Disposition: form-data; name="{name}"\r\n'
-                f"\r\n"
-                f"{value}\r\n"
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'
             )
             parts.append(part.encode("utf-8"))
 
