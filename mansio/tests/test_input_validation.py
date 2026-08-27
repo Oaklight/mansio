@@ -11,9 +11,8 @@ Covers:
 from __future__ import annotations
 
 import pytest
-
-from mansio import MansioClient
-from mansio.transport_http import MansioAPIError
+from mansio_client import MansioClient
+from mansio_client.transport import MansioAPIError
 
 
 class TestMalformedBody:

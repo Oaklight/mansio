@@ -251,12 +251,12 @@ class TestLeaseTimeout:
 
 
 class TestClientQueueAPI:
-    def test_client_queue_publish_claim_ack(self):
-        from mansio import MansioClient
+    def test_client_queue_publish_claim_ack(self, mansio_server):
+        from .conftest import make_client
 
-        bus = Bus(backend=MemoryBackend())
-        admin = MansioClient(bus, "admin-bot")
-        worker = MansioClient(bus, "worker-bot")
+        url, store, bus, server = mansio_server
+        admin = make_client(url, store, "admin-bot")
+        worker = make_client(url, store, "worker-bot")
 
         admin.queue_publish("task-queue", "build the thing")
         result = worker.queue_claim("task-queue")
@@ -267,6 +267,8 @@ class TestClientQueueAPI:
         acked = worker.queue_ack(result.message.id)
         assert acked is not None
         assert acked.status == "completed"
+        admin.close()
+        worker.close()
 
         assert worker.queue_claim("task-queue") is None
 

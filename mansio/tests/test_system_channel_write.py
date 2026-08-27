@@ -137,8 +137,8 @@ class TestSystemAgentsChannelWrite:
         )
         http.close()
 
-    def test_regular_agent_can_still_write_to_registry(self, auth_server) -> None:
-        """Scoped agent should still write to _system:registry."""
+    def test_regular_agent_cannot_write_to_registry(self, auth_server) -> None:
+        """Scoped agent cannot write to _system:registry (removed)."""
         from mansio._vendor.httpclient import Client as HttpClient
 
         url, store = auth_server
@@ -155,7 +155,7 @@ class TestSystemAgentsChannelWrite:
                 "payload": "registering",
             },
         )
-        assert resp.status_code == 200, (
-            f"Expected 200 for agent writing to _system:registry, got {resp.status_code}"
+        assert resp.status_code == 403, (
+            f"Expected 403 for agent writing to _system:registry, got {resp.status_code}"
         )
         http.close()

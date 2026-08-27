@@ -198,7 +198,7 @@ def detail_server_url():
 class TestHTTPChannelListDetail:
     def test_backward_compat_no_detail(self, detail_server_url: str) -> None:
         """Without detail param, returns list of strings."""
-        from mansio import MansioClient
+        from mansio_client import MansioClient
 
         with MansioClient(detail_server_url, "test-agent") as client:
             channels = client.channel_list()
@@ -208,7 +208,7 @@ class TestHTTPChannelListDetail:
 
     def test_detail_true_returns_dicts(self, detail_server_url: str) -> None:
         """With detail=True, returns list of dicts with metadata."""
-        from mansio import MansioClient
+        from mansio_client import MansioClient
 
         with MansioClient(detail_server_url, "test-agent") as client:
             channels: list[dict] = client.channel_list(detail=True)  # type: ignore[assignment]
@@ -226,7 +226,7 @@ class TestHTTPChannelListDetail:
 
     def test_detail_false_returns_strings(self, detail_server_url: str) -> None:
         """Explicit detail=False returns strings."""
-        from mansio import MansioClient
+        from mansio_client import MansioClient
 
         with MansioClient(detail_server_url, "test-agent") as client:
             channels = client.channel_list(detail=False)

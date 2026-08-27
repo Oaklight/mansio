@@ -61,8 +61,6 @@ class Bus:
     Args:
         backend: Message backend for transport and persistence.
             Defaults to in-memory SQLite.
-        require_auth: If True, MansioClient must authenticate with
-            a registered secret. Defaults to False.
         compaction_policy: Callable invoked after each publish with
             ``(backend, channel)``. Defaults to
             :func:`system_channel_policy`.
@@ -77,11 +75,9 @@ class Bus:
         self,
         backend: Backend | None = None,
         *,
-        require_auth: bool = False,
         compaction_policy: CompactionPolicy | None = None,
     ) -> None:
         self._backend = backend or SQLiteBackend()
-        self._require_auth = require_auth
         self._compaction_policy = compaction_policy or system_channel_policy
         self._subs: dict[str, dict[str, Callable[[Message], None]]] = defaultdict(dict)
         self._ensured_channels: set[str] = set()
@@ -91,11 +87,6 @@ class Bus:
     def backend(self) -> Backend:
         """The underlying message backend."""
         return self._backend
-
-    @property
-    def require_auth(self) -> bool:
-        """Whether this bus requires client authentication."""
-        return self._require_auth
 
     @property
     def metrics(self) -> MetricsCollector:

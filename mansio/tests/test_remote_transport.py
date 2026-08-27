@@ -15,8 +15,9 @@ import threading
 import time
 
 import pytest
+from mansio_client import MansioClient
 
-from mansio import Bus, MansioClient, MansioServer, MemoryBackend
+from mansio import Bus, MansioServer, MemoryBackend
 from mansio.frontends import HttpFrontend
 from mansio.transport_http import HttpTransport
 
@@ -90,11 +91,6 @@ class TestHttpTransport:
         assert "alpha" in channels
         assert "beta" in channels
 
-        transport.close()
-
-    def test_require_auth(self, server_url: str) -> None:
-        transport = HttpTransport(server_url, agent_id="test-agent")
-        assert transport.require_auth is False
         transport.close()
 
     def test_queue_status_roundtrip(self, server_url: str) -> None:
@@ -364,7 +360,7 @@ class TestChannelNameValidation:
 
     def test_65_char_channel_rejected(self, server_url: str) -> None:
         """A 65-char channel name exceeds the max and should be rejected."""
-        from mansio.transport_http import MansioAPIError
+        from mansio_client.transport import MansioAPIError
 
         client = MansioClient(server_url, "validator")
         with pytest.raises(MansioAPIError) as exc_info:
@@ -374,7 +370,7 @@ class TestChannelNameValidation:
 
     def test_trailing_underscore_rejected(self, server_url: str) -> None:
         """Trailing underscore should be rejected like other trailing specials."""
-        from mansio.transport_http import MansioAPIError
+        from mansio_client.transport import MansioAPIError
 
         client = MansioClient(server_url, "validator")
         with pytest.raises(MansioAPIError) as exc_info:
@@ -384,7 +380,7 @@ class TestChannelNameValidation:
 
     def test_trailing_hyphen_rejected(self, server_url: str) -> None:
         """Trailing hyphen should be rejected."""
-        from mansio.transport_http import MansioAPIError
+        from mansio_client.transport import MansioAPIError
 
         client = MansioClient(server_url, "validator")
         with pytest.raises(MansioAPIError) as exc_info:
@@ -394,7 +390,7 @@ class TestChannelNameValidation:
 
     def test_trailing_dot_rejected(self, server_url: str) -> None:
         """Trailing dot should be rejected."""
-        from mansio.transport_http import MansioAPIError
+        from mansio_client.transport import MansioAPIError
 
         client = MansioClient(server_url, "validator")
         with pytest.raises(MansioAPIError) as exc_info:
@@ -413,7 +409,7 @@ class TestChannelNameValidation:
 
     def test_min_length_enforced(self, server_url: str) -> None:
         """Channel names shorter than 3 chars should be rejected."""
-        from mansio.transport_http import MansioAPIError
+        from mansio_client.transport import MansioAPIError
 
         client = MansioClient(server_url, "validator")
         for name in ["a", "ab"]:
@@ -428,7 +424,7 @@ class TestInputValidation:
 
     def test_empty_payload_rejected(self, server_url: str) -> None:
         """Empty string payload should be rejected."""
-        from mansio.transport_http import MansioAPIError
+        from mansio_client.transport import MansioAPIError
 
         client = MansioClient(server_url, "validator")
         with pytest.raises(MansioAPIError) as exc_info:
@@ -438,7 +434,7 @@ class TestInputValidation:
 
     def test_whitespace_payload_rejected(self, server_url: str) -> None:
         """Whitespace-only payload should be rejected."""
-        from mansio.transport_http import MansioAPIError
+        from mansio_client.transport import MansioAPIError
 
         client = MansioClient(server_url, "validator")
         with pytest.raises(MansioAPIError) as exc_info:
@@ -456,7 +452,7 @@ class TestInputValidation:
 
     def test_negative_limit_rejected(self, server_url: str) -> None:
         """Negative limit in channel_read should be rejected."""
-        from mansio.transport_http import MansioAPIError
+        from mansio_client.transport import MansioAPIError
 
         client = MansioClient(server_url, "validator")
         client.channel_send("test-limit", "msg")
@@ -467,7 +463,7 @@ class TestInputValidation:
 
     def test_zero_limit_rejected(self, server_url: str) -> None:
         """Zero limit in channel_read should be rejected."""
-        from mansio.transport_http import MansioAPIError
+        from mansio_client.transport import MansioAPIError
 
         client = MansioClient(server_url, "validator")
         client.channel_send("test-limit", "msg")

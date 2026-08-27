@@ -224,7 +224,7 @@ class TestMansioClientOrder:
     """Test MansioClient.channel_read() order parameter."""
 
     def test_channel_read_defaults_to_newest(self, server_url):
-        from mansio import MansioClient
+        from mansio_client import MansioClient
 
         with MansioClient(server_url, "test-agent") as client:
             for i in range(5):
@@ -234,7 +234,7 @@ class TestMansioClientOrder:
             assert [m.payload for m in msgs] == ["msg-2", "msg-3", "msg-4"]
 
     def test_channel_read_oldest_explicit(self, server_url):
-        from mansio import MansioClient
+        from mansio_client import MansioClient
 
         with MansioClient(server_url, "test-agent") as client:
             for i in range(5):
@@ -245,7 +245,7 @@ class TestMansioClientOrder:
 
     def test_channel_poll_uses_oldest(self, server_url):
         """channel_poll() should use oldest order (cursor-based forward pagination)."""
-        from mansio import MansioClient
+        from mansio_client import MansioClient
 
         with MansioClient(server_url, "test-agent") as client:
             for i in range(5):
