@@ -162,6 +162,18 @@ class TokenStore:
         )
         return [dict(row) for row in rows]
 
+    def user_exists(self, user_id: str) -> bool:
+        """Check if a user has any tokens."""
+        row = (
+            self._conn()
+            .execute(
+                "SELECT 1 FROM tokens WHERE agent_id = ? LIMIT 1",
+                (user_id,),
+            )
+            .fetchone()
+        )
+        return row is not None
+
     def delete_user(self, user_id: str) -> int:
         """Delete all tokens for a user.
 

@@ -239,6 +239,7 @@ class AdminServer:
         self._setup_system_routes()
         self._setup_prefix_routes()
         self._setup_user_routes()
+        self._setup_user_token_routes()
         self._setup_token_routes()
 
     def _setup_ui_routes(self) -> None:
@@ -506,27 +507,30 @@ class AdminServer:
             }, 404
 
     def _setup_user_routes(self) -> None:
-        """Register all user management routes."""
-        self._setup_user_crud_routes()
-        self._setup_user_token_routes()
-
-    def _setup_user_crud_routes(self) -> None:
         """Register user CRUD routes."""
-        self._setup_user_list_route()
-        self._setup_user_register_route()
-        self._setup_user_detail_route()
-        self._setup_user_delete_route()
+        self._setup_user_list_register_routes()
+        self._setup_user_detail_delete_routes()
 
-    def _setup_user_list_route(self) -> None:
+    def _setup_user_list_register_routes(self) -> None:
+        """User list and registration routes."""
         token_store = self._token_store
         bus = self._bus
+
+        _USER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
+
+        def _validate_user_id(user_id: str) -> tuple | None:
+            if not _USER_ID_RE.match(user_id):
+                return {
+                    "error": "Bad Request",
+                    "message": "user_id must be 3-64 chars, lowercase alphanumeric + hyphens",
+                }, 400
+            return None
 
         @self._app.get("/api/users")
         def list_users(request: Any) -> dict:
             if token_store is None:
                 return {"users": [], "enabled": False}
             users = token_store.list_users()
-            # Enrich with presence if available
             try:
                 presence = {a.agent_id: a for a in bus.agents(timeout_seconds=120)}
             except NotImplementedError:
@@ -537,12 +541,8 @@ class AdminServer:
                 u["last_seen"] = p.last_seen if p else None
             return {"users": users}
 
-    def _setup_user_register_route(self) -> None:
-        token_store = self._token_store
-
         @self._app.post("/api/users")
         def register_user(request: Any) -> dict | tuple:
-            """Register a new user and create their first token."""
             if token_store is None:
                 return {
                     "error": "Service Unavailable",
@@ -551,22 +551,18 @@ class AdminServer:
             data = request.json() if request.body else {}
             user_id = data.get("user_id", "").strip()
             if not user_id:
-                return {
-                    "error": "Bad Request",
-                    "message": "user_id is required",
-                }, 400
-            # Check if user already exists
-            existing = token_store.list_user_tokens(user_id)
-            if existing:
-                return {
-                    "error": "Conflict",
-                    "message": f"User '{user_id}' already exists",
-                }, 409
+                return {"error": "Bad Request", "message": "user_id is required"}, 400
+            err = _validate_user_id(user_id)
+            if err:
+                return err
+            if token_store.user_exists(user_id):
+                return {"error": "Conflict", "message": f"User '{user_id}' already exists"}, 409
             label = data.get("label", "initial token")
             entry = token_store.create_token(agent_id=user_id, label=label)
             return {"ok": True, "user_id": user_id, "token": entry}, 201
 
-    def _setup_user_detail_route(self) -> None:
+    def _setup_user_detail_delete_routes(self) -> None:
+        """User detail and deletion routes."""
         token_store = self._token_store
         bus = self._bus
 
@@ -577,7 +573,6 @@ class AdminServer:
             tokens = token_store.list_user_tokens(user_id)
             if not tokens:
                 return {"error": "Not Found", "message": f"User '{user_id}' not found"}, 404
-            # Presence info
             try:
                 p = bus.agent_status(user_id)
             except NotImplementedError:
@@ -588,9 +583,6 @@ class AdminServer:
                 "status": p.status if p else "unknown",
                 "last_seen": p.last_seen if p else None,
             }
-
-    def _setup_user_delete_route(self) -> None:
-        token_store = self._token_store
 
         @self._app.delete("/api/users/<user_id>")
         def delete_user(request: Any, user_id: str) -> dict | tuple:
@@ -616,6 +608,8 @@ class AdminServer:
         def create_user_token(request: Any, user_id: str) -> dict | tuple:
             if token_store is None:
                 return {"error": "Service Unavailable"}, 503
+            if not token_store.user_exists(user_id):
+                return {"error": "Not Found", "message": f"User '{user_id}' not found"}, 404
             data = request.json() if request.body else {}
             label = data.get("label", "")
             entry = token_store.create_token(agent_id=user_id, label=label)
