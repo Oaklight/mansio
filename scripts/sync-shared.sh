@@ -34,7 +34,7 @@ cp "$SHARED/_vendor/httpclient.py" "$CLIENT/_vendor/httpclient.py"
 sync_file "$SHARED/_vendor/sse.py" "$MANSIO/_vendor/sse.py" "$CLIENT/_vendor/sse.py"
 
 # Format synced files to match project style
-ruff format     "$MANSIO/types.py" "$CLIENT/types.py"     "$MANSIO/transport_http.py" "$CLIENT/transport.py"     "$MANSIO/_vendor/httpclient.py" "$CLIENT/_vendor/httpclient.py"     "$MANSIO/_vendor/sse.py" "$CLIENT/_vendor/sse.py"     2>/dev/null || true
+ruff format     "$MANSIO/types.py"     "$MANSIO/transport_http.py"     "$MANSIO/_vendor/httpclient.py"     "$MANSIO/_vendor/sse.py"     "$CLIENT/types.py"     "$CLIENT/transport.py"     "$CLIENT/_vendor/httpclient.py"     "$CLIENT/_vendor/sse.py"     2>/dev/null || true
 
 # Stage synced files so pre-commit hook works like ruff-format
 git add \
