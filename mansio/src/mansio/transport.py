@@ -102,11 +102,6 @@ class Transport(Protocol):
         """
         ...
 
-    @property
-    def require_auth(self) -> bool:
-        """Whether the underlying bus requires authentication."""
-        ...
-
     def close(self) -> None:
         """Release resources."""
         ...

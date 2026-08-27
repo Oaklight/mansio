@@ -13,7 +13,9 @@ from __future__ import annotations
 import threading
 import time
 
-from mansio import Bus, MansioClient, MansioServer, MemoryBackend
+from mansio_client import MansioClient
+
+from mansio import Bus, MansioServer, MemoryBackend
 from mansio.frontends import HttpFrontend
 
 

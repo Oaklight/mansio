@@ -310,7 +310,7 @@ class TestHttpDeletionAuth:
         from mansio.token_store import TokenStore
 
         backend = MemoryBackend()
-        bus = Bus(backend=backend, require_auth=True)
+        bus = Bus(backend=backend)
         token_store = TokenStore(tmp_path / "tokens.db")
 
         # Create tokens

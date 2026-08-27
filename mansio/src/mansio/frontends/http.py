@@ -15,7 +15,7 @@ API Endpoints:
     GET  /v1/queue/status    — query queue status of a message
     GET  /v1/subscribe       — SSE stream for real-time notifications
     GET  /v1/auth/check      — validate agent credentials
-    GET  /v1/registry/lookup — look up agent registration
+    GET  /v1/registry/lookup — check if an agent is known (presence-based)
     GET  /health             — health check
 
 Authentication:
@@ -196,12 +196,9 @@ def _validate_and_auth_publish(
     if channel.startswith("_system:"):
         # Allow: _system:agents with msg_type="presence" (SDK _announce())
         # Allow: _system:cursors:{agent_id} (own cursor persistence)
-        # Allow: _system:registry (self-registration)
+        # System channels are write-restricted
         # Deny: _system:agents with arbitrary msg_types
-        allowed_system = (
-            f"_system:cursors:{auth_result}",
-            "_system:registry",
-        )
+        allowed_system = (f"_system:cursors:{auth_result}",)
         if channel == "_system:agents" and msg_type == "presence":
             pass  # allow SDK presence announcement
         elif channel not in allowed_system:
@@ -519,22 +516,6 @@ def _parse_query_params(request: Any, max_limit: int) -> dict:
     }
 
 
-async def _handle_registry_lookup(request: Any, bus: Any) -> dict | tuple:
-    """Handle /v1/registry/lookup requests."""
-    agent_id = (request.query_params.get("agent_id") or [None])[0]
-    if not agent_id:
-        return {
-            "error": "Bad Request",
-            "message": "Query param 'agent_id' required",
-        }, 400
-
-    msgs = await asyncio.to_thread(bus.query, "_system:registry", limit=1000)
-    for m in reversed(msgs):
-        if m.sender == agent_id and m.msg_type == "register":
-            return {"found": True, "agent_id": agent_id, "metadata": m.metadata}
-    return {"found": False, "agent_id": agent_id}
-
-
 async def _dm_unregistered_warning(bus: Any, channel: str, sender: str) -> str | None:
     """Return a warning string if a DM targets an unregistered agent."""
     if not channel.startswith("dm:"):
@@ -671,6 +652,7 @@ class HttpFrontend:
         self._setup_middleware()
         self._setup_api_routes()
         self._setup_deletion_routes()
+        self._setup_registry_route()
         self._setup_queue_routes()
         self._setup_presence_routes()
         self._setup_channel_acl_routes()
@@ -908,13 +890,27 @@ class HttpFrontend:
                 self._token_store and await asyncio.to_thread(self._token_store.has_tokens)
             )
             return {
-                "require_auth": bus.require_auth,
                 "token_auth_enabled": has_tokens,
             }
 
+    def _setup_registry_route(self) -> None:
+        """Register registry lookup route."""
+        bus = self._bus
+        assert bus is not None
+
         @self._app.get("/v1/registry/lookup")
         async def registry_lookup(request: Request) -> dict | tuple:
-            return await _handle_registry_lookup(request, bus)
+            agent_id = (request.query_params.get("agent_id") or [""])[0].strip()
+            if not agent_id:
+                return {
+                    "error": "Bad Request",
+                    "message": "Query param 'agent_id' required",
+                }, 400
+            # Check presence (heartbeat-based)
+            status = await asyncio.to_thread(bus.agent_status, agent_id)
+            if status is not None:
+                return {"found": True, "agent_id": agent_id, "status": status.status}
+            return {"found": False, "agent_id": agent_id}
 
     def _setup_deletion_routes(self) -> None:
         """Register channel and message deletion routes."""
@@ -1187,8 +1183,7 @@ class HttpFrontend:
             }
 
         @self._app.get("/v1/presence/<agent_id>")
-        async def presence_agent(request: Request) -> dict | tuple:
-            agent_id = request.path_params.get("agent_id", "")
+        async def presence_agent(request: Request, agent_id: str = "") -> dict | tuple:
             raw_timeout = (request.query_params.get("timeout") or ["120"])[0]
             timeout = _parse_query_timeout(raw_timeout)
             if isinstance(timeout, tuple):

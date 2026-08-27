@@ -19,9 +19,10 @@ import threading
 import time
 
 import pytest
+from mansio_client import MansioClient
 from mansio_client.federation import FederationLink
 
-from mansio import Bus, MansioClient, MansioServer, MemoryBackend
+from mansio import Bus, MansioServer, MemoryBackend
 from mansio.frontends import HttpFrontend
 
 

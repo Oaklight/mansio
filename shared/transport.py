@@ -73,9 +73,6 @@ class HttpTransport:
         self._sub_counter = 0
         self._last_event_id: str = ""  # track across SSE restarts
 
-        # Cache server auth requirement
-        self._require_auth: bool | None = None
-
     # ── Transport Protocol ────────────────────────────────────────
 
     def publish(
