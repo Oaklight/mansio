@@ -267,11 +267,8 @@ class TestClientQueueAPI:
         acked = worker.queue_ack(result.message.id)
         assert acked is not None
         assert acked.status == "completed"
-        admin.close()
-        worker.close()
 
         assert worker.queue_claim("task-queue") is None
 
         admin.close()
         worker.close()
-        bus.close()

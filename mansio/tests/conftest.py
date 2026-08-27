@@ -35,22 +35,9 @@ def mansio_server(tmp_path):
     bus.close()
 
 
-def make_client(url: str, token_store: TokenStore, agent_id: str = "test-agent"):
-    """Create a mansio_client.MansioClient with a fresh token."""
-    from mansio_client import MansioClient
-
-    entry = token_store.create_token(agent_id=agent_id, label=f"{agent_id} test token")
-    return MansioClient(url, agent_id, token=entry["token"])
-
-
 @pytest.fixture()
 def server_url(tmp_path):
     """Start a mansio server without token auth, yield URL."""
-    import threading
-    import time
-
-    from mansio.frontends import HttpFrontend
-
     bus = Bus(backend=MemoryBackend())
     frontend = HttpFrontend(host="127.0.0.1", port=0)
     server = MansioServer(bus)
@@ -65,3 +52,11 @@ def server_url(tmp_path):
 
     server.shutdown()
     bus.close()
+
+
+def make_client(url: str, token_store: TokenStore, agent_id: str = "test-agent"):
+    """Create a mansio_client.MansioClient with a fresh token."""
+    from mansio_client import MansioClient
+
+    entry = token_store.create_token(agent_id=agent_id, label=f"{agent_id} test token")
+    return MansioClient(url, agent_id, token=entry["token"])
