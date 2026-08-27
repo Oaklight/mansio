@@ -117,6 +117,65 @@ class TokenStore:
         )
         return [dict(row) for row in rows]
 
+    def list_users(self) -> list[dict[str, Any]]:
+        """List distinct users (agent_ids) with token counts.
+
+        Returns:
+            List of dicts with user_id, token_count, last_active.
+        """
+        rows = (
+            self._conn()
+            .execute(
+                "SELECT agent_id, COUNT(*) as token_count, "
+                "MAX(COALESCE(last_used_at, created_at)) as last_active "
+                "FROM tokens WHERE agent_id IS NOT NULL "
+                "GROUP BY agent_id ORDER BY agent_id"
+            )
+            .fetchall()
+        )
+        return [
+            {
+                "user_id": row["agent_id"],
+                "token_count": row["token_count"],
+                "last_active": row["last_active"],
+            }
+            for row in rows
+        ]
+
+    def list_user_tokens(self, user_id: str) -> list[dict[str, Any]]:
+        """List tokens belonging to a specific user.
+
+        Args:
+            user_id: The user identifier.
+
+        Returns:
+            Token entries for this user.
+        """
+        rows = (
+            self._conn()
+            .execute(
+                "SELECT id, token_prefix, agent_id, label, created_at, last_used_at "
+                "FROM tokens WHERE agent_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            )
+            .fetchall()
+        )
+        return [dict(row) for row in rows]
+
+    def delete_user(self, user_id: str) -> int:
+        """Delete all tokens for a user.
+
+        Args:
+            user_id: The user identifier.
+
+        Returns:
+            Number of tokens deleted.
+        """
+        conn = self._conn()
+        cursor = conn.execute("DELETE FROM tokens WHERE agent_id = ?", (user_id,))
+        conn.commit()
+        return cursor.rowcount
+
     def create_token(
         self,
         agent_id: str | None = None,
