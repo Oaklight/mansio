@@ -161,11 +161,10 @@ class HttpTransport:
         """
         params = urllib.parse.urlencode({"message_id": message_id})
         resp = self._http.get(f"{self._base_url}/v1/queue/status?{params}")
-        self._check_response(resp)
-        data = resp.json()
-        if not data.get("found"):
+        if resp.status_code == 404:
             return None
-        return data.get("status")
+        self._check_response(resp)
+        return resp.json().get("status")
 
     def query(
         self,

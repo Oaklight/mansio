@@ -14,9 +14,9 @@ import urllib.parse
 from collections.abc import Callable
 from typing import Literal, overload
 
-from mansio._vendor.httpclient import Client as HttpClient
-from mansio._vendor.sse import SSEClient
-from mansio.types import AgentPresence, ClaimResult, Message
+from __PKG__._vendor.httpclient import Client as HttpClient
+from __PKG__._vendor.sse import SSEClient
+from __PKG__.types import AgentPresence, ClaimResult, Message
 
 
 class MansioAPIError(Exception):
@@ -256,7 +256,9 @@ class HttpTransport:
             for a in resp.json().get("agents", [])
         ]
 
-    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
+    def agent_status(
+        self, agent_id: str, timeout_seconds: int = 120
+    ) -> AgentPresence | None:
         """Return presence for a single agent, or ``None`` if unknown."""
         params = urllib.parse.urlencode({"timeout": str(timeout_seconds)})
         resp = self._http.get(
@@ -343,7 +345,9 @@ class HttpTransport:
             self._sse_thread.join(timeout=3)
 
         self._sse_stop = threading.Event()
-        self._sse_thread = threading.Thread(target=self._sse_loop, daemon=True, name="mansio-sse")
+        self._sse_thread = threading.Thread(
+            target=self._sse_loop, daemon=True, name="mansio-sse"
+        )
         self._sse_thread.start()
 
     def _sse_loop(self) -> None:

@@ -31,48 +31,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Verify mansio-client types.py is in sync
+      - name: Verify shared files are in sync
         run: |
-          echo "Checking mansio-client types.py matches mansio types.py..."
-          if ! diff mansio/src/mansio/types.py mansio-client/src/mansio_client/types.py; then
-            echo ""
-            echo "ERROR: mansio-client types.py has drifted from mansio/types.py"
-            echo "Fix: cp mansio/src/mansio/types.py mansio-client/src/mansio_client/types.py"
+          bash scripts/sync-shared.sh
+          if ! git diff --quiet; then
+            echo "ERROR: shared files are out of sync"
+            echo "Run: bash scripts/sync-shared.sh"
+            git diff --stat
             exit 1
           fi
-
-      - name: Verify transport method signatures in sync
-        run: |
-          python3 -c "
-          import ast, sys
-
-          def get_methods(path):
-              tree = ast.parse(open(path).read())
-              methods = {}
-              for node in ast.walk(tree):
-                  if isinstance(node, ast.ClassDef) and node.name == 'HttpTransport':
-                      for item in node.body:
-                          if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                              if not item.name.startswith('_'):
-                                  args = [a.arg for a in item.args.args if a.arg != 'self']
-                                  methods[item.name] = args
-              return methods
-
-          m1 = get_methods('mansio/src/mansio/transport_http.py')
-          m2 = get_methods('mansio-client/src/mansio_client/transport.py')
-
-          if m1 != m2:
-              print('ERROR: Transport method signatures have drifted')
-              only1 = set(m1) - set(m2)
-              only2 = set(m2) - set(m1)
-              if only1: print(f'  Only in mansio: {only1}')
-              if only2: print(f'  Only in mansio-client: {only2}')
-              for name in set(m1) & set(m2):
-                  if m1[name] != m2[name]:
-                      print(f'  {name}: mansio={m1[name]} vs client={m2[name]}')
-              sys.exit(1)
-          print('Transport signatures in sync ✅')
-          "
+          echo "All shared files in sync ✅"
 
 
   test:

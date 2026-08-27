@@ -28,6 +28,7 @@ Issues = "https://github.com/Oaklight/mansio/issues"
 
 [project.scripts]
 mansio-client = "mansio_client.cli:main"
+mansio-mcp = "mansio_client.mcp:serve"
 
 [tool.setuptools.dynamic]
 version = { attr = "mansio_client.__version__" }

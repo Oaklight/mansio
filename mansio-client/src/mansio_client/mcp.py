@@ -130,7 +130,10 @@ _TOOLS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "with_agent": {"type": "string", "description": "The other agent's ID."},
+                "with_agent": {
+                    "type": "string",
+                    "description": "The other agent's ID.",
+                },
                 "limit": {
                     "type": "integer",
                     "description": "Max messages to return (default: 10).",
@@ -307,7 +310,9 @@ def _tool_note_read(client: MansioClient, args: dict[str, Any]) -> Any:
 
 
 def _tool_memory_store(client: MansioClient, args: dict[str, Any]) -> Any:
-    msg_id = client.memory_store(args["content"], memory_type=args.get("memory_type", "general"))
+    msg_id = client.memory_store(
+        args["content"], memory_type=args.get("memory_type", "general")
+    )
     return {"message_id": msg_id}
 
 
@@ -440,7 +445,10 @@ def _handle_request(client: MansioClient, req: dict[str, Any]) -> dict[str, Any]
                 req_id,
                 {
                     "content": [
-                        {"type": "text", "text": json.dumps(result, ensure_ascii=False)},
+                        {
+                            "type": "text",
+                            "text": json.dumps(result, ensure_ascii=False),
+                        },
                     ],
                 },
             )

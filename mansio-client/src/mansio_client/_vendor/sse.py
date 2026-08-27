@@ -88,7 +88,9 @@ def _ensure_sibling_path(name: str) -> str:
 # ── Sibling httpclient import (guarded) ──
 
 try:
-    from mansio_client._vendor.httpclient import HttpConnectionError as _HttpConnectionError
+    from mansio_client._vendor.httpclient import (
+        HttpConnectionError as _HttpConnectionError,
+    )
     from mansio_client._vendor.httpclient import HttpTimeoutError as _HttpTimeoutError
     from mansio_client._vendor.httpclient import async_get as _http_async_get
     from mansio_client._vendor.httpclient import get as _http_get
@@ -298,7 +300,9 @@ class SSEError(Exception):
 class SSEConnectionError(SSEError):
     """Raised when max retries exhausted."""
 
-    def __init__(self, url: str, retries: int, last_error: Exception | None = None) -> None:
+    def __init__(
+        self, url: str, retries: int, last_error: Exception | None = None
+    ) -> None:
         self.url = url
         self.retries = retries
         self.last_error = last_error
@@ -341,7 +345,9 @@ class _SSEClientMixin:
         return _SSEParser(
             last_id=self._last_event_id,
             retry=(
-                self._retry_interval if self._retry_interval != DEFAULT_RETRY_INTERVAL else None
+                self._retry_interval
+                if self._retry_interval != DEFAULT_RETRY_INTERVAL
+                else None
             ),
         )
 
