@@ -906,10 +906,11 @@ class HttpFrontend:
                     "error": "Bad Request",
                     "message": "Query param 'agent_id' required",
                 }, 400
-            # Check presence (heartbeat-based)
-            status = await asyncio.to_thread(bus.agent_status, agent_id)
-            if status is not None:
-                return {"found": True, "agent_id": agent_id, "status": status.status}
+            token_store = self._token_store
+            if token_store is not None and await asyncio.to_thread(
+                token_store.user_exists, agent_id
+            ):
+                return {"found": True, "agent_id": agent_id}
             return {"found": False, "agent_id": agent_id}
 
     def _setup_deletion_routes(self) -> None:
