@@ -3,7 +3,7 @@
 __version__ = "0.1.0"
 
 from mansio_client.client import MansioClient
-from mansio_client.federation import FederationLink
+from mansio_client.federation import FederationLink  # experimental, see federation.py
 from mansio_client.injectors import (
     ClaudeCodeInjector,
     Injector,

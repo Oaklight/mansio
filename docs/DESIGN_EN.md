@@ -705,6 +705,31 @@ in [GitHub issue #102](https://github.com/Oaklight/mansio/issues/102).
 Future phases may add floor control (turn locking), debounced delivery,
 and loop detection.
 
+### 3.11 Federation (Experimental)
+
+`FederationLink` (in `mansio-client`) connects two mansio instances for
+channel replication and on-demand routing. It is a **client-side only**
+component — no server-side changes are required.
+
+**Capabilities:**
+
+- **Replication** — continuous bidirectional, pull-only, or push-only
+  channel sync between two instances via SSE subscriptions.
+- **Federated routing** — stateless `route_read` / `route_send` proxying
+  to a remote instance.
+
+**Known limitations (Phase 1):**
+
+- Two-instance bridging only. Multi-hop mesh (A → B → C) is not supported;
+  the boolean `bridged` metadata flag prevents infinite loops between two
+  instances but intentionally blocks onward forwarding. Mesh topologies
+  would require a `visited_instances` list (deferred to Phase 2).
+- Loop prevention is a client-side metadata convention, not server-enforced.
+- No server awareness — the server does not know whether a message
+  originated locally or was bridged from another instance.
+
+This component is experimental and its API may change without notice.
+
 ---
 
 ## 4. Communication Patterns
