@@ -49,11 +49,15 @@ class AdminInfo:
 
 
 class AdminServer:
-    """Admin panel HTTP server.
+    """Admin panel HTTP server implementing the Frontend protocol.
+
+    Can be used standalone (legacy ``bus`` in constructor) or as a
+    Frontend via ``attach(bus)`` + ``serve_forever()``.
 
     Args:
-        bus: The Bus instance to monitor.
-        host: Host address to bind to. Defaults to "127.0.0.1".
+        bus: Optional Bus instance. If provided, ``attach(bus)`` is
+            called automatically for backward compatibility.
+        host: Host address to bind to. Defaults to ``"127.0.0.1"``.
         port: Port number to listen on. Defaults to 8741.
         serve_ui: Whether to serve the admin UI at root path.
         remote: Whether to allow remote connections (binds to 0.0.0.0).
@@ -63,7 +67,7 @@ class AdminServer:
 
     def __init__(
         self,
-        bus: Bus,
+        bus: Bus | None = None,
         host: str = "127.0.0.1",
         port: int = 8741,
         serve_ui: bool = True,
@@ -72,7 +76,7 @@ class AdminServer:
         token_store: TokenStore | None = None,
         auth_token: str | None = None,
     ) -> None:
-        self._bus = bus
+        self._bus: Bus | None = None
         self._host = "0.0.0.0" if remote else host
         self._port = port
         self._serve_ui = serve_ui
@@ -91,12 +95,74 @@ class AdminServer:
         self._started = threading.Event()
 
         self._setup_middleware()
+
+        # Backward compat: if bus is passed to constructor, attach immediately
+        if bus is not None:
+            self.attach(bus)
+
+    # ── Frontend protocol ─────────────────────────────────────────
+
+    def attach(self, bus: Bus) -> None:
+        """Bind this frontend to a Bus instance.
+
+        Must be called before ``serve_forever()`` or ``start()``.
+        Sets up all admin API routes that depend on the bus.
+
+        Args:
+            bus: The Bus to expose.
+
+        Raises:
+            RuntimeError: If already attached.
+        """
+        if self._bus is not None:
+            raise RuntimeError("AdminServer already attached to a bus")
+        self._bus = bus
         self._setup_routes()
 
-    # ── Lifecycle ─────────────────────────────────────────────────
+    def serve_forever(self) -> None:
+        """Start accepting connections. Blocks until ``shutdown()``.
+
+        Raises:
+            RuntimeError: If not attached to a Bus.
+        """
+        if self._bus is None:
+            raise RuntimeError("Must call attach(bus) before serve_forever()")
+        self._app.run(self._host, self._port)
+
+    def shutdown(self) -> None:
+        """Stop accepting connections and release resources.
+
+        Safe to call multiple times or if not running.
+        """
+        self._app.shutdown()
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
+            self._thread = None
+            self._started.clear()
+            logger.info("Admin server stopped")
+
+    @property
+    def address(self) -> tuple[str, int]:
+        """Return the (host, port) this frontend is listening on.
+
+        Raises:
+            RuntimeError: If not yet serving.
+        """
+        h = self._app.host or self._host
+        p = self._app.port if self._app.port is not None else self._port
+        return (h, p)
+
+    # ── Convenience lifecycle (background thread) ─────────────────
 
     def start(self) -> AdminInfo:
-        """Start the server in a background thread."""
+        """Start the server in a background thread.
+
+        Convenience method that launches ``serve_forever()`` in a
+        daemon thread. The bus must already be attached (either via
+        constructor or ``attach()``).
+        """
+        if self._bus is None:
+            raise RuntimeError("Must call attach(bus) before start()")
         if self._thread is not None and self._thread.is_alive():
             raise RuntimeError("Server is already running")
 
@@ -144,13 +210,11 @@ class AdminServer:
         self._app.run(self._host, self._port)
 
     def stop(self) -> None:
-        """Stop the server. Safe to call if not running."""
-        self._app.shutdown()
-        if self._thread is not None:
-            self._thread.join(timeout=5.0)
-            self._thread = None
-            self._started.clear()
-            logger.info("Admin server stopped")
+        """Stop the server. Safe to call if not running.
+
+        Alias for ``shutdown()`` — kept for backward compatibility.
+        """
+        self.shutdown()
 
     def is_running(self) -> bool:
         """Check if server is running."""
@@ -333,7 +397,7 @@ class AdminServer:
 
         @self._app.get("/api/stats")
         def stats(request: Any) -> dict:
-            s = bus.backend.stats()
+            s = bus.stats()
             s["active_subscriptions"] = sum(len(v) for v in bus.subscription_counts().values())
             return s
 
@@ -398,10 +462,10 @@ class AdminServer:
                 limit = int((request.query_params.get("limit") or ["100"])[0])
             except ValueError:
                 return {"error": "Bad Request", "message": "'limit' must be an integer"}, 400
+            if limit < 1:
+                return {"error": "Bad Request", "message": "'limit' must be at least 1"}, 400
 
-            msgs = bus.backend.search(
-                channel=channel, sender=sender, msg_type=msg_type, limit=limit
-            )
+            msgs = bus.search(channel=channel, sender=sender, msg_type=msg_type, limit=limit)
             return {
                 "count": len(msgs),
                 "messages": [_msg_dict(m) for m in msgs],
@@ -450,7 +514,7 @@ class AdminServer:
                 "backend": {},
                 "tokens": {"configured": 0},
             }
-            info["backend"] = bus.backend.info()
+            info["backend"] = bus.info()
             if token_store:
                 info["tokens"]["configured"] = len(token_store.list_tokens())
             return info

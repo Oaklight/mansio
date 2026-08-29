@@ -269,6 +269,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _migrate_legacy_db(db_path: str, logger) -> str:
     """Auto-rename piazza.db to mansio.db when using the default path."""
     if db_path == _DEFAULT_DB and not os.path.exists(_DEFAULT_DB) and os.path.exists(_LEGACY_DB):
+        import warnings
+
+        warnings.warn(
+            f"Legacy database '{_LEGACY_DB}' detected and auto-renamed to "
+            f"'{_DEFAULT_DB}'. This auto-migration will be removed in mansio 1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         os.rename(_LEGACY_DB, _DEFAULT_DB)
         logger.info("Migrated database", old=_LEGACY_DB, new=_DEFAULT_DB)
     return db_path
@@ -390,7 +398,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
             channels=args.irc_channels or [],
         )
 
-    # Start AdminServer (managed independently from Bus)
+    # Start AdminServer as a Frontend
     from mansio.admin import AdminServer
 
     admin_kwargs: dict[str, Any] = {
@@ -403,7 +411,8 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     if args.token:
         admin_kwargs["auth_password"] = args.token
 
-    admin = AdminServer(bus, **admin_kwargs)
+    admin = AdminServer(**admin_kwargs)
+    admin.attach(bus)
     info = admin.start()
     logger.info("Admin panel", url=info.url)
     if info.password:
@@ -423,7 +432,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 
     stop.wait()
     logger.info("Shutting down...")
-    admin.stop()
+    admin.shutdown()
     if irc_frontend:
         irc_frontend.shutdown()
     if http_frontend:
