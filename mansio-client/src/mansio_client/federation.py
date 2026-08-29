@@ -24,6 +24,7 @@ Example::
 from __future__ import annotations
 
 import threading
+import warnings
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -52,6 +53,12 @@ class FederationLink:
         local_instance: str = "local",
         remote_instance: str = "remote",
     ) -> None:
+        warnings.warn(
+            "FederationLink is experimental: two-instance bridging only, "
+            "no multi-hop mesh, loop prevention via metadata convention "
+            "(not server-enforced). API may change without notice.",
+            stacklevel=2,
+        )
         if local_instance == remote_instance:
             raise ValueError(
                 f"local_instance and remote_instance must differ, "

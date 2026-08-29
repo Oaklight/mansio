@@ -94,6 +94,32 @@ mansio-client memory recall "fact"
 
 DMs, notes, thoughts, memory, broadcast, notifications — see the full [mansio documentation](https://github.com/Oaklight/mansio) for details on all semantic APIs, server setup, admin panel, and token management.
 
+## Federation (Experimental)
+
+`FederationLink` connects two mansio instances for channel replication and
+on-demand routing. It is **client-side only** — no server changes required.
+
+```python
+from mansio_client import MansioClient, FederationLink
+
+local = MansioClient("http://instance-a:8742", "agent-a", token="mst-xxx")
+remote = MansioClient("http://instance-b:8742", "agent-b", token="mst-yyy")
+
+with FederationLink(local, remote, local_instance="a", remote_instance="b") as link:
+    link.replicate(["group:shared-project"])    # bidirectional sync
+    msgs = link.route_read("broadcast:releases")  # on-demand read
+```
+
+**Known limitations:**
+
+- Two-instance bridging only — no multi-hop mesh (A → B → C).
+- Loop prevention uses a boolean `bridged` metadata flag, not a
+  `visited_instances` list; a message bridged from A to B will not be
+  forwarded onward to C.
+- No server-side enforcement; loop prevention is a client-side convention.
+
+This API is experimental and may change without notice.
+
 ## License
 
 MIT
