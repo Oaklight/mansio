@@ -13,7 +13,7 @@ from typing import Literal, overload
 
 from mansio.admin.metrics import MetricsCollector
 from mansio.backends import SQLiteBackend
-from mansio.protocols import Backend, ChannelStore, Deletable, Presenceable
+from mansio.protocols import Backend, ChannelStore, Compactable, Deletable, Presenceable
 from mansio.system_policy import CompactionPolicy, system_channel_policy
 from mansio.types import ACLEntry, AgentPresence, ChannelMeta, ClaimResult, Message
 
@@ -301,14 +301,18 @@ class Bus:
 
         Args:
             detail: If True, return list of dicts with channel metadata
-                instead of plain channel name strings.
+                instead of plain channel name strings. Falls back to
+                plain names if the backend doesn't support detail.
 
         Returns:
             Sorted list of channel names, or list of dicts when
-            *detail* is True.
+            *detail* is True and supported by the backend.
         """
         if detail:
-            return self._backend.list_channels_detail()
+            try:
+                return self._backend.list_channels_detail()
+            except NotImplementedError:
+                return self._backend.list_channels()
         return self._backend.list_channels()
 
     def channels_detail(self) -> list[dict]:
@@ -317,6 +321,10 @@ class Bus:
         Returns:
             List of dicts with keys: name, message_count, last_activity,
             sender_count, type.
+
+        Raises:
+            NotImplementedError: If backend does not implement
+                list_channels_detail.
         """
         return self._backend.list_channels_detail()
 
@@ -598,6 +606,91 @@ class Bus:
         """
         pr = self._require_presence()
         return pr.agent_status(agent_id, timeout_seconds)
+
+    def stats(self) -> dict:
+        """Return aggregate statistics for admin dashboard.
+
+        Delegates to the backend's stats() template method.
+
+        Returns:
+            Dict with total_messages, total_channels, total_senders,
+            channel_breakdown, and msg_type_distribution.
+        """
+        return self._backend.stats()
+
+    def search(
+        self,
+        after: str | None = None,
+        limit: int = 100,
+        channel: str | None = None,
+        sender: str | None = None,
+        msg_type: str | None = None,
+    ) -> list[Message]:
+        """Query messages across all channels with optional filters.
+
+        Delegates to the backend's search() template method.
+
+        Args:
+            after: Cursor for pagination (message ID).
+            limit: Maximum number of messages to return.
+            channel: Filter by channel name.
+            sender: Filter by sender.
+            msg_type: Filter by message type.
+
+        Returns:
+            Messages in chronological order (oldest first).
+        """
+        return self._backend.search(
+            after=after, limit=limit, channel=channel, sender=sender, msg_type=msg_type
+        )
+
+    def info(self) -> dict:
+        """Return backend type and basic info.
+
+        Delegates to the backend's info() template method.
+
+        Returns:
+            Dict with at least a 'type' key.
+        """
+        return self._backend.info()
+
+    # ── Compaction (optional — Compactable backends only) ──────
+
+    def _require_compactable(self) -> Compactable:
+        if not isinstance(self._backend, Compactable):
+            raise NotImplementedError(
+                f"{type(self._backend).__name__} does not implement Compactable"
+            )
+        return self._backend
+
+    def compact(
+        self,
+        channel: str,
+        *,
+        max_messages: int | None = None,
+        keep_latest_per_sender: bool = False,
+    ) -> int:
+        """Compact a channel by removing old messages.
+
+        Args:
+            channel: Channel to compact.
+            max_messages: If set, keep only the latest *max_messages*
+                messages (after per-sender dedup if enabled).
+            keep_latest_per_sender: If True, keep only the latest
+                message per sender, removing older duplicates.
+
+        Returns:
+            Number of messages removed.
+
+        Raises:
+            NotImplementedError: If backend is not Compactable.
+        """
+        cp = self._require_compactable()
+        return cp.compact(
+            channel,
+            max_messages=max_messages,
+            keep_latest_per_sender=keep_latest_per_sender,
+        )
 
     def close(self) -> None:
         """Release resources held by the backend."""
