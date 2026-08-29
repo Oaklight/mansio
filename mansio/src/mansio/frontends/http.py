@@ -16,6 +16,7 @@ API Endpoints:
     GET  /v1/subscribe       — SSE stream for real-time notifications
     GET  /v1/auth/check      — validate agent credentials
     GET  /v1/registry/lookup — check if an agent is known (presence-based)
+    POST /v1/admin/compact   — compact a channel (admin only)
     GET  /health             — health check
 
 Authentication:
@@ -918,6 +919,7 @@ class HttpFrontend:
         self._setup_delete_channel_route()
         self._setup_delete_message_route()
         self._setup_admin_cleanup_route()
+        self._setup_admin_compact_route()
 
     def _setup_delete_channel_route(self) -> None:
         """Register DELETE /v1/channels/<channel_name>."""
@@ -1092,6 +1094,69 @@ class HttpFrontend:
                 "channels_deleted": len(channels_deleted),
                 "messages_deleted": total_deleted,
                 "channels": channels_deleted,
+            }
+
+    def _setup_admin_compact_route(self) -> None:
+        """Register POST /v1/admin/compact."""
+        bus = self._bus
+        assert bus is not None
+
+        @self._app.post("/v1/admin/compact")
+        async def admin_compact(request: Request) -> dict | tuple:
+            auth_result = _auth_result_var.get()
+
+            # Admin only: supertoken (None) or no-auth mode (True)
+            if isinstance(auth_result, str):
+                return {
+                    "error": "Forbidden",
+                    "message": "Admin endpoints require a supertoken",
+                }, 403
+
+            try:
+                data = request.json()
+            except Exception:
+                return {
+                    "error": "Bad Request",
+                    "message": "Request body must be valid JSON",
+                }, 400
+
+            if not isinstance(data, dict):
+                return {
+                    "error": "Bad Request",
+                    "message": "Request body must be a JSON object",
+                }, 400
+
+            channel = data.get("channel", "").strip()
+            if not channel:
+                return {
+                    "error": "Bad Request",
+                    "message": "'channel' field is required",
+                }, 400
+
+            max_messages = data.get("max_messages")
+            if max_messages is not None and (not isinstance(max_messages, int) or max_messages < 1):
+                return {
+                    "error": "Bad Request",
+                    "message": "max_messages must be a positive integer",
+                }, 400
+            keep_latest_per_sender = bool(data.get("keep_latest_per_sender", False))
+
+            try:
+                removed = await asyncio.to_thread(
+                    bus.compact,
+                    channel,
+                    max_messages=max_messages,
+                    keep_latest_per_sender=keep_latest_per_sender,
+                )
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support compaction",
+                }, 501
+
+            return {
+                "channel": channel,
+                "messages_removed": removed,
             }
 
     def _setup_queue_routes(self) -> None:

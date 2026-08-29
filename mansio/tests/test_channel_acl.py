@@ -356,6 +356,9 @@ class TestBusChannelManagement:
             def store_queue(self, message: Message) -> None:
                 pass
 
+            def get_message(self, message_id: str):
+                return None
+
             def query(self, *a, **kw):
                 return []
 
