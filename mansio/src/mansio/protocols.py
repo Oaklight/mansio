@@ -23,12 +23,12 @@ class Backend(ABC):
     MQTT, NATS, or pure in-memory storage.
 
     Abstract methods (must implement):
-        store, store_queue, query, list_channels, queue_claim,
-        queue_ack, queue_status
+        store, store_queue, query, get_message, list_channels,
+        queue_claim, queue_ack, queue_status
 
     Template methods (have default implementations):
         close, search, message_count, stats, queue_stats,
-        queue_retire, recent_timestamps, info
+        queue_retire, recent_timestamps, info, list_channels_detail
     """
 
     # === Abstract (must implement) ===
@@ -83,6 +83,7 @@ class Backend(ABC):
         """
         ...
 
+    @abstractmethod
     def get_message(self, message_id: str) -> Message | None:
         """Retrieve a single message by ID.
 
@@ -92,7 +93,7 @@ class Backend(ABC):
         Returns:
             The Message if found, otherwise None.
         """
-        raise NotImplementedError
+        ...
 
     @abstractmethod
     def list_channels(self) -> list[str]:
