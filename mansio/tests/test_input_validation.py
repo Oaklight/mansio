@@ -1,4 +1,4 @@
-"""Tests for input validation in publish and query endpoints.
+"""Tests for input validation in publish, query, and presence endpoints.
 
 Covers:
 - Malformed/empty JSON body → 400, not 500 (issue #66)
@@ -6,6 +6,7 @@ Covers:
 - Non-string payload rejection: int, bool, dict, list (issue #73)
 - Empty/whitespace payload rejection (issue #51)
 - Negative/zero limit rejection (issue #52)
+- Presence endpoint timeout validation (issue #221)
 """
 
 from __future__ import annotations
@@ -343,4 +344,79 @@ class TestMetadataValidation:
         # Also test omitted metadata
         resp2 = self._publish(http, server_url)
         assert resp2.status_code == 200, f"omitted metadata: expected 200, got {resp2.status_code}"
+        http.close()
+
+
+class TestPresenceTimeoutValidation:
+    """Malformed timeout on presence endpoints should return 400 (#221)."""
+
+    @pytest.mark.parametrize(
+        "timeout_val",
+        ["notanumber", "abc", "3.5", "null"],
+        ids=["word", "alpha", "float", "null-string"],
+    )
+    def test_presence_list_bad_timeout(self, server_url: str, timeout_val: str) -> None:
+        from mansio._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = http.get(f"{server_url}/v1/presence?timeout={timeout_val}")
+        assert resp.status_code == 400, (
+            f"GET /v1/presence?timeout={timeout_val!r}: expected 400, got {resp.status_code}"
+        )
+        http.close()
+
+    def test_presence_list_negative_timeout(self, server_url: str) -> None:
+        from mansio._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = http.get(f"{server_url}/v1/presence?timeout=-1")
+        assert resp.status_code == 400, "GET /v1/presence?timeout=-1: expected 400, got " + str(
+            resp.status_code
+        )
+        http.close()
+
+    def test_presence_list_zero_timeout(self, server_url: str) -> None:
+        from mansio._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = http.get(f"{server_url}/v1/presence?timeout=0")
+        assert resp.status_code == 400, "GET /v1/presence?timeout=0: expected 400, got " + str(
+            resp.status_code
+        )
+        http.close()
+
+    @pytest.mark.parametrize(
+        "timeout_val",
+        ["notanumber", "abc", "3.5", "null"],
+        ids=["word", "alpha", "float", "null-string"],
+    )
+    def test_presence_agent_bad_timeout(self, server_url: str, timeout_val: str) -> None:
+        from mansio._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = http.get(f"{server_url}/v1/presence/some-agent?timeout={timeout_val}")
+        assert resp.status_code == 400, (
+            f"GET /v1/presence/<agent_id>?timeout={timeout_val!r}: "
+            f"expected 400, got {resp.status_code}"
+        )
+        http.close()
+
+    def test_presence_agent_negative_timeout(self, server_url: str) -> None:
+        from mansio._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = http.get(f"{server_url}/v1/presence/some-agent?timeout=-1")
+        assert resp.status_code == 400, (
+            "GET /v1/presence/<agent_id>?timeout=-1: expected 400, got " + str(resp.status_code)
+        )
+        http.close()
+
+    def test_presence_valid_timeout(self, server_url: str) -> None:
+        from mansio._vendor.httpclient import Client as HttpClient
+
+        http = HttpClient()
+        resp = http.get(f"{server_url}/v1/presence?timeout=60")
+        assert resp.status_code == 200, "GET /v1/presence?timeout=60: expected 200, got " + str(
+            resp.status_code
+        )
         http.close()

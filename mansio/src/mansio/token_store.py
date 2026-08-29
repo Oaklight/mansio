@@ -300,6 +300,16 @@ class TokenStore:
         ):
             return False
 
+        if token_str.startswith(_LEGACY_TOKEN_PREFIX):
+            import warnings
+
+            warnings.warn(
+                "Token prefix 'pzt-' is deprecated, rotate to a new 'mst-' token. "
+                "Support for 'pzt-' tokens will be removed in mansio 1.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         provided_hash = _hash_token(token_str)
         conn = self._conn()
 
