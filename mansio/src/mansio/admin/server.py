@@ -127,6 +127,7 @@ class AdminServer:
         """
         if self._bus is None:
             raise RuntimeError("Must call attach(bus) before serve_forever()")
+        self._started.set()
         self._app.run(self._host, self._port)
 
     def shutdown(self) -> None:
