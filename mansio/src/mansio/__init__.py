@@ -53,16 +53,17 @@ __all__ = [
 ]
 
 
+_DEPRECATED_ALIASES = {
+    "SQLiteStorage": ("SQLiteBackend", SQLiteBackend),
+    "MemoryStorage": ("MemoryBackend", MemoryBackend),
+    "StorageBackend": ("Backend", Backend),
+}
+
+
 def __getattr__(name: str):
     """Lazy import for optional backends and deprecated aliases."""
     import warnings
 
-    # Deprecated aliases — will be removed in a future release.
-    _DEPRECATED_ALIASES = {
-        "SQLiteStorage": ("SQLiteBackend", SQLiteBackend),
-        "MemoryStorage": ("MemoryBackend", MemoryBackend),
-        "StorageBackend": ("Backend", Backend),
-    }
     if name in _DEPRECATED_ALIASES:
         new_name, obj = _DEPRECATED_ALIASES[name]
         warnings.warn(
