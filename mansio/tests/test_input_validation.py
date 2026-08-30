@@ -15,13 +15,13 @@ import pytest
 from mansio_client import MansioClient
 from mansio_client.transport import MansioAPIError
 
+from mansio._vendor.httpclient import Client as HttpClient
+
 
 class TestMalformedBody:
     """Malformed or empty JSON body should return 400, not 500."""
 
     def test_empty_body(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.post(
             f"{server_url}/v1/publish",
@@ -32,8 +32,6 @@ class TestMalformedBody:
         http.close()
 
     def test_invalid_json(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.post(
             f"{server_url}/v1/publish",
@@ -44,8 +42,6 @@ class TestMalformedBody:
         http.close()
 
     def test_null_body(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.post(
             f"{server_url}/v1/publish",
@@ -56,8 +52,6 @@ class TestMalformedBody:
         http.close()
 
     def test_array_body(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.post(
             f"{server_url}/v1/publish",
@@ -82,8 +76,6 @@ class TestMsgTypeValidation:
         )
 
     def test_valid_msg_types(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         for mtype in ["chat", "note", "thought", "custom-type"]:
             resp = self._publish(http, server_url, mtype)
@@ -91,32 +83,24 @@ class TestMsgTypeValidation:
         http.close()
 
     def test_empty_msg_type_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, "")
         assert resp.status_code == 400
         http.close()
 
     def test_whitespace_msg_type_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, "   ")
         assert resp.status_code == 400
         http.close()
 
     def test_overlength_msg_type_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, "a" * 65)
         assert resp.status_code == 400
         http.close()
 
     def test_64_char_msg_type_accepted(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, "a" * 64)
         assert resp.status_code == 200
@@ -138,32 +122,24 @@ class TestPayloadTypeValidation:
         )
 
     def test_int_payload_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, 42)
         assert resp.status_code == 400, f"int payload: expected 400, got {resp.status_code}"
         http.close()
 
     def test_bool_payload_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, True)
         assert resp.status_code == 400, f"bool payload: expected 400, got {resp.status_code}"
         http.close()
 
     def test_dict_payload_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, {"key": "val"})
         assert resp.status_code == 400, f"dict payload: expected 400, got {resp.status_code}"
         http.close()
 
     def test_list_payload_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, [1, 2, 3])
         assert resp.status_code == 400, f"list payload: expected 400, got {resp.status_code}"
@@ -196,16 +172,12 @@ class TestLimitValidation:
     """Limit parameter validation in query endpoint."""
 
     def test_negative_limit_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.get(f"{server_url}/v1/query?channel=test-lim&limit=-1")
         assert resp.status_code == 400
         http.close()
 
     def test_zero_limit_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.get(f"{server_url}/v1/query?channel=test-lim&limit=0")
         assert resp.status_code == 400
@@ -220,8 +192,6 @@ class TestLimitValidation:
         client.close()
 
     def test_float_limit_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.get(f"{server_url}/v1/query?channel=test-lim&limit=3.5")
         assert resp.status_code == 400
@@ -232,8 +202,6 @@ class TestPayloadSizeLimit:
     """Payload must not exceed 256 KB (issue #58)."""
 
     def test_large_payload_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         oversized = "a" * (256 * 1024 + 1)  # 256 KB + 1 byte
         resp = http.post(
@@ -249,8 +217,6 @@ class TestPayloadSizeLimit:
         http.close()
 
     def test_max_payload_accepted(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         exact = "a" * (256 * 1024)  # exactly 256 KB
         resp = http.post(
@@ -266,8 +232,6 @@ class TestPayloadSizeLimit:
         http.close()
 
     def test_normal_payload_accepted(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.post(
             f"{server_url}/v1/publish",
@@ -296,48 +260,36 @@ class TestMetadataValidation:
         return http.post(f"{url}/v1/publish", json=body)
 
     def test_string_metadata_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, metadata="not-a-dict")
         assert resp.status_code == 400, f"string metadata: expected 400, got {resp.status_code}"
         http.close()
 
     def test_list_metadata_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, metadata=[1, 2, 3])
         assert resp.status_code == 400, f"list metadata: expected 400, got {resp.status_code}"
         http.close()
 
     def test_int_metadata_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, metadata=42)
         assert resp.status_code == 400, f"int metadata: expected 400, got {resp.status_code}"
         http.close()
 
     def test_bool_metadata_rejected(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, metadata=True)
         assert resp.status_code == 400, f"bool metadata: expected 400, got {resp.status_code}"
         http.close()
 
     def test_dict_metadata_accepted(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, metadata={"key": "val"})
         assert resp.status_code == 200, f"dict metadata: expected 200, got {resp.status_code}"
         http.close()
 
     def test_null_metadata_accepted(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = self._publish(http, server_url, metadata=None)
         assert resp.status_code == 200, f"null metadata: expected 200, got {resp.status_code}"
@@ -356,8 +308,6 @@ class TestPresenceTimeoutValidation:
         ids=["word", "alpha", "float", "null-string"],
     )
     def test_presence_list_bad_timeout(self, server_url: str, timeout_val: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.get(f"{server_url}/v1/presence?timeout={timeout_val}")
         assert resp.status_code == 400, (
@@ -366,8 +316,6 @@ class TestPresenceTimeoutValidation:
         http.close()
 
     def test_presence_list_negative_timeout(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.get(f"{server_url}/v1/presence?timeout=-1")
         assert resp.status_code == 400, "GET /v1/presence?timeout=-1: expected 400, got " + str(
@@ -376,8 +324,6 @@ class TestPresenceTimeoutValidation:
         http.close()
 
     def test_presence_list_zero_timeout(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.get(f"{server_url}/v1/presence?timeout=0")
         assert resp.status_code == 400, "GET /v1/presence?timeout=0: expected 400, got " + str(
@@ -391,8 +337,6 @@ class TestPresenceTimeoutValidation:
         ids=["word", "alpha", "float", "null-string"],
     )
     def test_presence_agent_bad_timeout(self, server_url: str, timeout_val: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.get(f"{server_url}/v1/presence/some-agent?timeout={timeout_val}")
         assert resp.status_code == 400, (
@@ -402,8 +346,6 @@ class TestPresenceTimeoutValidation:
         http.close()
 
     def test_presence_agent_negative_timeout(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.get(f"{server_url}/v1/presence/some-agent?timeout=-1")
         assert resp.status_code == 400, (
@@ -412,8 +354,6 @@ class TestPresenceTimeoutValidation:
         http.close()
 
     def test_presence_valid_timeout(self, server_url: str) -> None:
-        from mansio._vendor.httpclient import Client as HttpClient
-
         http = HttpClient()
         resp = http.get(f"{server_url}/v1/presence?timeout=60")
         assert resp.status_code == 200, "GET /v1/presence?timeout=60: expected 200, got " + str(
