@@ -57,6 +57,7 @@ class FederationLink:
             "FederationLink is experimental: two-instance bridging only, "
             "no multi-hop mesh, loop prevention via metadata convention "
             "(not server-enforced). API may change without notice.",
+            FutureWarning,
             stacklevel=2,
         )
         if local_instance == remote_instance:

@@ -112,7 +112,7 @@ with FederationLink(local, remote, local_instance="a", remote_instance="b") as l
 
 **Known limitations:**
 
-- Two-instance bridging only — no multi-hop mesh (A → B → C).
+- Two-instance bridging only — no multi-hop mesh (A → B → C, deferred to Phase 2).
 - Loop prevention uses a boolean `bridged` metadata flag, not a
   `visited_instances` list; a message bridged from A to B will not be
   forwarded onward to C.
