@@ -28,8 +28,11 @@ class TestParseArgsServe:
         assert args.http is None
         assert args.remote is False
         assert args.token is None
+        assert args.admin_password is None
+        assert args.host is None
         assert args.no_ui is False
         assert args.log_level == "INFO"
+        assert args.nats is None
 
     def test_explicit_serve(self):
         args = parse_args(["serve"])
@@ -86,6 +89,34 @@ class TestParseArgsServe:
     def test_serve_irc_ssl(self):
         args = parse_args(["serve", "--irc", "host:6697", "--irc-ssl"])
         assert args.irc_ssl is True
+
+    def test_serve_nats(self):
+        args = parse_args(["serve", "--nats", "nats://localhost:4222"])
+        assert args.nats == "nats://localhost:4222"
+        assert args.db is None
+        assert args.maildir is None
+
+    def test_serve_nats_mutually_exclusive_with_db(self):
+        with pytest.raises(SystemExit):
+            parse_args(["serve", "--nats", "nats://localhost:4222", "-d", "test.db"])
+
+    def test_serve_nats_mutually_exclusive_with_maildir(self):
+        with pytest.raises(SystemExit):
+            parse_args(["serve", "--nats", "nats://localhost:4222", "--maildir", "/tmp/mail"])
+
+    def test_serve_host(self):
+        args = parse_args(["serve", "--host", "192.168.1.100"])
+        assert args.host == "192.168.1.100"
+
+    def test_serve_admin_password(self):
+        args = parse_args(["serve", "--admin-password", "my-secret"])
+        assert args.admin_password == "my-secret"
+
+    def test_serve_admin_password_and_token_both_set(self):
+        """Both --admin-password and --token can be parsed (conflict checked at runtime)."""
+        args = parse_args(["serve", "--admin-password", "pw1", "--token", "pw2"])
+        assert args.admin_password == "pw1"
+        assert args.token == "pw2"
 
     def test_serve_irc_defaults(self):
         args = parse_args(["serve"])
@@ -315,6 +346,9 @@ class TestCliSubprocess:
         assert result.returncode == 0
         assert "--http" in result.stdout
         assert "--admin-port" in result.stdout
+        assert "--nats" in result.stdout
+        assert "--host" in result.stdout
+        assert "--admin-password" in result.stdout
 
     def test_client_help(self):
         result = subprocess.run(

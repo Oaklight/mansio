@@ -124,6 +124,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Use Maildir backend at PATH instead of SQLite",
     )
+    backend_group.add_argument(
+        "--nats",
+        metavar="URL",
+        default=None,
+        help="Use NATS backend at URL (e.g. nats://localhost:4222)",
+    )
     serve.add_argument(
         "--http",
         metavar="[HOST:]PORT",
@@ -137,19 +143,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Admin panel port (default: 8741)",
     )
     serve.add_argument(
+        "--host",
+        default=None,
+        help="Admin panel bind address (default: 127.0.0.1)",
+    )
+    serve.add_argument(
+        "--admin-password",
+        default=None,
+        help="Admin panel password (auto-generated when --remote is used)",
+    )
+    serve.add_argument(
         "--remote",
         action="store_true",
-        help="Allow remote connections for admin (binds to 0.0.0.0, enables auth)",
+        help=(
+            "Shorthand: bind admin to 0.0.0.0 and auto-generate admin password. "
+            "Equivalent to --host 0.0.0.0 with an auto-generated --admin-password"
+        ),
     )
     serve.add_argument(
         "--token",
         default=None,
-        help="Admin password for admin panel (auto-generated if --remote)",
+        help="Deprecated alias for --admin-password",
     )
     serve.add_argument(
         "--no-auth",
         action="store_true",
-        help="Disable API token auth and admin auth (for local dev)",
+        help="Disable all auth — API token auth and admin auth (dev only)",
     )
     serve.add_argument(
         "--no-ui",
@@ -292,6 +311,14 @@ def _create_bus(args: argparse.Namespace, logger: Any) -> Any:
         logger.info("Bus started", backend="maildir", path=args.maildir)
         return Bus(backend=backend)
 
+    if args.nats:
+        from mansio.backends.nats import NATSBackend
+        from mansio.bus import Bus
+
+        backend = NATSBackend(url=args.nats)
+        logger.info("Bus started", backend="nats", url=args.nats)
+        return Bus(backend=backend)
+
     from mansio.backends.sqlite import SchemaVersionError
 
     db_path = _migrate_legacy_db(args.db or _DEFAULT_DB, logger)
@@ -306,6 +333,159 @@ def _create_bus(args: argparse.Namespace, logger: Any) -> Any:
         sys.exit(1)
     logger.info("Bus started", backend="sqlite", db=db_path)
     return bus
+
+
+def _resolve_admin_auth(args: argparse.Namespace, logger: Any) -> tuple[str, str | None]:
+    """Resolve admin host and password from CLI flags.
+
+    Handles --host, --remote, --admin-password, --token (deprecated),
+    and --no-auth safety checks.
+
+    Args:
+        args: Parsed arguments namespace.
+        logger: Structured logger.
+
+    Returns:
+        Tuple of (admin_host, admin_password). Calls sys.exit on
+        invalid combinations.
+    """
+    # Resolve --token as deprecated alias for --admin-password
+    admin_password = args.admin_password
+    if args.token:
+        if admin_password:
+            logger.error("Cannot use both --admin-password and --token (--token is deprecated)")
+            sys.exit(1)
+        import warnings
+
+        warnings.warn(
+            "--token is deprecated, use --admin-password instead. "
+            "Support for --token will be removed in mansio 1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        admin_password = args.token
+
+    # Resolve admin bind host: explicit --host > --remote > default
+    admin_host = args.host if args.host else ("0.0.0.0" if args.remote else "127.0.0.1")
+
+    # --no-auth + remote-accessible is dangerous — refuse to start
+    if args.no_auth and (args.remote or (args.host and args.host != "127.0.0.1")):
+        logger.error(
+            "--no-auth cannot be used with remote access "
+            "(would expose unauthenticated API to the network)"
+        )
+        sys.exit(1)
+
+    return admin_host, admin_password
+
+
+def _create_token_store(args: argparse.Namespace, logger: Any) -> Any:
+    """Create token store if applicable.
+
+    TokenStore requires SQLite; returns None for non-SQLite backends
+    or when --no-auth is set.
+
+    Args:
+        args: Parsed arguments namespace.
+        logger: Structured logger.
+
+    Returns:
+        TokenStore instance or None.
+    """
+    if args.no_auth or args.maildir or args.nats:
+        return None
+
+    from mansio.token_store import TokenStore
+
+    db_path = args.db or _DEFAULT_DB
+    token_store = TokenStore(db_path)
+    token_count = len(token_store.list_tokens())
+    if token_count > 0:
+        logger.info("Token auth enabled", token_count=token_count)
+    else:
+        logger.info("Token auth ready (no tokens yet — API open until first token created)")
+    return token_store
+
+
+def _start_http_frontend(args: argparse.Namespace, bus: Any, token_store: Any, logger: Any) -> Any:
+    """Start HttpFrontend if --http is set.
+
+    Args:
+        args: Parsed arguments namespace.
+        bus: Message bus instance.
+        token_store: Token store or None.
+        logger: Structured logger.
+
+    Returns:
+        HttpFrontend instance or None.
+    """
+    if not args.http:
+        return None
+
+    from mansio.frontends.http import HttpFrontend
+
+    host, port = _parse_host_port(args.http)
+    http_frontend = HttpFrontend(host=host, port=port, token_store=token_store)
+    http_frontend.attach(bus)
+    http_thread = threading.Thread(
+        target=http_frontend.serve_forever,
+        name="mansio-http-frontend",
+        daemon=True,
+    )
+    http_thread.start()
+    # Wait for server to bind (port changes from 0 to actual)
+    for _ in range(50):
+        _, actual_port = http_frontend.address
+        if actual_port != 0:
+            break
+        time.sleep(0.01)
+    actual_host, actual_port = http_frontend.address
+    logger.info("HttpFrontend started", url=f"http://{actual_host}:{actual_port}")
+    return http_frontend
+
+
+def _start_irc_frontend(args: argparse.Namespace, bus: Any, logger: Any) -> Any:
+    """Start IrcFrontend if --irc is set.
+
+    Args:
+        args: Parsed arguments namespace.
+        bus: Message bus instance.
+        logger: Structured logger.
+
+    Returns:
+        IrcFrontend instance or None.
+    """
+    if not args.irc:
+        return None
+
+    from mansio.frontends.irc import IrcFrontend
+
+    if ":" not in args.irc:
+        logger.error("--irc requires HOST:PORT format (e.g. irc.example.com:6667)")
+        sys.exit(1)
+    irc_host, irc_port = _parse_host_port(args.irc)
+    irc_frontend = IrcFrontend(
+        irc_host=irc_host,
+        irc_port=irc_port,
+        nickname=args.irc_nick,
+        channels=args.irc_channels or [],
+        use_ssl=args.irc_ssl,
+    )
+    irc_frontend.attach(bus)
+    irc_thread = threading.Thread(
+        target=irc_frontend.serve_forever,
+        name="mansio-irc-frontend",
+        daemon=True,
+    )
+    irc_thread.start()
+    logger.info(
+        "IrcFrontend started",
+        host=irc_host,
+        port=irc_port,
+        nick=args.irc_nick,
+        channels=args.irc_channels or [],
+    )
+    return irc_frontend
 
 
 def _cmd_serve(args: argparse.Namespace) -> None:
@@ -325,91 +505,25 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     configure(logger_factory=lambda *a: logging.getLogger(a[0] if a else "mansio"))
     logger = get_logger("mansio")
 
-    # --no-auth + --remote is dangerous — refuse to start
-    if args.no_auth and args.remote:
-        logger.error("--no-auth cannot be used with --remote (would expose unauthenticated API)")
-        sys.exit(1)
-
+    admin_host, admin_password = _resolve_admin_auth(args, logger)
     bus = _create_bus(args, logger)
+    token_store = _create_token_store(args, logger)
 
-    # Set up token store (unless --no-auth)
-    token_store = None
-    if not args.no_auth:
-        from mansio.token_store import TokenStore
-
-        token_store = TokenStore(args.db)
-        token_count = len(token_store.list_tokens())
-        if token_count > 0:
-            logger.info("Token auth enabled", token_count=token_count)
-        else:
-            logger.info("Token auth ready (no tokens yet — API open until first token created)")
-
-    # Start HttpFrontend if requested
-    http_frontend = None
-    if args.http:
-        from mansio.frontends.http import HttpFrontend
-
-        host, port = _parse_host_port(args.http)
-        http_frontend = HttpFrontend(host=host, port=port, token_store=token_store)
-        http_frontend.attach(bus)
-        http_thread = threading.Thread(
-            target=http_frontend.serve_forever,
-            name="mansio-http-frontend",
-            daemon=True,
-        )
-        http_thread.start()
-        # Wait for server to bind (port changes from 0 to actual)
-        for _ in range(50):
-            _, actual_port = http_frontend.address
-            if actual_port != 0:
-                break
-            time.sleep(0.01)
-        actual_host, actual_port = http_frontend.address
-        logger.info("HttpFrontend started", url=f"http://{actual_host}:{actual_port}")
-
-    # Start IrcFrontend if requested
-    irc_frontend = None
-    if args.irc:
-        from mansio.frontends.irc import IrcFrontend
-
-        if ":" not in args.irc:
-            logger.error("--irc requires HOST:PORT format (e.g. irc.example.com:6667)")
-            sys.exit(1)
-        irc_host, irc_port = _parse_host_port(args.irc)
-        irc_frontend = IrcFrontend(
-            irc_host=irc_host,
-            irc_port=irc_port,
-            nickname=args.irc_nick,
-            channels=args.irc_channels or [],
-            use_ssl=args.irc_ssl,
-        )
-        irc_frontend.attach(bus)
-        irc_thread = threading.Thread(
-            target=irc_frontend.serve_forever,
-            name="mansio-irc-frontend",
-            daemon=True,
-        )
-        irc_thread.start()
-        logger.info(
-            "IrcFrontend started",
-            host=irc_host,
-            port=irc_port,
-            nick=args.irc_nick,
-            channels=args.irc_channels or [],
-        )
+    http_frontend = _start_http_frontend(args, bus, token_store, logger)
+    irc_frontend = _start_irc_frontend(args, bus, logger)
 
     # Start AdminServer as a Frontend
     from mansio.admin import AdminServer
 
     admin_kwargs: dict[str, Any] = {
-        "host": "0.0.0.0" if args.remote else "127.0.0.1",
+        "host": admin_host,
         "port": args.admin_port,
         "serve_ui": not args.no_ui,
         "remote": args.remote,
         "token_store": token_store,
     }
-    if args.token:
-        admin_kwargs["auth_password"] = args.token
+    if admin_password:
+        admin_kwargs["auth_password"] = admin_password
 
     admin = AdminServer(**admin_kwargs)
     admin.attach(bus)
