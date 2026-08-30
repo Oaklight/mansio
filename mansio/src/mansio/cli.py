@@ -368,13 +368,25 @@ def _resolve_admin_auth(args: argparse.Namespace, logger: Any) -> tuple[str, str
     # Resolve admin bind host: explicit --host > --remote > default
     admin_host = args.host if args.host else ("0.0.0.0" if args.remote else "127.0.0.1")
 
+    _LOCALHOST = {"127.0.0.1", "::1", "localhost"}
+
     # --no-auth + remote-accessible is dangerous — refuse to start
-    if args.no_auth and (args.remote or (args.host and args.host != "127.0.0.1")):
+    if args.no_auth and (args.remote or (args.host and args.host not in _LOCALHOST)):
         logger.error(
             "--no-auth cannot be used with remote access "
             "(would expose unauthenticated API to the network)"
         )
         sys.exit(1)
+
+    # Auto-generate password when exposed without explicit auth
+    if admin_host not in _LOCALHOST and not admin_password and not args.no_auth:
+        import secrets
+
+        admin_password = secrets.token_urlsafe(16)
+        logger.warning(
+            "Admin panel exposed on %s without --admin-password, auto-generated one",
+            admin_host,
+        )
 
     return admin_host, admin_password
 
@@ -392,7 +404,11 @@ def _create_token_store(args: argparse.Namespace, logger: Any) -> Any:
     Returns:
         TokenStore instance or None.
     """
-    if args.no_auth or args.maildir or args.nats:
+    if args.no_auth:
+        return None
+    if args.maildir or args.nats:
+        backend_name = "maildir" if args.maildir else "nats"
+        logger.info("Token auth not available with %s backend", backend_name)
         return None
 
     from mansio.token_store import TokenStore
