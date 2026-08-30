@@ -1134,9 +1134,7 @@ class HttpFrontend:
                 }, 400
 
             max_messages = data.get("max_messages")
-            if max_messages is not None and (
-                not isinstance(max_messages, int) or max_messages < 1
-            ):
+            if max_messages is not None and (not isinstance(max_messages, int) or max_messages < 1):
                 return {
                     "error": "Bad Request",
                     "message": "max_messages must be a positive integer",
