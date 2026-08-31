@@ -84,15 +84,15 @@ class ACLEntry:
 
     Attributes:
         channel: Channel name this entry applies to.
-        agent_id: Agent granted access.
+        user_id: User granted access.
         permission: Access level — ``"read"``, ``"write"``, or ``"admin"``.
             ``admin`` implies ``write`` implies ``read``.
         granted_at: ISO 8601 timestamp.
-        granted_by: Agent that created this entry (optional).
+        granted_by: User that created this entry (optional).
     """
 
     channel: str
-    agent_id: str
+    user_id: str
     permission: str = field(default="write")  # "read" | "write" | "admin"
     granted_at: str = field(default="")
     granted_by: str | None = field(default=None)
@@ -103,17 +103,17 @@ PERMISSION_LEVELS: dict[str, int] = {"read": 0, "write": 1, "admin": 2}
 
 
 @dataclass(frozen=True, slots=True)
-class AgentPresence:
-    """Presence record for a single agent.
+class UserPresence:
+    """Presence record for a single user.
 
     Attributes:
-        agent_id: Unique agent identifier.
+        user_id: Unique user identifier.
         status: ``"online"`` or ``"offline"``.
         last_seen: ISO 8601 timestamp of last heartbeat.
         metadata: Optional extra fields (display_name, capabilities, etc.).
     """
 
-    agent_id: str
+    user_id: str
     status: str  # "online" | "offline"
     last_seen: str
     metadata: dict | None = field(default=None)

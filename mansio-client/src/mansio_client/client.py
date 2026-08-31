@@ -12,14 +12,14 @@ import re
 from typing import TYPE_CHECKING, Literal, overload
 
 from mansio_client.transport import HttpTransport
-from mansio_client.types import AgentPresence, ClaimResult, Message
+from mansio_client.types import ClaimResult, Message, UserPresence
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from mansio_client.injectors import Injector
 
-_AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
+_USER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
 
 
 def _tags_match(msg_tags: list[str] | None, filter_tags: list[str]) -> bool:
@@ -33,9 +33,9 @@ class MansioClient:
 
     Args:
         url: Server URL (e.g. ``"https://mansio-api.example.com"``).
-        agent_id: Unique agent identifier (3-64 chars, lowercase).
+        user_id: Unique user identifier (3-64 chars, lowercase).
         token: Bearer token for API authentication (``mst-...``).
-        display_name: Human-readable name. Defaults to agent_id.
+        display_name: Human-readable name. Defaults to user_id.
 
     Example::
 
@@ -47,33 +47,33 @@ class MansioClient:
     def __init__(
         self,
         url: str,
-        agent_id: str,
+        user_id: str,
         *,
         token: str | None = None,
         display_name: str | None = None,
     ) -> None:
-        self._validate_agent_id(agent_id)
-        self._agent_id = agent_id
-        self._display_name = display_name or agent_id
-        self._transport = HttpTransport(url, agent_id=agent_id, token=token)
+        self._validate_user_id(user_id)
+        self._user_id = user_id
+        self._display_name = display_name or user_id
+        self._transport = HttpTransport(url, user_id=user_id, token=token)
         self._cursors: dict[str, str] = {}
 
         self._announce()
         self._restore_cursors()
 
     @staticmethod
-    def _validate_agent_id(agent_id: str) -> None:
-        if not _AGENT_ID_RE.match(agent_id):
+    def _validate_user_id(user_id: str) -> None:
+        if not _USER_ID_RE.match(user_id):
             raise ValueError(
-                f"Invalid agent_id {agent_id!r}: must be 3-64 chars, "
+                f"Invalid user_id {user_id!r}: must be 3-64 chars, "
                 f"lowercase alphanumeric + hyphens, start/end with alphanumeric."
             )
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
     @property
-    def agent_id(self) -> str:
-        return self._agent_id
+    def user_id(self) -> str:
+        return self._user_id
 
     @property
     def display_name(self) -> str:
@@ -91,22 +91,22 @@ class MansioClient:
         self.close()
 
     def __repr__(self) -> str:
-        return f"MansioClient(agent_id={self._agent_id!r})"
+        return f"MansioClient(user_id={self._user_id!r})"
 
     # ── Announce + Cursors ────────────────────────────────────────
 
     def _announce(self) -> None:
         with contextlib.suppress(Exception):
             self._transport.publish(
-                "_system:agents",
-                self._agent_id,
+                "_system:users",
+                self._user_id,
                 "presence",
                 json.dumps({"status": "online"}),
                 metadata={"display_name": self._display_name},
             )
 
     def _restore_cursors(self) -> None:
-        cursor_channel = f"_system:cursors:{self._agent_id}"
+        cursor_channel = f"_system:cursors:{self._user_id}"
         with contextlib.suppress(Exception):
             msgs = self._transport.query(cursor_channel, limit=1000)
             for msg in reversed(msgs):
@@ -120,8 +120,8 @@ class MansioClient:
             return
         with contextlib.suppress(Exception):
             self._transport.publish(
-                f"_system:cursors:{self._agent_id}",
-                self._agent_id,
+                f"_system:cursors:{self._user_id}",
+                self._user_id,
                 "cursor_snapshot",
                 json.dumps(self._cursors),
             )
@@ -139,7 +139,7 @@ class MansioClient:
     ) -> str:
         return self._transport.publish(
             channel,
-            self._agent_id,
+            self._user_id,
             msg_type,
             content,
             metadata,
@@ -199,11 +199,11 @@ class MansioClient:
         return f"dm:{pair[0]}:{pair[1]}"
 
     def dm_send(self, to_agent: str, content: str) -> str:
-        channel = self._dm_channel(self._agent_id, to_agent)
+        channel = self._dm_channel(self._user_id, to_agent)
         return self.channel_send(channel, content, msg_type="chat")
 
     def dm_read(self, with_agent: str, limit: int = 10) -> list[Message]:
-        channel = self._dm_channel(self._agent_id, with_agent)
+        channel = self._dm_channel(self._user_id, with_agent)
         return self.channel_read(channel, limit=limit)
 
     # ── Notes ─────────────────────────────────────────────────────
@@ -211,13 +211,13 @@ class MansioClient:
     def note_write(self, content: str, tags: list[str] | None = None) -> str:
         metadata = {"tags": tags} if tags else None
         return self.channel_send(
-            f"notebook:{self._agent_id}", content, msg_type="note", metadata=metadata
+            f"notebook:{self._user_id}", content, msg_type="note", metadata=metadata
         )
 
     def note_read(
         self, tags: list[str] | None = None, limit: int = 10
     ) -> list[Message]:
-        msgs = self.channel_read(f"notebook:{self._agent_id}", limit=limit)
+        msgs = self.channel_read(f"notebook:{self._user_id}", limit=limit)
         if tags is None:
             return [m for m in msgs if m.msg_type == "note"]
         return [
@@ -234,28 +234,28 @@ class MansioClient:
         self, thinking_mode: str, focus_area: str, thought_process: str
     ) -> str:
         return self.channel_send(
-            f"notebook:{self._agent_id}",
+            f"notebook:{self._user_id}",
             thought_process,
             msg_type="thought",
             metadata={"thinking_mode": thinking_mode, "focus_area": focus_area},
         )
 
     def thought_read(self, limit: int = 10) -> list[Message]:
-        msgs = self.channel_read(f"notebook:{self._agent_id}", limit=limit)
+        msgs = self.channel_read(f"notebook:{self._user_id}", limit=limit)
         return [m for m in msgs if m.msg_type == "thought"]
 
     # ── Memory ────────────────────────────────────────────────────
 
     def memory_store(self, content: str, memory_type: str = "general") -> str:
         return self.channel_send(
-            f"memory:{self._agent_id}",
+            f"memory:{self._user_id}",
             content,
             msg_type="memory",
             metadata={"memory_type": memory_type},
         )
 
     def memory_recall(self, query: str, limit: int = 5) -> list[Message]:
-        msgs = self.channel_read(f"memory:{self._agent_id}", limit=limit * 5)
+        msgs = self.channel_read(f"memory:{self._user_id}", limit=limit * 5)
         memories = [m for m in msgs if m.msg_type == "memory"]
         if query:
             memories = [m for m in memories if query.lower() in m.payload.lower()]
@@ -274,7 +274,7 @@ class MansioClient:
         return self.channel_read(f"broadcast:{topic}", limit=limit)
 
     def notification_check(self) -> list[Message]:
-        return self.channel_poll(f"_system:notifications:{self._agent_id}")
+        return self.channel_poll(f"_system:notifications:{self._user_id}")
 
     # ── Queue ─────────────────────────────────────────────────────
 
@@ -286,18 +286,18 @@ class MansioClient:
         metadata: dict | None = None,
     ) -> str:
         return self._transport.publish(
-            channel, self._agent_id, msg_type, content, metadata, queue=True
+            channel, self._user_id, msg_type, content, metadata, queue=True
         )
 
     def queue_claim(
         self, channel: str, *, lease_seconds: int = 300
     ) -> ClaimResult | None:
         return self._transport.queue_claim(
-            channel, self._agent_id, lease_seconds=lease_seconds
+            channel, self._user_id, lease_seconds=lease_seconds
         )
 
     def queue_ack(self, message_id: str) -> ClaimResult | None:
-        return self._transport.queue_ack(message_id, self._agent_id)
+        return self._transport.queue_ack(message_id, self._user_id)
 
     def queue_status(self, message_id: str) -> dict | None:
         return self._transport.queue_status(message_id)
@@ -305,15 +305,15 @@ class MansioClient:
     # ── Presence ──────────────────────────────────────────────────
 
     def heartbeat(self, metadata: dict | None = None) -> None:
-        self._transport.heartbeat(self._agent_id, metadata)
+        self._transport.heartbeat(self._user_id, metadata)
 
-    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
-        return self._transport.agents(timeout_seconds)
+    def users(self, timeout_seconds: int = 120) -> list[UserPresence]:
+        return self._transport.users(timeout_seconds)
 
-    def agent_status(
-        self, agent_id: str, timeout_seconds: int = 120
-    ) -> AgentPresence | None:
-        return self._transport.agent_status(agent_id, timeout_seconds)
+    def user_status(
+        self, user_id: str, timeout_seconds: int = 120
+    ) -> UserPresence | None:
+        return self._transport.user_status(user_id, timeout_seconds)
 
     # ── Subscribe / Unsubscribe ───────────────────────────────────
 

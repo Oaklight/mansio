@@ -9,7 +9,7 @@ Usage::
     from mansio_client import MansioClient
     from mansio_client.injectors import ClaudeCodeInjector
 
-    client = MansioClient(url, agent_id, token=token)
+    client = MansioClient(url, user_id, token=token)
     injector = ClaudeCodeInjector(project_dir=".")
     sub_ids = client.listen(["general", "inbox"], injector)
 """

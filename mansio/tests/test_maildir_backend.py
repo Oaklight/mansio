@@ -636,40 +636,40 @@ class TestPathTraversal:
 
 
 class TestPresence:
-    """Verify heartbeat/agents/agent_status on MaildirBackend."""
+    """Verify heartbeat/users/user_status on MaildirBackend."""
 
     def test_heartbeat_and_agents(self, tmp_path):
         backend = MaildirBackend(tmp_path / "presence")
         backend.heartbeat("agent-a", metadata={"role": "worker"})
         backend.heartbeat("agent-b")
 
-        agents = backend.agents(timeout_seconds=120)
-        assert len(agents) == 2
-        ids = {a.agent_id for a in agents}
+        online_users = backend.users(timeout_seconds=120)
+        assert len(online_users) == 2
+        ids = {a.user_id for a in online_users}
         assert ids == {"agent-a", "agent-b"}
-        for a in agents:
+        for a in online_users:
             assert a.status == "online"
 
-    def test_agent_status_known(self, tmp_path):
+    def test_user_status_known(self, tmp_path):
         backend = MaildirBackend(tmp_path / "presence")
         backend.heartbeat("agent-x", metadata={"v": 1})
-        status = backend.agent_status("agent-x")
+        status = backend.user_status("agent-x")
         assert status is not None
-        assert status.agent_id == "agent-x"
+        assert status.user_id == "agent-x"
         assert status.status == "online"
         assert status.metadata == {"v": 1}
 
-    def test_agent_status_unknown(self, tmp_path):
+    def test_user_status_unknown(self, tmp_path):
         backend = MaildirBackend(tmp_path / "presence")
-        assert backend.agent_status("ghost") is None
+        assert backend.user_status("ghost") is None
 
     def test_agent_offline_by_timeout(self, tmp_path):
         backend = MaildirBackend(tmp_path / "presence")
         backend.heartbeat("agent-old")
         # With timeout_seconds=0, even a just-heartbeated agent is offline.
-        agents = backend.agents(timeout_seconds=0)
-        assert len(agents) == 1
-        assert agents[0].status == "offline"
+        online_users = backend.users(timeout_seconds=0)
+        assert len(online_users) == 1
+        assert online_users[0].status == "offline"
 
     def test_presence_survives_restart(self, tmp_path):
         root = tmp_path / "presence-persist"
@@ -678,9 +678,9 @@ class TestPresence:
         b1.close()
 
         b2 = MaildirBackend(root)
-        status = b2.agent_status("agent-persist")
+        status = b2.user_status("agent-persist")
         assert status is not None
-        assert status.agent_id == "agent-persist"
+        assert status.user_id == "agent-persist"
         b2.close()
 
 

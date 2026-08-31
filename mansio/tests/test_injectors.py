@@ -471,7 +471,7 @@ class TestHelpers:
         assert _safe_filename("agent-a") == "agent-a"
         assert _safe_filename("dm:a:b") == "dm_a_b"
         assert _safe_filename("hello world") == "hello_world"
-        assert _safe_filename("_system:agents") == "_system_agents"
+        assert _safe_filename("_system:users") == "_system_users"
         assert _safe_filename("") == ""
 
 
@@ -489,7 +489,7 @@ class TestClientListen:
         with patch.object(MansioClient, "__init__", lambda self, *a, **kw: None):
             client = MansioClient.__new__(MansioClient)
             client._transport = MagicMock()
-            client._agent_id = "test"
+            client._user_id = "test"
             client._display_name = "test"
             client._cursors = {}
 
@@ -519,7 +519,7 @@ class TestClientListen:
         with patch.object(MansioClient, "__init__", lambda self, *a, **kw: None):
             client = MansioClient.__new__(MansioClient)
             client._transport = MagicMock()
-            client._agent_id = "test"
+            client._user_id = "test"
             client._display_name = "test"
             client._cursors = {}
 

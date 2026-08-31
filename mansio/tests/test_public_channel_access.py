@@ -54,8 +54,8 @@ class TestPublicChannelQuery:
         alice_token = store.create_token("alice", "Alice's token")["token"]
         bob_token = store.create_token("bob", "Bob's token")["token"]
 
-        alice_t = HttpTransport(url, agent_id="alice", token=alice_token)
-        bob_t = HttpTransport(url, agent_id="bob", token=bob_token)
+        alice_t = HttpTransport(url, user_id="alice", token=alice_token)
+        bob_t = HttpTransport(url, user_id="bob", token=bob_token)
 
         alice_t.publish("dev-mansio", "alice", "chat", "hello from alice")
         bob_t.publish("dev-mansio", "bob", "chat", "hello from bob")
@@ -83,9 +83,9 @@ class TestPublicChannelQuery:
         b_token = store.create_token("agent-b", "B")["token"]
         c_token = store.create_token("agent-c", "C")["token"]
 
-        a_t = HttpTransport(url, agent_id="agent-a", token=a_token)
-        b_t = HttpTransport(url, agent_id="agent-b", token=b_token)
-        c_t = HttpTransport(url, agent_id="agent-c", token=c_token)
+        a_t = HttpTransport(url, user_id="agent-a", token=a_token)
+        b_t = HttpTransport(url, user_id="agent-b", token=b_token)
+        c_t = HttpTransport(url, user_id="agent-c", token=c_token)
 
         a_t.publish("shared-channel", "agent-a", "chat", "msg-a")
         b_t.publish("shared-channel", "agent-b", "chat", "msg-b")
@@ -152,9 +152,9 @@ class TestDMIsolation:
         bob_token = store.create_token("bob", "Bob")["token"]
         eve_token = store.create_token("eve", "Eve")["token"]
 
-        alice_t = HttpTransport(url, agent_id="alice", token=alice_token)
-        bob_t = HttpTransport(url, agent_id="bob", token=bob_token)
-        eve_t = HttpTransport(url, agent_id="eve", token=eve_token)
+        alice_t = HttpTransport(url, user_id="alice", token=alice_token)
+        bob_t = HttpTransport(url, user_id="bob", token=bob_token)
+        eve_t = HttpTransport(url, user_id="eve", token=eve_token)
 
         # Alice sends a DM to Bob
         alice_t.publish("dm:alice:bob", "alice", "chat", "secret for bob")
@@ -199,8 +199,8 @@ class TestPrivateChannelIsolation:
         milo_token = store.create_token("milo", "Milo")["token"]
         elena_token = store.create_token("elena", "Elena")["token"]
 
-        milo_t = HttpTransport(url, agent_id="milo", token=milo_token)
-        elena_t = HttpTransport(url, agent_id="elena", token=elena_token)
+        milo_t = HttpTransport(url, user_id="milo", token=milo_token)
+        elena_t = HttpTransport(url, user_id="elena", token=elena_token)
 
         milo_t.publish("notebook:milo", "milo", "note", "milo's private note")
 

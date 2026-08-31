@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal, Protocol, overload
 
 if TYPE_CHECKING:
-    from mansio.types import AgentPresence, ClaimResult, Message
+    from mansio.types import ClaimResult, Message, UserPresence
 
 
 class Transport(Protocol):
@@ -108,14 +108,14 @@ class Transport(Protocol):
 
     # ── Presence ──────────────────────────────────────────────────
 
-    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
-        """Record a heartbeat for *agent_id*."""
+    def heartbeat(self, user_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *user_id*."""
         ...
 
-    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
-        """Return all known agents with computed online/offline status."""
+    def users(self, timeout_seconds: int = 120) -> list[UserPresence]:
+        """Return all known users with computed online/offline status."""
         ...
 
-    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
-        """Return presence for a single agent, or ``None`` if unknown."""
+    def user_status(self, user_id: str, timeout_seconds: int = 120) -> UserPresence | None:
+        """Return presence for a single user, or ``None`` if unknown."""
         ...

@@ -59,7 +59,7 @@ class TestTypes:
         assert m.visibility == "public"
 
     def test_acl_entry_defaults(self):
-        e = ACLEntry(channel="ch", agent_id="bob")
+        e = ACLEntry(channel="ch", user_id="bob")
         assert e.permission == "write"
         assert e.granted_at == ""
         assert e.granted_by is None
@@ -67,7 +67,7 @@ class TestTypes:
     def test_acl_entry_explicit(self):
         e = ACLEntry(
             channel="ch",
-            agent_id="bob",
+            user_id="bob",
             permission="admin",
             granted_at="t",
             granted_by="alice",
@@ -105,11 +105,11 @@ class TestMemoryChannelStore:
     def test_create_with_acl(self):
         b = MemoryBackend()
         meta = ChannelMeta(name="ch", owner="alice", visibility="private", created_at="t")
-        acl = [ACLEntry(channel="ch", agent_id="bob", permission="write", granted_at="t")]
+        acl = [ACLEntry(channel="ch", user_id="bob", permission="write", granted_at="t")]
         b.create_channel(meta, acl)
         entries = b.get_acl("ch")
         assert len(entries) == 1
-        assert entries[0].agent_id == "bob"
+        assert entries[0].user_id == "bob"
         b.close()
 
     def test_list_channels_meta(self):
@@ -133,7 +133,7 @@ class TestMemoryChannelStore:
     def test_delete_channel_meta(self):
         b = MemoryBackend()
         b.create_channel(ChannelMeta(name="ch", owner="alice", visibility="public", created_at="t"))
-        acl = [ACLEntry(channel="ch", agent_id="bob", permission="write", granted_at="t")]
+        acl = [ACLEntry(channel="ch", user_id="bob", permission="write", granted_at="t")]
         b.set_acl("ch", acl)
         assert b.delete_channel_meta("ch")
         assert b.get_channel("ch") is None
@@ -145,27 +145,23 @@ class TestMemoryChannelStore:
         b = MemoryBackend()
         b.create_channel(ChannelMeta(name="ch", owner="a", visibility="private", created_at="t"))
         # add
-        b.add_acl_entry(ACLEntry(channel="ch", agent_id="bob", permission="read", granted_at="t"))
-        b.add_acl_entry(
-            ACLEntry(channel="ch", agent_id="carol", permission="write", granted_at="t")
-        )
+        b.add_acl_entry(ACLEntry(channel="ch", user_id="bob", permission="read", granted_at="t"))
+        b.add_acl_entry(ACLEntry(channel="ch", user_id="carol", permission="write", granted_at="t"))
         assert len(b.get_acl("ch")) == 2
         # upsert
-        b.add_acl_entry(ACLEntry(channel="ch", agent_id="bob", permission="admin", granted_at="t"))
+        b.add_acl_entry(ACLEntry(channel="ch", user_id="bob", permission="admin", granted_at="t"))
         entries = b.get_acl("ch")
-        bob_entry = [e for e in entries if e.agent_id == "bob"][0]
+        bob_entry = [e for e in entries if e.user_id == "bob"][0]
         assert bob_entry.permission == "admin"
         # remove
         assert b.remove_acl_entry("ch", "bob")
         assert not b.remove_acl_entry("ch", "bob")  # already gone
         assert len(b.get_acl("ch")) == 1
         # replace all
-        b.set_acl(
-            "ch", [ACLEntry(channel="ch", agent_id="dave", permission="read", granted_at="t")]
-        )
+        b.set_acl("ch", [ACLEntry(channel="ch", user_id="dave", permission="read", granted_at="t")])
         entries = b.get_acl("ch")
         assert len(entries) == 1
-        assert entries[0].agent_id == "dave"
+        assert entries[0].user_id == "dave"
         b.close()
 
 
@@ -196,20 +192,20 @@ class TestSQLiteChannelStore:
         meta = ChannelMeta(name="ch", owner="alice", visibility="private", created_at="t")
         acl = [
             ACLEntry(
-                channel="ch", agent_id="bob", permission="write", granted_at="t", granted_by="alice"
+                channel="ch", user_id="bob", permission="write", granted_at="t", granted_by="alice"
             ),
         ]
         b.create_channel(meta, acl)
         entries = b.get_acl("ch")
         assert len(entries) == 1
-        assert entries[0].agent_id == "bob"
+        assert entries[0].user_id == "bob"
         assert entries[0].granted_by == "alice"
         b.close()
 
     def test_delete_cascades_acl(self, tmp_path):
         b = SQLiteBackend(str(tmp_path / "test.db"))
         meta = ChannelMeta(name="ch", owner="alice", visibility="private", created_at="t")
-        acl = [ACLEntry(channel="ch", agent_id="bob", permission="write", granted_at="t")]
+        acl = [ACLEntry(channel="ch", user_id="bob", permission="write", granted_at="t")]
         b.create_channel(meta, acl)
         b.delete_channel_meta("ch")
         assert b.get_acl("ch") == []
@@ -231,7 +227,7 @@ class TestSQLiteChannelStore:
         b1 = SQLiteBackend(db)
         b1.create_channel(
             ChannelMeta(name="ch", owner="alice", visibility="private", created_at="t"),
-            [ACLEntry(channel="ch", agent_id="bob", permission="write", granted_at="t")],
+            [ACLEntry(channel="ch", user_id="bob", permission="write", granted_at="t")],
         )
         b1.close()
         b2 = SQLiteBackend(db)
@@ -254,9 +250,9 @@ class TestCheckAccess:
         b.create_channel(
             ChannelMeta(name="priv", owner="alice", visibility="private", created_at="t"),
             [
-                ACLEntry(channel="priv", agent_id="reader", permission="read", granted_at="t"),
-                ACLEntry(channel="priv", agent_id="writer", permission="write", granted_at="t"),
-                ACLEntry(channel="priv", agent_id="admin", permission="admin", granted_at="t"),
+                ACLEntry(channel="priv", user_id="reader", permission="read", granted_at="t"),
+                ACLEntry(channel="priv", user_id="writer", permission="write", granted_at="t"),
+                ACLEntry(channel="priv", user_id="admin", permission="admin", granted_at="t"),
             ],
         )
         b.create_channel(
@@ -302,13 +298,13 @@ class TestCheckAccess:
 
     def test_public_explicit_read_acl_keeps_write(self, backend):
         """An explicit read ACL entry must not downgrade public write access."""
-        entry = ACLEntry(channel="pub", agent_id="stranger", permission="read", granted_at=_now())
+        entry = ACLEntry(channel="pub", user_id="stranger", permission="read", granted_at=_now())
         backend.add_acl_entry(entry)
         assert backend.check_access("pub", "stranger", "write")
 
     def test_private_explicit_read_blocks_write(self, backend):
         """On private channels, an explicit read ACL should NOT grant write."""
-        entry = ACLEntry(channel="priv", agent_id="stranger", permission="read", granted_at=_now())
+        entry = ACLEntry(channel="priv", user_id="stranger", permission="read", granted_at=_now())
         backend.add_acl_entry(entry)
         assert backend.check_access("priv", "stranger", "read")
         assert not backend.check_access("priv", "stranger", "write")
@@ -385,7 +381,7 @@ class TestBusChannelManagement:
 
     def test_acl_management(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        entry = ACLEntry(channel="ch", agent_id="bob", permission="write", granted_at=_now())
+        entry = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
         bus.add_acl_entry(entry)
         assert bus.check_access("ch", "bob", "write")
         entries = bus.get_acl("ch")
@@ -414,8 +410,8 @@ class TestSugarAutoCreation:
         assert meta is not None
         assert meta.visibility == "private"
         acl = bus.get_acl("dm:alice:bob")
-        agent_ids = {e.agent_id for e in acl}
-        assert agent_ids == {"alice", "bob"}
+        user_ids = {e.user_id for e in acl}
+        assert user_ids == {"alice", "bob"}
 
     def test_notebook_auto_create(self, bus):
         bus.publish("notebook:alice", "alice", "text", "note")
@@ -425,7 +421,7 @@ class TestSugarAutoCreation:
         assert meta.owner == "alice"
         acl = bus.get_acl("notebook:alice")
         assert len(acl) == 1
-        assert acl[0].agent_id == "alice"
+        assert acl[0].user_id == "alice"
         assert acl[0].permission == "admin"
 
     def test_memory_auto_create(self, bus):
@@ -477,7 +473,7 @@ class TestSQLiteBusACL:
 
     def test_full_flow(self, sqlite_bus):
         sqlite_bus.create_channel("priv", "alice", visibility="private")
-        entry = ACLEntry(channel="priv", agent_id="bob", permission="write", granted_at=_now())
+        entry = ACLEntry(channel="priv", user_id="bob", permission="write", granted_at=_now())
         sqlite_bus.add_acl_entry(entry)
         assert sqlite_bus.check_access("priv", "bob", "write")
         assert not sqlite_bus.check_access("priv", "carol", "read")
@@ -490,7 +486,7 @@ class TestSQLiteBusACL:
         meta = sqlite_bus.get_channel_meta("dm:alice:bob")
         assert meta.visibility == "private"
         acl = sqlite_bus.get_acl("dm:alice:bob")
-        assert {e.agent_id for e in acl} == {"alice", "bob"}
+        assert {e.user_id for e in acl} == {"alice", "bob"}
 
 
 # ──────────────────────────────────────────────
@@ -505,7 +501,7 @@ class TestACLEnforcement:
 
     def test_publish_write_allowed(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        entry = ACLEntry(channel="ch", agent_id="bob", permission="write", granted_at=_now())
+        entry = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
         bus.add_acl_entry(entry)
         msg_id = bus.publish("ch", "bob", "text", "hi", enforce_acl=True)
         assert msg_id
@@ -535,53 +531,53 @@ class TestACLEnforcement:
 
     def test_query_read_allowed(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        entry = ACLEntry(channel="ch", agent_id="bob", permission="read", granted_at=_now())
+        entry = ACLEntry(channel="ch", user_id="bob", permission="read", granted_at=_now())
         bus.add_acl_entry(entry)
         bus.publish("ch", "alice", "text", "hi")
-        msgs = bus.query("ch", agent_id="bob")
+        msgs = bus.query("ch", user_id="bob")
         assert len(msgs) == 1
 
     def test_query_read_denied(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
         bus.publish("ch", "alice", "text", "hi")
         with pytest.raises(PermissionError, match="read permission"):
-            bus.query("ch", agent_id="bob")
+            bus.query("ch", user_id="bob")
 
     def test_query_no_agent_skips_check(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
         bus.publish("ch", "alice", "text", "hi")
-        msgs = bus.query("ch")  # no agent_id
+        msgs = bus.query("ch")  # no user_id
         assert len(msgs) == 1
 
     # ── subscribe ─────────────────────────────
 
     def test_subscribe_read_allowed(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        entry = ACLEntry(channel="ch", agent_id="bob", permission="read", granted_at=_now())
+        entry = ACLEntry(channel="ch", user_id="bob", permission="read", granted_at=_now())
         bus.add_acl_entry(entry)
-        sub_id = bus.subscribe("ch", lambda m: None, agent_id="bob")
+        sub_id = bus.subscribe("ch", lambda m: None, user_id="bob")
         assert sub_id
 
     def test_subscribe_read_denied(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
         with pytest.raises(PermissionError, match="read permission"):
-            bus.subscribe("ch", lambda m: None, agent_id="bob")
+            bus.subscribe("ch", lambda m: None, user_id="bob")
 
     # ── delete_channel ────────────────────────
 
     def test_delete_channel_admin_allowed(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
         bus.publish("ch", "alice", "text", "hi")
-        count = bus.delete_channel("ch", agent_id="alice")  # owner = admin
+        count = bus.delete_channel("ch", user_id="alice")  # owner = admin
         assert count == 1
         assert bus.get_channel_meta("ch") is None
 
     def test_delete_channel_admin_denied(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        entry = ACLEntry(channel="ch", agent_id="bob", permission="write", granted_at=_now())
+        entry = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
         bus.add_acl_entry(entry)
         with pytest.raises(PermissionError, match="admin permission"):
-            bus.delete_channel("ch", agent_id="bob")
+            bus.delete_channel("ch", user_id="bob")
 
     def test_delete_channel_no_agent_skips_check(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
@@ -594,28 +590,28 @@ class TestACLEnforcement:
 
     def test_delete_own_message(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        entry = ACLEntry(channel="ch", agent_id="bob", permission="write", granted_at=_now())
+        entry = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
         bus.add_acl_entry(entry)
         msg_id = bus.publish("ch", "bob", "text", "hi")
-        assert bus.delete_message(msg_id, agent_id="bob")
+        assert bus.delete_message(msg_id, user_id="bob")
 
     def test_delete_other_message_as_admin(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        entry = ACLEntry(channel="ch", agent_id="bob", permission="write", granted_at=_now())
+        entry = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
         bus.add_acl_entry(entry)
         msg_id = bus.publish("ch", "bob", "text", "hi")
         # alice is owner (admin) — can delete bob's message
-        assert bus.delete_message(msg_id, agent_id="alice")
+        assert bus.delete_message(msg_id, user_id="alice")
 
     def test_delete_other_message_denied(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        entry_b = ACLEntry(channel="ch", agent_id="bob", permission="write", granted_at=_now())
-        entry_c = ACLEntry(channel="ch", agent_id="carol", permission="write", granted_at=_now())
+        entry_b = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
+        entry_c = ACLEntry(channel="ch", user_id="carol", permission="write", granted_at=_now())
         bus.add_acl_entry(entry_b)
         bus.add_acl_entry(entry_c)
         msg_id = bus.publish("ch", "bob", "text", "hi")
         with pytest.raises(PermissionError, match="cannot delete"):
-            bus.delete_message(msg_id, agent_id="carol")
+            bus.delete_message(msg_id, user_id="carol")
 
     def test_delete_message_no_agent_skips_check(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
@@ -628,29 +624,29 @@ class TestACLEnforcement:
         """Channels without metadata allow all operations."""
         msg_id = bus.publish("random", "anyone", "text", "hi", enforce_acl=True)
         assert msg_id
-        msgs = bus.query("random", agent_id="anyone")
+        msgs = bus.query("random", user_id="anyone")
         assert len(msgs) == 1
 
     # ── permission hierarchy ──────────────────
 
     def test_write_implies_read(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        entry = ACLEntry(channel="ch", agent_id="bob", permission="write", granted_at=_now())
+        entry = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
         bus.add_acl_entry(entry)
         # bob has write, should be able to read
-        msgs = bus.query("ch", agent_id="bob")
+        msgs = bus.query("ch", user_id="bob")
         assert msgs == []
 
     def test_admin_implies_write(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        entry = ACLEntry(channel="ch", agent_id="bob", permission="admin", granted_at=_now())
+        entry = ACLEntry(channel="ch", user_id="bob", permission="admin", granted_at=_now())
         bus.add_acl_entry(entry)
         msg_id = bus.publish("ch", "bob", "text", "hi", enforce_acl=True)
         assert msg_id
 
     def test_read_does_not_imply_write(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        entry = ACLEntry(channel="ch", agent_id="bob", permission="read", granted_at=_now())
+        entry = ACLEntry(channel="ch", user_id="bob", permission="read", granted_at=_now())
         bus.add_acl_entry(entry)
         with pytest.raises(PermissionError, match="write permission"):
             bus.publish("ch", "bob", "text", "hi", enforce_acl=True)
@@ -760,12 +756,12 @@ class TestHttpChannelACL:
             "POST",
             f"{base}/v1/channels/ch/acl",
             {
-                "agent_id": "bob",
+                "user_id": "bob",
                 "permission": "write",
             },
         )
         assert status == 201
-        assert data["entry"]["agent_id"] == "bob"
+        assert data["entry"]["user_id"] == "bob"
         assert data["entry"]["permission"] == "write"
 
     def test_add_acl_bad_permission(self, http_client):
@@ -775,7 +771,7 @@ class TestHttpChannelACL:
             "POST",
             f"{base}/v1/channels/ch/acl",
             {
-                "agent_id": "bob",
+                "user_id": "bob",
                 "permission": "superadmin",
             },
         )
@@ -789,7 +785,7 @@ class TestHttpChannelACL:
             "POST",
             f"{base}/v1/channels/ch/acl",
             {
-                "agent_id": "bob",
+                "user_id": "bob",
                 "permission": "read",
             },
         )
@@ -799,8 +795,8 @@ class TestHttpChannelACL:
             f"{base}/v1/channels/ch/acl",
             {
                 "acl": [
-                    {"agent_id": "carol", "permission": "write"},
-                    {"agent_id": "dave", "permission": "admin"},
+                    {"user_id": "carol", "permission": "write"},
+                    {"user_id": "dave", "permission": "admin"},
                 ],
             },
         )
@@ -808,10 +804,10 @@ class TestHttpChannelACL:
         assert data["count"] == 2
         # Verify bob is gone
         _, acl_data = self._req("GET", f"{base}/v1/channels/ch/acl")
-        agents = {e["agent_id"] for e in acl_data["acl"]}
-        assert "bob" not in agents
-        assert "carol" in agents
-        assert "dave" in agents
+        users = {e["user_id"] for e in acl_data["acl"]}
+        assert "bob" not in users
+        assert "carol" in users
+        assert "dave" in users
 
     def test_remove_acl_entry(self, http_client):
         base, bus = http_client
@@ -820,7 +816,7 @@ class TestHttpChannelACL:
             "POST",
             f"{base}/v1/channels/ch/acl",
             {
-                "agent_id": "bob",
+                "user_id": "bob",
                 "permission": "read",
             },
         )

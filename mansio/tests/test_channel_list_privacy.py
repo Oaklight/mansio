@@ -159,7 +159,7 @@ class TestChannelListPrivacy:
             b_token = store.create_token("agent-b", "B")["token"]
 
             bus.publish("dev-mansio", "agent-a", "chat", "hello")
-            bus.publish("_system:agents", "agent-a", "system", "heartbeat")
+            bus.publish("_system:users", "agent-a", "system", "heartbeat")
             bus.publish("broadcast:news", "agent-a", "chat", "news")
 
             for token in [a_token, b_token]:
@@ -167,7 +167,7 @@ class TestChannelListPrivacy:
                 resp = http.get(f"{url}/v1/channels")
                 channels = resp.json()["channels"]
                 assert "dev-mansio" in channels
-                assert "_system:agents" in channels
+                assert "_system:users" in channels
                 assert "broadcast:news" in channels
                 http.close()
         finally:

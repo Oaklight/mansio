@@ -578,7 +578,7 @@ def _cmd_client_send(args: argparse.Namespace) -> None:
     """
     from mansio.transport_http import HttpTransport
 
-    transport = HttpTransport(args.server, agent_id=args.agent, token=args.api_token)
+    transport = HttpTransport(args.server, user_id=args.agent, token=args.api_token)
     msg_id = transport.publish(args.channel, args.agent, args.msg_type, args.message)
     print(msg_id)
     transport.close()
@@ -592,7 +592,7 @@ def _cmd_client_poll(args: argparse.Namespace) -> None:
     """
     from mansio.transport_http import HttpTransport
 
-    transport = HttpTransport(args.server, agent_id=args.agent, token=args.api_token)
+    transport = HttpTransport(args.server, user_id=args.agent, token=args.api_token)
 
     if args.follow:
         # SSE mode: subscribe and print each message as JSON line
@@ -626,7 +626,7 @@ def _cmd_client_channels(args: argparse.Namespace) -> None:
     """
     from mansio.transport_http import HttpTransport
 
-    transport = HttpTransport(args.server, agent_id=args.agent, token=args.api_token)
+    transport = HttpTransport(args.server, user_id=args.agent, token=args.api_token)
     for ch in transport.channels():
         print(ch)
     transport.close()
@@ -644,7 +644,7 @@ def _cmd_client_dm(args: argparse.Namespace) -> None:
     pair = sorted([args.agent, args.to_agent])
     channel = f"dm:{pair[0]}:{pair[1]}"
 
-    transport = HttpTransport(args.server, agent_id=args.agent, token=args.api_token)
+    transport = HttpTransport(args.server, user_id=args.agent, token=args.api_token)
     msg_id = transport.publish(channel, args.agent, "chat", args.message)
     print(msg_id)
     transport.close()

@@ -54,9 +54,9 @@ def server_url(tmp_path):
     bus.close()
 
 
-def make_client(url: str, token_store: TokenStore, agent_id: str = "test-agent"):
+def make_client(url: str, token_store: TokenStore, user_id: str = "test-agent"):
     """Create a mansio_client.MansioClient with a fresh token."""
     from mansio_client import MansioClient
 
-    entry = token_store.create_token(agent_id=agent_id, label=f"{agent_id} test token")
-    return MansioClient(url, agent_id, token=entry["token"])
+    entry = token_store.create_token(user_id=user_id, label=f"{user_id} test token")
+    return MansioClient(url, user_id, token=entry["token"])

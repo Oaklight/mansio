@@ -472,7 +472,7 @@ class TestBulkDeleteSystemProtection(TestHttpDeletion):
         """Wildcard '*' must not delete _system: channels."""
         base_url, bus, _ = client
         _publish_n(bus, "user-ch", "agent-a", 2)
-        bus.publish("_system:agents", "agent-a", "presence", "online")
+        bus.publish("_system:users", "agent-a", "presence", "online")
 
         status, data = self._request(
             "POST",
@@ -482,13 +482,13 @@ class TestBulkDeleteSystemProtection(TestHttpDeletion):
         assert status == 200
         # user-ch should be deleted
         assert "user-ch" in data["channels"]
-        # _system:agents must NOT be deleted
-        assert "_system:agents" not in data["channels"]
+        # _system:users must NOT be deleted
+        assert "_system:users" not in data["channels"]
 
     def test_bulk_delete_system_glob_matches_nothing(self, client):
         """Pattern '_system:*' should match zero channels (all filtered)."""
         base_url, bus, _ = client
-        bus.publish("_system:agents", "agent-a", "presence", "online")
+        bus.publish("_system:users", "agent-a", "presence", "online")
         bus.publish("_system:registry", "agent-a", "registration", "data")
 
         status, data = self._request(

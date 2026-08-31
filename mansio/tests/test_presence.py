@@ -13,7 +13,7 @@ import pytest
 from mansio.backends.memory import MemoryBackend
 from mansio.backends.sqlite import SQLiteBackend
 from mansio.bus import Bus
-from mansio.types import AgentPresence
+from mansio.types import UserPresence
 
 _has_maildir = importlib.util.find_spec("mansio.backends.maildir") is not None
 
@@ -75,64 +75,64 @@ def backend(request, tmp_path):
 class TestHeartbeat:
     def test_heartbeat_records_agent(self, backend):
         backend.heartbeat("agent-a")
-        agents = backend.agents()
+        agents = backend.users()
         assert len(agents) == 1
-        assert agents[0].agent_id == "agent-a"
+        assert agents[0].user_id == "agent-a"
         assert agents[0].status == "online"
 
     def test_heartbeat_with_metadata(self, backend):
         backend.heartbeat("agent-a", metadata={"display_name": "Alice"})
-        result = backend.agent_status("agent-a")
+        result = backend.user_status("agent-a")
         assert result is not None
         assert result.metadata == {"display_name": "Alice"}
 
     def test_heartbeat_updates_last_seen(self, backend):
         backend.heartbeat("agent-a")
-        first = backend.agent_status("agent-a")
+        first = backend.user_status("agent-a")
         assert first is not None
         time.sleep(0.05)
         backend.heartbeat("agent-a")
-        second = backend.agent_status("agent-a")
+        second = backend.user_status("agent-a")
         assert second is not None
         assert second.last_seen >= first.last_seen
 
     def test_heartbeat_updates_metadata(self, backend):
         backend.heartbeat("agent-a", metadata={"v": 1})
         backend.heartbeat("agent-a", metadata={"v": 2})
-        result = backend.agent_status("agent-a")
+        result = backend.user_status("agent-a")
         assert result is not None
         assert result.metadata == {"v": 2}
 
     def test_heartbeat_no_metadata(self, backend):
         backend.heartbeat("agent-a")
-        result = backend.agent_status("agent-a")
+        result = backend.user_status("agent-a")
         assert result is not None
         assert result.metadata is None
 
 
 class TestAgents:
     def test_agents_empty(self, backend):
-        assert backend.agents() == []
+        assert backend.users() == []
 
     def test_agents_multiple(self, backend):
         backend.heartbeat("agent-b")
         backend.heartbeat("agent-a")
         backend.heartbeat("agent-c")
-        agents = backend.agents()
+        agents = backend.users()
         assert len(agents) == 3
-        # Sorted by agent_id
-        assert [a.agent_id for a in agents] == ["agent-a", "agent-b", "agent-c"]
+        # Sorted by user_id
+        assert [a.user_id for a in agents] == ["agent-a", "agent-b", "agent-c"]
 
     def test_agents_all_online(self, backend):
         backend.heartbeat("agent-a")
         backend.heartbeat("agent-b")
-        agents = backend.agents(timeout_seconds=120)
+        agents = backend.users(timeout_seconds=120)
         assert all(a.status == "online" for a in agents)
 
     def test_agents_offline_after_timeout(self, backend):
         backend.heartbeat("agent-a")
         # Use a very short timeout so the heartbeat is already "expired"
-        agents = backend.agents(timeout_seconds=0)
+        agents = backend.users(timeout_seconds=0)
         assert len(agents) == 1
         assert agents[0].status == "offline"
 
@@ -143,34 +143,34 @@ class TestAgents:
         # Use a 1-second timeout; agent-a is online, agent-b would be offline
         # We'll just use timeout=0 to make agent-a offline too, then re-heartbeat
         # Actually, let's test properly: use timeout_seconds parameter
-        agents = backend.agents(timeout_seconds=3600)
+        agents = backend.users(timeout_seconds=3600)
         assert all(a.status == "online" for a in agents)
-        agents = backend.agents(timeout_seconds=0)
+        agents = backend.users(timeout_seconds=0)
         assert all(a.status == "offline" for a in agents)
 
 
 class TestAgentStatus:
     def test_unknown_agent(self, backend):
-        assert backend.agent_status("nonexistent") is None
+        assert backend.user_status("nonexistent") is None
 
     def test_known_agent(self, backend):
         backend.heartbeat("agent-a", metadata={"role": "worker"})
-        result = backend.agent_status("agent-a")
+        result = backend.user_status("agent-a")
         assert result is not None
-        assert isinstance(result, AgentPresence)
-        assert result.agent_id == "agent-a"
+        assert isinstance(result, UserPresence)
+        assert result.user_id == "agent-a"
         assert result.status == "online"
         assert result.metadata == {"role": "worker"}
 
     def test_agent_offline_by_timeout(self, backend):
         backend.heartbeat("agent-a")
-        result = backend.agent_status("agent-a", timeout_seconds=0)
+        result = backend.user_status("agent-a", timeout_seconds=0)
         assert result is not None
         assert result.status == "offline"
 
     def test_agent_online_within_timeout(self, backend):
         backend.heartbeat("agent-a")
-        result = backend.agent_status("agent-a", timeout_seconds=3600)
+        result = backend.user_status("agent-a", timeout_seconds=3600)
         assert result is not None
         assert result.status == "online"
 
@@ -183,9 +183,9 @@ class TestPresencePersistence:
         b1.close()
 
         b2 = SQLiteBackend(db)
-        result = b2.agent_status("agent-a", timeout_seconds=3600)
+        result = b2.user_status("agent-a", timeout_seconds=3600)
         assert result is not None
-        assert result.agent_id == "agent-a"
+        assert result.user_id == "agent-a"
         assert result.metadata == {"name": "Alice"}
         b2.close()
 
@@ -199,9 +199,9 @@ class TestPresencePersistence:
         b1.close()
 
         b2 = _MB(root)
-        result = b2.agent_status("agent-a", timeout_seconds=3600)
+        result = b2.user_status("agent-a", timeout_seconds=3600)
         assert result is not None
-        assert result.agent_id == "agent-a"
+        assert result.user_id == "agent-a"
         assert result.metadata == {"name": "Alice"}
         b2.close()
 
@@ -215,9 +215,9 @@ class TestBusPresence:
         bus.heartbeat("agent-a", metadata={"display_name": "Alice"})
         bus.heartbeat("agent-b")
 
-        agents = bus.agents()
+        agents = bus.users()
         assert len(agents) == 2
-        assert agents[0].agent_id == "agent-a"
+        assert agents[0].user_id == "agent-a"
         assert agents[0].metadata == {"display_name": "Alice"}
         bus.close()
 
@@ -225,39 +225,39 @@ class TestBusPresence:
         bus = Bus(backend=MemoryBackend())
         bus.heartbeat("agent-a")
 
-        result = bus.agent_status("agent-a")
+        result = bus.user_status("agent-a")
         assert result is not None
         assert result.status == "online"
 
-        assert bus.agent_status("nonexistent") is None
+        assert bus.user_status("nonexistent") is None
         bus.close()
 
     def test_bus_agent_timeout(self):
         bus = Bus(backend=MemoryBackend())
         bus.heartbeat("agent-a")
 
-        result = bus.agent_status("agent-a", timeout_seconds=0)
+        result = bus.user_status("agent-a", timeout_seconds=0)
         assert result is not None
         assert result.status == "offline"
         bus.close()
 
 
-# ── AgentPresence type tests ─────────────────────────────────────────────────
+# ── UserPresence type tests ─────────────────────────────────────────────────
 
 
-class TestAgentPresenceType:
+class TestUserPresenceType:
     def test_frozen(self):
-        ap = AgentPresence(agent_id="test", status="online", last_seen="2026-01-01T00:00:00+00:00")
+        ap = UserPresence(user_id="test", status="online", last_seen="2026-01-01T00:00:00+00:00")
         with pytest.raises(AttributeError):
             ap.status = "offline"  # type: ignore[misc]
 
     def test_default_metadata_none(self):
-        ap = AgentPresence(agent_id="test", status="online", last_seen="2026-01-01T00:00:00+00:00")
+        ap = UserPresence(user_id="test", status="online", last_seen="2026-01-01T00:00:00+00:00")
         assert ap.metadata is None
 
     def test_with_metadata(self):
-        ap = AgentPresence(
-            agent_id="test",
+        ap = UserPresence(
+            user_id="test",
             status="online",
             last_seen="2026-01-01T00:00:00+00:00",
             metadata={"cap": ["search"]},

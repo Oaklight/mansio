@@ -1,9 +1,9 @@
-"""SQLite-backed token store for agent API authentication.
+"""SQLite-backed token store for API authentication.
 
-Manages agent tokens (create, validate, rotate, delete) with:
+Manages tokens (create, validate, rotate, delete) with:
 - SHA-256 hashing — plaintext never stored, shown once at creation
 - Constant-time comparison — prevents timing attacks
-- Supertoken support — agent_id=NULL grants wildcard access
+- Supertoken support — user_id=NULL grants wildcard access
 - last_used_at tracking — updated on every validated request
 - Thread-local connection pool — one SQLite connection per thread,
   reused across calls to avoid per-request connection overhead
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS tokens (
     id           TEXT PRIMARY KEY,
     token_hash   TEXT NOT NULL UNIQUE,
     token_prefix TEXT NOT NULL,
-    agent_id     TEXT,
+    user_id      TEXT,
     label        TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL,
     last_used_at TEXT
@@ -99,18 +99,26 @@ class TokenStore:
         """Create the tokens table if it does not exist."""
         conn = self._conn()
         conn.executescript(_CREATE_TABLE)
+        self._migrate_agent_id_to_user_id(conn)
+
+    def _migrate_agent_id_to_user_id(self, conn: sqlite3.Connection) -> None:
+        """Rename agent_id column to user_id in tokens table (idempotent)."""
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(tokens)").fetchall()}
+        if "agent_id" in cols and "user_id" not in cols:
+            conn.execute("ALTER TABLE tokens RENAME COLUMN agent_id TO user_id")
+            conn.commit()
 
     def list_tokens(self) -> list[dict[str, Any]]:
         """List all tokens with metadata (no secret values).
 
         Returns:
-            List of token entries with id, token_prefix, agent_id,
+            List of token entries with id, token_prefix, user_id,
             label, created_at, and last_used_at.
         """
         rows = (
             self._conn()
             .execute(
-                "SELECT id, token_prefix, agent_id, label, created_at, last_used_at "
+                "SELECT id, token_prefix, user_id, label, created_at, last_used_at "
                 "FROM tokens ORDER BY created_at DESC"
             )
             .fetchall()
@@ -118,7 +126,7 @@ class TokenStore:
         return [dict(row) for row in rows]
 
     def list_users(self) -> list[dict[str, Any]]:
-        """List distinct users (agent_ids) with token counts.
+        """List distinct users with token counts.
 
         Returns:
             List of dicts with user_id, token_count, last_active.
@@ -126,16 +134,16 @@ class TokenStore:
         rows = (
             self._conn()
             .execute(
-                "SELECT agent_id, COUNT(*) as token_count, "
+                "SELECT user_id, COUNT(*) as token_count, "
                 "MAX(COALESCE(last_used_at, created_at)) as last_active "
-                "FROM tokens WHERE agent_id IS NOT NULL "
-                "GROUP BY agent_id ORDER BY agent_id"
+                "FROM tokens WHERE user_id IS NOT NULL "
+                "GROUP BY user_id ORDER BY user_id"
             )
             .fetchall()
         )
         return [
             {
-                "user_id": row["agent_id"],
+                "user_id": row["user_id"],
                 "token_count": row["token_count"],
                 "last_active": row["last_active"],
             }
@@ -154,8 +162,8 @@ class TokenStore:
         rows = (
             self._conn()
             .execute(
-                "SELECT id, token_prefix, agent_id, label, created_at, last_used_at "
-                "FROM tokens WHERE agent_id = ? ORDER BY created_at DESC",
+                "SELECT id, token_prefix, user_id, label, created_at, last_used_at "
+                "FROM tokens WHERE user_id = ? ORDER BY created_at DESC",
                 (user_id,),
             )
             .fetchall()
@@ -167,7 +175,7 @@ class TokenStore:
         row = (
             self._conn()
             .execute(
-                "SELECT 1 FROM tokens WHERE agent_id = ? LIMIT 1",
+                "SELECT 1 FROM tokens WHERE user_id = ? LIMIT 1",
                 (user_id,),
             )
             .fetchone()
@@ -184,19 +192,19 @@ class TokenStore:
             Number of tokens deleted.
         """
         conn = self._conn()
-        cursor = conn.execute("DELETE FROM tokens WHERE agent_id = ?", (user_id,))
+        cursor = conn.execute("DELETE FROM tokens WHERE user_id = ?", (user_id,))
         conn.commit()
         return cursor.rowcount
 
     def create_token(
         self,
-        agent_id: str | None = None,
+        user_id: str | None = None,
         label: str = "",
     ) -> dict[str, Any]:
         """Create a new agent token.
 
         Args:
-            agent_id: Agent ID this token authenticates as.
+            user_id: User ID this token authenticates as.
                 None creates a supertoken (wildcard).
             label: Human-readable description.
 
@@ -205,11 +213,11 @@ class TokenStore:
             (shown this once only).
 
         Raises:
-            ValueError: If *agent_id* is an empty string (use ``None``
+            ValueError: If *user_id* is an empty string (use ``None``
                 explicitly for supertokens).
         """
-        if isinstance(agent_id, str) and not agent_id.strip():
-            raise ValueError("agent_id must be a non-empty string or None")
+        if isinstance(user_id, str) and not user_id.strip():
+            raise ValueError("user_id must be a non-empty string or None")
         token = _generate_token()
         token_hash = _hash_token(token)
         token_prefix = token[:_DISPLAY_PREFIX_LEN]
@@ -218,9 +226,9 @@ class TokenStore:
 
         conn = self._conn()
         conn.execute(
-            "INSERT INTO tokens (id, token_hash, token_prefix, agent_id, label, created_at) "
+            "INSERT INTO tokens (id, token_hash, token_prefix, user_id, label, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (token_id, token_hash, token_prefix, agent_id, label, now),
+            (token_id, token_hash, token_prefix, user_id, label, now),
         )
         conn.commit()
 
@@ -228,7 +236,7 @@ class TokenStore:
             "id": token_id,
             "token": token,
             "token_prefix": token_prefix,
-            "agent_id": agent_id,
+            "user_id": user_id,
             "label": label,
             "created_at": now,
             "last_used_at": None,
@@ -271,7 +279,7 @@ class TokenStore:
             return None
 
         row = conn.execute(
-            "SELECT id, token_prefix, agent_id, label, created_at, last_used_at "
+            "SELECT id, token_prefix, user_id, label, created_at, last_used_at "
             "FROM tokens WHERE id = ?",
             (token_id,),
         ).fetchone()
@@ -282,7 +290,7 @@ class TokenStore:
         return result
 
     def validate(self, token_str: str) -> str | None | bool:
-        """Validate a token and return the associated agent_id.
+        """Validate a token and return the associated user_id.
 
         Uses constant-time comparison to prevent timing attacks.
         Updates ``last_used_at`` in the same connection (no extra open).
@@ -291,7 +299,7 @@ class TokenStore:
             token_str: The plaintext token from the request.
 
         Returns:
-            - ``str``: the agent_id bound to this token
+            - ``str``: the user_id bound to this token
             - ``None``: valid supertoken (wildcard, any agent)
             - ``False``: invalid token
         """
@@ -315,7 +323,7 @@ class TokenStore:
 
         # Fetch all token hashes for constant-time scan.
         # For typical deployments (< 1000 tokens) this is fine.
-        rows = conn.execute("SELECT id, token_hash, agent_id FROM tokens").fetchall()
+        rows = conn.execute("SELECT id, token_hash, user_id FROM tokens").fetchall()
 
         matched_id: str | None = None
         matched_agent: str | None | bool = False
@@ -323,7 +331,7 @@ class TokenStore:
         for row in rows:
             if secrets.compare_digest(provided_hash, row["token_hash"]):
                 matched_id = row["id"]
-                matched_agent = row["agent_id"]  # None for supertoken
+                matched_agent = row["user_id"]  # None for supertoken
                 break
 
         if matched_id is None:

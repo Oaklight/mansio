@@ -16,7 +16,7 @@ from typing import Literal, overload
 
 from __PKG__._vendor.httpclient import Client as HttpClient
 from __PKG__._vendor.sse import SSEClient
-from __PKG__.types import AgentPresence, ClaimResult, Message
+from __PKG__.types import ClaimResult, Message, UserPresence
 
 
 class MansioAPIError(Exception):
@@ -40,7 +40,7 @@ class HttpTransport:
     Args:
         base_url: Server URL, e.g. ``"http://localhost:8742"`` or
             ``"https://mansio.example.com"``.
-        agent_id: Agent identifier for SSE subscriptions.
+        user_id: User identifier for SSE subscriptions.
         timeout: HTTP request timeout in seconds.
         token: Optional Bearer token for API authentication (``mst-...``).
     """
@@ -48,12 +48,12 @@ class HttpTransport:
     def __init__(
         self,
         base_url: str,
-        agent_id: str = "",
+        user_id: str = "",
         timeout: float = 10.0,
         token: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
-        self._agent_id = agent_id
+        self._user_id = user_id
         self._timeout = timeout
         self._token = token
 
@@ -230,43 +230,43 @@ class HttpTransport:
 
     # ── Presence ──────────────────────────────────────────────────
 
-    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
-        """Record a heartbeat for *agent_id*."""
-        body: dict = {"agent_id": agent_id}
+    def heartbeat(self, user_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *user_id*."""
+        body: dict = {"user_id": user_id}
         if metadata:
             body["metadata"] = metadata
         resp = self._http.post(f"{self._base_url}/v1/presence/heartbeat", json=body)
         self._check_response(resp)
 
-    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
-        """Return all known agents with computed online/offline status."""
+    def users(self, timeout_seconds: int = 120) -> list[UserPresence]:
+        """Return all known users with computed online/offline status."""
         params = urllib.parse.urlencode({"timeout": str(timeout_seconds)})
         resp = self._http.get(f"{self._base_url}/v1/presence?{params}")
         self._check_response(resp)
         return [
-            AgentPresence(
-                agent_id=a["agent_id"],
+            UserPresence(
+                user_id=a["user_id"],
                 status=a["status"],
                 last_seen=a["last_seen"],
                 metadata=a.get("metadata"),
             )
-            for a in resp.json().get("agents", [])
+            for a in resp.json().get("users", [])
         ]
 
-    def agent_status(
-        self, agent_id: str, timeout_seconds: int = 120
-    ) -> AgentPresence | None:
-        """Return presence for a single agent, or ``None`` if unknown."""
+    def user_status(
+        self, user_id: str, timeout_seconds: int = 120
+    ) -> UserPresence | None:
+        """Return presence for a single user, or ``None`` if unknown."""
         params = urllib.parse.urlencode({"timeout": str(timeout_seconds)})
         resp = self._http.get(
-            f"{self._base_url}/v1/presence/{urllib.parse.quote(agent_id, safe='')}?{params}"
+            f"{self._base_url}/v1/presence/{urllib.parse.quote(user_id, safe='')}?{params}"
         )
         if resp.status_code == 404:
             return None
         self._check_response(resp)
         data = resp.json()
-        return AgentPresence(
-            agent_id=data["agent_id"],
+        return UserPresence(
+            user_id=data["user_id"],
             status=data["status"],
             last_seen=data["last_seen"],
             metadata=data.get("metadata"),
@@ -383,7 +383,7 @@ class HttpTransport:
     def _build_sse_url(self, channels: list[str]) -> str:
         """Build the full SSE subscribe URL."""
         params = urllib.parse.urlencode(
-            [("channel", ch) for ch in channels] + [("agent_id", self._agent_id)]
+            [("channel", ch) for ch in channels] + [("user_id", self._user_id)]
         )
         return f"{self._base_url}/v1/subscribe?{params}"
 

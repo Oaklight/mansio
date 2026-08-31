@@ -322,15 +322,15 @@ def _tool_memory_recall(client: MansioClient, args: dict[str, Any]) -> Any:
 
 
 def _tool_agents(client: MansioClient, args: dict[str, Any]) -> Any:
-    agents = client.agents(timeout_seconds=args.get("timeout_seconds", 120))
+    online_users = client.users(timeout_seconds=args.get("timeout_seconds", 120))
     return [
         {
-            "agent_id": a.agent_id,
+            "user_id": a.user_id,
             "status": a.status,
             "last_seen": a.last_seen,
             "metadata": a.metadata,
         }
-        for a in agents
+        for a in online_users
     ]
 
 
@@ -473,7 +473,7 @@ def _handle_request(client: MansioClient, req: dict[str, Any]) -> dict[str, Any]
 
 def serve(
     url: str,
-    agent_id: str,
+    user_id: str,
     *,
     token: str | None = None,
     display_name: str | None = None,
@@ -482,11 +482,11 @@ def serve(
 
     Args:
         url: Mansio server URL.
-        agent_id: Agent ID to connect as.
+        user_id: User ID to connect as.
         token: Optional API token.
         display_name: Optional display name.
     """
-    client = MansioClient(url, agent_id, token=token, display_name=display_name)
+    client = MansioClient(url, user_id, token=token, display_name=display_name)
 
     try:
         for line in sys.stdin:

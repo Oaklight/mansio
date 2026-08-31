@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Literal, Protocol, runtime_checkable
 
 from mansio._vendor.structlog import get_logger
-from mansio.types import ACLEntry, AgentPresence, ChannelMeta, ClaimResult, Message
+from mansio.types import ACLEntry, ChannelMeta, ClaimResult, Message, UserPresence
 
 logger = get_logger(__name__)
 
@@ -302,7 +302,7 @@ class ChannelStore(Protocol):
     """Optional protocol for backends that support explicit channel metadata and ACL.
 
     Backends implementing this protocol store channel ownership, visibility,
-    and per-agent access control entries. The Bus layer consults this for
+    and per-user access control entries. The Bus layer consults this for
     authorization decisions.
     """
 
@@ -360,10 +360,10 @@ class ChannelStore(Protocol):
         ...
 
     def add_acl_entry(self, entry: ACLEntry) -> None:
-        """Add or update a single ACL entry (upsert by channel + agent_id)."""
+        """Add or update a single ACL entry (upsert by channel + user_id)."""
         ...
 
-    def remove_acl_entry(self, channel: str, agent_id: str) -> bool:
+    def remove_acl_entry(self, channel: str, user_id: str) -> bool:
         """Remove an ACL entry.
 
         Returns:
@@ -371,16 +371,16 @@ class ChannelStore(Protocol):
         """
         ...
 
-    def check_access(self, channel: str, agent_id: str, required: str = "read") -> bool:
-        """Check if an agent has the required permission on a channel.
+    def check_access(self, channel: str, user_id: str, required: str = "read") -> bool:
+        """Check if a user has the required permission on a channel.
 
         Permission hierarchy: ``admin`` ⊃ ``write`` ⊃ ``read``.
-        Public channels grant implicit ``read`` to all agents.
+        Public channels grant implicit ``read`` to all users.
         Unregistered channels (no metadata) are treated as public.
 
         Args:
             channel: Channel name.
-            agent_id: Agent to check.
+            user_id: User to check.
             required: Minimum permission needed.
 
         Returns:
@@ -418,26 +418,26 @@ class Deletable(Protocol):
 
 @runtime_checkable
 class Presenceable(Protocol):
-    """Optional protocol for backends that support agent presence tracking."""
+    """Optional protocol for backends that support user presence tracking."""
 
-    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
-        """Record a heartbeat for *agent_id*.
+    def heartbeat(self, user_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *user_id*.
 
         Upserts ``last_seen`` to now and stores optional *metadata*
         (display_name, capabilities, ...).
         """
         ...
 
-    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
-        """Return all known agents with computed online/offline status.
+    def users(self, timeout_seconds: int = 120) -> list[UserPresence]:
+        """Return all known users with computed online/offline status.
 
-        An agent is ``"online"`` if its last heartbeat is within
+        A user is ``"online"`` if its last heartbeat is within
         *timeout_seconds* of now, otherwise ``"offline"``.
         """
         ...
 
-    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
-        """Return presence for a single agent, or ``None`` if unknown."""
+    def user_status(self, user_id: str, timeout_seconds: int = 120) -> UserPresence | None:
+        """Return presence for a single user, or ``None`` if unknown."""
         ...
 
 

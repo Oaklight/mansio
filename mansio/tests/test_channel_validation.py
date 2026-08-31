@@ -121,7 +121,7 @@ class TestValidateChannelName:
     @pytest.mark.parametrize(
         "name",
         [
-            "_system:agents",
+            "_system:users",
             "dm:alice:bob",
             "notebook:elena",
             "memory:elena",

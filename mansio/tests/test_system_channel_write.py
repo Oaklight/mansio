@@ -1,7 +1,7 @@
-"""Tests for _system:agents write restriction — fixes #101.
+"""Tests for _system:users write restriction — fixes #101.
 
-Verifies that regular scoped agent tokens get 403 when POSTing
-arbitrary message types to ``_system:agents``, while the SDK's
+Verifies that regular scoped scoped tokens get 403 when POSTing
+arbitrary message types to ``_system:users``, while the SDK's
 presence announcement (msg_type="presence") and supertokens are
 still allowed.
 """
@@ -43,10 +43,10 @@ def auth_server(tmp_path):
 
 
 class TestSystemAgentsChannelWrite:
-    """Regular agent tokens must be denied arbitrary writes to _system:agents (#101)."""
+    """Regular scoped tokens must be denied arbitrary writes to _system:users (#101)."""
 
     def test_regular_agent_cannot_publish_arbitrary_to_system_agents(self, auth_server) -> None:
-        """A scoped agent token should get 403 when publishing non-presence to _system:agents."""
+        """A scoped scoped token should get 403 when publishing non-presence to _system:users."""
         from mansio._vendor.httpclient import Client as HttpClient
 
         url, store = auth_server
@@ -57,19 +57,19 @@ class TestSystemAgentsChannelWrite:
         resp = http.post(
             f"{url}/v1/publish",
             json={
-                "channel": "_system:agents",
+                "channel": "_system:users",
                 "sender": "milo",
                 "msg_type": "chat",
                 "payload": "should be rejected",
             },
         )
         assert resp.status_code == 403, (
-            f"Expected 403 for regular agent writing chat to _system:agents, got {resp.status_code}"
+            f"Expected 403 for regular agent writing chat to _system:users, got {resp.status_code}"
         )
         http.close()
 
     def test_regular_agent_can_announce_presence(self, auth_server) -> None:
-        """A scoped agent token can publish msg_type=presence to _system:agents (SDK _announce)."""
+        """A scoped scoped token can publish msg_type=presence to _system:users (SDK _announce)."""
         from mansio._vendor.httpclient import Client as HttpClient
 
         url, store = auth_server
@@ -80,37 +80,37 @@ class TestSystemAgentsChannelWrite:
         resp = http.post(
             f"{url}/v1/publish",
             json={
-                "channel": "_system:agents",
+                "channel": "_system:users",
                 "sender": "milo",
                 "msg_type": "presence",
                 "payload": '{"status": "online"}',
             },
         )
         assert resp.status_code == 200, (
-            f"Expected 200 for presence announce to _system:agents, got {resp.status_code}"
+            f"Expected 200 for presence announce to _system:users, got {resp.status_code}"
         )
         http.close()
 
     def test_supertoken_can_publish_to_system_agents(self, auth_server) -> None:
-        """A supertoken (agent_id=NULL) should be able to write anything to _system:agents."""
+        """A supertoken (user_id=NULL) should be able to write anything to _system:users."""
         from mansio._vendor.httpclient import Client as HttpClient
 
         url, store = auth_server
-        token_entry = store.create_token(agent_id=None, label="Admin supertoken")
+        token_entry = store.create_token(user_id=None, label="Admin supertoken")
         token = token_entry["token"]
 
         http = HttpClient(headers={"Authorization": f"Bearer {token}"})
         resp = http.post(
             f"{url}/v1/publish",
             json={
-                "channel": "_system:agents",
+                "channel": "_system:users",
                 "sender": "system",
                 "msg_type": "admin-broadcast",
                 "payload": "system message",
             },
         )
         assert resp.status_code == 200, (
-            f"Expected 200 for supertoken writing to _system:agents, got {resp.status_code}"
+            f"Expected 200 for supertoken writing to _system:users, got {resp.status_code}"
         )
         http.close()
 

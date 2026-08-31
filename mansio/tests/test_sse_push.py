@@ -426,7 +426,7 @@ class TestTransportLastEventId:
         received: list = []
         done = threading.Event()
 
-        transport = HttpTransport(url, agent_id="track-test")
+        transport = HttpTransport(url, user_id="track-test")
 
         def on_msg(msg):
             received.append(msg)
