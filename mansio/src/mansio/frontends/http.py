@@ -105,7 +105,7 @@ def _is_private_channel(channel: str) -> bool:
     return any(channel.startswith(p) for p in _PRIVATE_CHANNEL_PREFIXES)
 
 
-def _agent_involved(user_id: str, channel: str, sender: str) -> bool:
+def _user_involved(user_id: str, channel: str, sender: str) -> bool:
     """Check if an agent is involved in a message (sender or channel member).
 
     For **public** channels every authenticated agent is considered
@@ -527,7 +527,7 @@ async def _dm_unregistered_warning(bus: Any, channel: str, sender: str) -> str |
     other = parts[1] if parts[2] == sender else parts[2]
     status = await asyncio.to_thread(bus.user_status, other)
     if status is None:
-        return f"target agent '{other}' is not registered; message stored but may never be read"
+        return f"target user '{other}' is not registered; message stored but may never be read"
     return None
 
 
@@ -845,7 +845,7 @@ class HttpFrontend:
 
             auth_result = _auth_result_var.get()
             if isinstance(auth_result, str):
-                msgs = [m for m in msgs if _agent_involved(auth_result, m.channel, m.sender)]
+                msgs = [m for m in msgs if _user_involved(auth_result, m.channel, m.sender)]
 
             total = await asyncio.to_thread(bus.message_count, channel)
             has_more = len(msgs) == limit
@@ -1256,7 +1256,7 @@ class HttpFrontend:
                 return timeout
             result = await asyncio.to_thread(bus.user_status, user_id, timeout)
             if result is None:
-                return {"error": "agent not found"}, 404
+                return {"error": "user not found"}, 404
             return {
                 "user_id": result.user_id,
                 "status": result.status,
@@ -1683,7 +1683,7 @@ def _setup_sse_subscriptions(
                         drop_counter[0] += 1
 
             def _cb(msg: Message) -> None:
-                if isinstance(auth_result, str) and not _agent_involved(
+                if isinstance(auth_result, str) and not _user_involved(
                     auth_result, msg.channel, msg.sender
                 ):
                     return
@@ -1762,7 +1762,7 @@ async def _sse_event_generator(session: _SSESession) -> Any:
                     missed = [
                         m
                         for m in missed
-                        if _agent_involved(session.auth_result, m.channel, m.sender)
+                        if _user_involved(session.auth_result, m.channel, m.sender)
                     ]
                 for m in missed:
                     data = json.dumps(

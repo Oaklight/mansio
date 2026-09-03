@@ -944,7 +944,7 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
             self._save_presence(data)
 
     def users(self, timeout_seconds: int = 120) -> list[UserPresence]:
-        """Return all known agents with computed online/offline status."""
+        """Return all known users with computed online/offline status."""
         with self._lock:
             data = self._load_presence()
 
@@ -971,7 +971,7 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
         return result
 
     def user_status(self, user_id: str, timeout_seconds: int = 120) -> UserPresence | None:
-        """Return presence for a single agent, or ``None`` if unknown."""
+        """Return presence for a single user, or ``None`` if unknown."""
         with self._lock:
             data = self._load_presence()
 

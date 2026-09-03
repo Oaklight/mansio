@@ -243,11 +243,11 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
         );
         CREATE TABLE IF NOT EXISTS channel_acl (
             channel    TEXT NOT NULL REFERENCES channels(name) ON DELETE CASCADE,
-            user_id   TEXT NOT NULL,
+            agent_id   TEXT NOT NULL,
             permission TEXT NOT NULL DEFAULT 'read',
             granted_at TEXT NOT NULL DEFAULT '',
             granted_by TEXT,
-            PRIMARY KEY (channel, user_id)
+            PRIMARY KEY (channel, agent_id)
         );
     """)
 
@@ -1039,7 +1039,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             self._conn.commit()
 
     def users(self, timeout_seconds: int = 120) -> list[UserPresence]:
-        """Return all known agents with computed online/offline status."""
+        """Return all known users with computed online/offline status."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         with self._lock:
             rows = self._conn.execute(
@@ -1060,7 +1060,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
         return result
 
     def user_status(self, user_id: str, timeout_seconds: int = 120) -> UserPresence | None:
-        """Return presence for a single agent, or ``None`` if unknown."""
+        """Return presence for a single user, or ``None`` if unknown."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         with self._lock:
             row = self._conn.execute(

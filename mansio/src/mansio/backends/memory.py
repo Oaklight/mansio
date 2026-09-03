@@ -528,7 +528,7 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             }
 
     def users(self, timeout_seconds: int = 120) -> list[UserPresence]:
-        """Return all known agents with computed online/offline status."""
+        """Return all known users with computed online/offline status."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         result: list[UserPresence] = []
         with self._lock:
@@ -546,7 +546,7 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
         return result
 
     def user_status(self, user_id: str, timeout_seconds: int = 120) -> UserPresence | None:
-        """Return presence for a single agent, or ``None`` if unknown."""
+        """Return presence for a single user, or ``None`` if unknown."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         with self._lock:
             rec = self._presence.get(user_id)
