@@ -525,7 +525,10 @@ async def _dm_unregistered_warning(bus: Any, channel: str, sender: str) -> str |
     if len(parts) != 3:
         return None
     other = parts[1] if parts[2] == sender else parts[2]
-    status = await asyncio.to_thread(bus.user_status, other)
+    try:
+        status = await asyncio.to_thread(bus.user_status, other)
+    except NotImplementedError:
+        return None
     if status is None:
         return f"target agent '{other}' is not registered; message stored but may never be read"
     return None
@@ -1226,7 +1229,13 @@ class HttpFrontend:
             meta_err = _validate_metadata(metadata)
             if meta_err:
                 return meta_err
-            await asyncio.to_thread(bus.heartbeat, user_id, metadata)
+            try:
+                await asyncio.to_thread(bus.heartbeat, user_id, metadata)
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support presence",
+                }, 501
             return {"ok": True}
 
         @self._app.get("/v1/presence")
@@ -1235,7 +1244,13 @@ class HttpFrontend:
             timeout = _parse_query_timeout(raw_timeout)
             if isinstance(timeout, tuple):
                 return timeout
-            agents = await asyncio.to_thread(bus.users, timeout)
+            try:
+                agents = await asyncio.to_thread(bus.users, timeout)
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support presence",
+                }, 501
             return {
                 "agents": [
                     {
@@ -1254,7 +1269,13 @@ class HttpFrontend:
             timeout = _parse_query_timeout(raw_timeout)
             if isinstance(timeout, tuple):
                 return timeout
-            result = await asyncio.to_thread(bus.user_status, user_id, timeout)
+            try:
+                result = await asyncio.to_thread(bus.user_status, user_id, timeout)
+            except NotImplementedError:
+                return {
+                    "error": "Not Implemented",
+                    "message": "Backend does not support presence",
+                }, 501
             if result is None:
                 return {"error": "agent not found"}, 404
             return {

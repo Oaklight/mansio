@@ -106,7 +106,9 @@ class TestThoughtRecord:
             token = store.create_token("elena", "Elena")["token"]
             client = MansioClient(url, "elena", token=token)
 
-            msg_id = client.thought_record("reasoning", "test focus", "thinking about stuff")
+            msg_id = client.thought_record(
+                "thinking about stuff", thinking_mode="reasoning", focus_area="test focus"
+            )
             assert msg_id
             assert isinstance(msg_id, str)
 
@@ -120,8 +122,12 @@ class TestThoughtRecord:
             token = store.create_token("elena", "Elena")["token"]
             client = MansioClient(url, "elena", token=token)
 
-            client.thought_record("planning", "architecture", "designing the system")
-            client.thought_record("reflection", "code review", "reviewing the PR")
+            client.thought_record(
+                "designing the system", thinking_mode="planning", focus_area="architecture"
+            )
+            client.thought_record(
+                "reviewing the PR", thinking_mode="reflection", focus_area="code review"
+            )
 
             thoughts = client.thought_read(limit=10)
             assert len(thoughts) == 2
@@ -201,7 +207,7 @@ class TestServerStability:
 
             # All three sugar methods in sequence
             client.note_write("a note")
-            client.thought_record("reasoning", "test", "a thought")
+            client.thought_record("a thought", thinking_mode="reasoning", focus_area="test")
             client.memory_store("a memory")
 
             # Server should still be healthy — verify with channel_list
@@ -231,7 +237,7 @@ class TestServerStability:
             alice.note_write("alice note")
             bob.note_write("bob note")
             alice.memory_store("alice memory")
-            bob.thought_record("planning", "test", "bob thought")
+            bob.thought_record("bob thought", thinking_mode="planning", focus_area="test")
 
             # Each sees only their own data
             assert len(alice.note_read()) == 1
