@@ -243,11 +243,11 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
         );
         CREATE TABLE IF NOT EXISTS channel_acl (
             channel    TEXT NOT NULL REFERENCES channels(name) ON DELETE CASCADE,
-            user_id   TEXT NOT NULL,
+            agent_id   TEXT NOT NULL,
             permission TEXT NOT NULL DEFAULT 'read',
             granted_at TEXT NOT NULL DEFAULT '',
             granted_by TEXT,
-            PRIMARY KEY (channel, user_id)
+            PRIMARY KEY (channel, agent_id)
         );
     """)
 
