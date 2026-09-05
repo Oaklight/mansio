@@ -231,13 +231,22 @@ class MansioClient:
     # ── Thoughts ──────────────────────────────────────────────────
 
     def thought_record(
-        self, thinking_mode: str, focus_area: str, thought_process: str
+        self,
+        thought_process: str,
+        *,
+        thinking_mode: str | None = None,
+        focus_area: str | None = None,
     ) -> str:
+        metadata: dict = {}
+        if thinking_mode:
+            metadata["thinking_mode"] = thinking_mode
+        if focus_area:
+            metadata["focus_area"] = focus_area
         return self.channel_send(
             f"notebook:{self._user_id}",
             thought_process,
             msg_type="thought",
-            metadata={"thinking_mode": thinking_mode, "focus_area": focus_area},
+            metadata=metadata or None,
         )
 
     def thought_read(self, limit: int = 10) -> list[Message]:
