@@ -8,7 +8,7 @@ from io import StringIO
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from mansio_client.types import AgentPresence, Message
+from mansio_client.types import UserPresence, Message
 
 from mansio_client.mcp import (
     _TOOLS,
@@ -326,9 +326,9 @@ class TestCallTool(unittest.TestCase):
         assert len(result) == 1
 
     def test_agents(self) -> None:
-        self.client.agents.return_value = [
-            AgentPresence(
-                agent_id="agent-a",
+        self.client.users.return_value = [
+            UserPresence(
+                user_id="agent-a",
                 status="online",
                 last_seen="2026-01-01T00:00:00Z",
                 metadata={"display_name": "Agent A"},
@@ -336,7 +336,7 @@ class TestCallTool(unittest.TestCase):
         ]
         result = _call_tool(self.client, "mansio_agents", {})
         assert len(result) == 1
-        assert result[0]["agent_id"] == "agent-a"
+        assert result[0]["user_id"] == "agent-a"
         assert result[0]["metadata"]["display_name"] == "Agent A"
 
     def test_heartbeat(self) -> None:

@@ -50,7 +50,7 @@ class TestHttpTransport:
     """Test HttpTransport implements Transport protocol."""
 
     def test_publish_and_query(self, server_url: str) -> None:
-        transport = HttpTransport(server_url, agent_id="test-agent")
+        transport = HttpTransport(server_url, user_id="test-agent")
         msg_id = transport.publish(
             channel="test-ch",
             sender="test-agent",
@@ -68,7 +68,7 @@ class TestHttpTransport:
         transport.close()
 
     def test_query_with_cursor(self, server_url: str) -> None:
-        transport = HttpTransport(server_url, agent_id="test-agent")
+        transport = HttpTransport(server_url, user_id="test-agent")
 
         id1 = transport.publish("test-ch", "a", "chat", "first")
         id2 = transport.publish("test-ch", "a", "chat", "second")
@@ -82,7 +82,7 @@ class TestHttpTransport:
         transport.close()
 
     def test_channels(self, server_url: str) -> None:
-        transport = HttpTransport(server_url, agent_id="test-agent")
+        transport = HttpTransport(server_url, user_id="test-agent")
 
         transport.publish("alpha", "a", "chat", "x")
         transport.publish("beta", "a", "chat", "y")
@@ -95,7 +95,7 @@ class TestHttpTransport:
 
     def test_queue_status_roundtrip(self, server_url: str) -> None:
         """queue_status() returns correct dict through HTTP transport."""
-        transport = HttpTransport(server_url, agent_id="test-agent")
+        transport = HttpTransport(server_url, user_id="test-agent")
 
         # Publish a queue message
         msg_id = transport.publish(
@@ -213,7 +213,7 @@ class TestSsePush:
         received: list = []
         event = threading.Event()
 
-        transport = HttpTransport(server_url, agent_id="sse-listener")
+        transport = HttpTransport(server_url, user_id="sse-listener")
 
         def on_msg(msg):
             received.append(msg)
@@ -223,7 +223,7 @@ class TestSsePush:
         time.sleep(0.5)  # let SSE connection establish
 
         # Publish from a different transport
-        sender = HttpTransport(server_url, agent_id="sse-sender")
+        sender = HttpTransport(server_url, user_id="sse-sender")
         sender.publish("sse-test", "sse-sender", "chat", "live push!")
 
         assert event.wait(timeout=5), "SSE event not received within 5s"
@@ -240,7 +240,7 @@ class TestSsePush:
         received_b: list = []
         done = threading.Event()
 
-        transport = HttpTransport(server_url, agent_id="multi-sub")
+        transport = HttpTransport(server_url, user_id="multi-sub")
         transport.subscribe("chan-a", lambda m: received_a.append(m))
 
         def _on_b(m):
@@ -250,7 +250,7 @@ class TestSsePush:
         transport.subscribe("chan-b", _on_b)
         time.sleep(0.5)
 
-        sender = HttpTransport(server_url, agent_id="multi-pub")
+        sender = HttpTransport(server_url, user_id="multi-pub")
         sender.publish("chan-a", "multi-pub", "chat", "to A")
         sender.publish("chan-b", "multi-pub", "chat", "to B")
 
@@ -269,11 +269,11 @@ class TestSsePush:
         """After unsubscribe, no more events are delivered."""
         received: list = []
 
-        transport = HttpTransport(server_url, agent_id="unsub-test")
+        transport = HttpTransport(server_url, user_id="unsub-test")
         sub_id = transport.subscribe("unsub-ch", lambda m: received.append(m))
         time.sleep(0.5)
 
-        sender = HttpTransport(server_url, agent_id="unsub-sender")
+        sender = HttpTransport(server_url, user_id="unsub-sender")
         sender.publish("unsub-ch", "unsub-sender", "chat", "before unsub")
         time.sleep(0.5)
         assert len(received) == 1
@@ -526,11 +526,11 @@ class TestSystemChannelAuth:
         http.close()
 
     def test_own_system_cursors_allowed(self, auth_server) -> None:
-        """Agents can write to their own _system:cursors:{agent_id} channel."""
+        """Agents can write to their own _system:cursors:{user_id} channel."""
         url, store = auth_server
         token = store.create_token("cursor-agent", "Cursor agent's token")["token"]
 
-        transport = HttpTransport(url, agent_id="cursor-agent", token=token)
+        transport = HttpTransport(url, user_id="cursor-agent", token=token)
         msg_id = transport.publish(
             "_system:cursors:cursor-agent", "cursor-agent", "cursor_snapshot", "{}"
         )
@@ -540,9 +540,9 @@ class TestSystemChannelAuth:
     def test_supertoken_can_write_system(self, auth_server) -> None:
         """Supertokens can write to _system channels."""
         url, store = auth_server
-        super_token = store.create_token(agent_id=None, label="admin")["token"]
+        super_token = store.create_token(user_id=None, label="admin")["token"]
 
-        transport = HttpTransport(url, agent_id="admin", token=super_token)
+        transport = HttpTransport(url, user_id="admin", token=super_token)
         msg_id = transport.publish("_system:agents", "admin", "presence", "admin check")
         assert msg_id
         transport.close()
@@ -579,7 +579,7 @@ class TestChannelOwnership:
         elena_token = store.create_token("elena", "Elena's token")["token"]
 
         # Milo can write to his own notebook
-        milo_transport = HttpTransport(url, agent_id="milo", token=milo_token)
+        milo_transport = HttpTransport(url, user_id="milo", token=milo_token)
         msg_id = milo_transport.publish("notebook:milo", "milo", "note", "my private note")
         assert msg_id
         milo_transport.close()
@@ -616,7 +616,7 @@ class TestChannelOwnership:
         bob_token = store.create_token("bob", "Bob's token")["token"]
 
         # Alice can write to her own memory
-        alice_transport = HttpTransport(url, agent_id="alice", token=alice_token)
+        alice_transport = HttpTransport(url, user_id="alice", token=alice_token)
         msg_id = alice_transport.publish("memory:alice", "alice", "memo", "remember this")
         assert msg_id
         alice_transport.close()
@@ -648,7 +648,7 @@ class TestChannelOwnership:
         url, store = auth_server
         token = store.create_token("agent-x", "X's token")["token"]
 
-        transport = HttpTransport(url, agent_id="agent-x", token=token)
+        transport = HttpTransport(url, user_id="agent-x", token=token)
         msg_id = transport.publish("notebook:agent-x", "agent-x", "note", "my note")
         assert msg_id
 
@@ -660,9 +660,9 @@ class TestChannelOwnership:
     def test_supertoken_bypasses_ownership(self, auth_server) -> None:
         """Supertokens can write to any private channel."""
         url, store = auth_server
-        super_token = store.create_token(agent_id=None, label="admin")["token"]
+        super_token = store.create_token(user_id=None, label="admin")["token"]
 
-        transport = HttpTransport(url, agent_id="admin", token=super_token)
+        transport = HttpTransport(url, user_id="admin", token=super_token)
         msg_id = transport.publish("notebook:milo", "admin", "note", "admin override")
         assert msg_id
         transport.close()

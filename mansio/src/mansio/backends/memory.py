@@ -12,10 +12,10 @@ from mansio.protocols import Backend, ChannelStore, Compactable, Deletable, Pres
 from mansio.types import (
     PERMISSION_LEVELS,
     ACLEntry,
-    AgentPresence,
     ChannelMeta,
     ClaimResult,
     Message,
+    UserPresence,
 )
 
 _CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
@@ -47,7 +47,7 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
         self._messages: dict[str, list[Message]] = defaultdict(list)
         self._messages_by_id: dict[str, Message] = {}
         self._queue_status_map: dict[str, dict] = {}
-        self._presence: dict[str, dict] = {}  # agent_id → {last_seen, metadata}
+        self._presence: dict[str, dict] = {}  # user_id → {last_seen, metadata}
         self._channels: dict[str, ChannelMeta] = {}
         self._acl: dict[str, dict[str, ACLEntry]] = defaultdict(dict)  # channel → {agent → entry}
 
@@ -518,43 +518,43 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
 
     # ── Presence ──────────────────────────────────────────────
 
-    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
-        """Record a heartbeat for *agent_id*."""
+    def heartbeat(self, user_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *user_id*."""
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
-            self._presence[agent_id] = {
+            self._presence[user_id] = {
                 "last_seen": now,
                 "metadata": metadata,
             }
 
-    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+    def users(self, timeout_seconds: int = 120) -> list[UserPresence]:
         """Return all known agents with computed online/offline status."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
-        result: list[AgentPresence] = []
+        result: list[UserPresence] = []
         with self._lock:
-            for agent_id, rec in self._presence.items():
+            for user_id, rec in self._presence.items():
                 status = "online" if rec["last_seen"] >= cutoff else "offline"
                 result.append(
-                    AgentPresence(
-                        agent_id=agent_id,
+                    UserPresence(
+                        user_id=user_id,
                         status=status,
                         last_seen=rec["last_seen"],
                         metadata=rec["metadata"],
                     )
                 )
-        result.sort(key=lambda a: a.agent_id)
+        result.sort(key=lambda a: a.user_id)
         return result
 
-    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
+    def user_status(self, user_id: str, timeout_seconds: int = 120) -> UserPresence | None:
         """Return presence for a single agent, or ``None`` if unknown."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         with self._lock:
-            rec = self._presence.get(agent_id)
+            rec = self._presence.get(user_id)
             if rec is None:
                 return None
             status = "online" if rec["last_seen"] >= cutoff else "offline"
-            return AgentPresence(
-                agent_id=agent_id,
+            return UserPresence(
+                user_id=user_id,
                 status=status,
                 last_seen=rec["last_seen"],
                 metadata=rec["metadata"],
@@ -569,7 +569,7 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             self._channels[meta.name] = meta
             if acl:
                 for entry in acl:
-                    self._acl[meta.name][entry.agent_id] = entry
+                    self._acl[meta.name][entry.user_id] = entry
 
     def get_channel(self, name: str) -> ChannelMeta | None:
         with self._lock:
@@ -602,31 +602,31 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
 
     def set_acl(self, channel: str, entries: list[ACLEntry]) -> None:
         with self._lock:
-            self._acl[channel] = {e.agent_id: e for e in entries}
+            self._acl[channel] = {e.user_id: e for e in entries}
 
     def get_acl(self, channel: str) -> list[ACLEntry]:
         with self._lock:
-            return sorted(self._acl.get(channel, {}).values(), key=lambda e: e.agent_id)
+            return sorted(self._acl.get(channel, {}).values(), key=lambda e: e.user_id)
 
     def add_acl_entry(self, entry: ACLEntry) -> None:
         with self._lock:
-            self._acl[entry.channel][entry.agent_id] = entry
+            self._acl[entry.channel][entry.user_id] = entry
 
-    def remove_acl_entry(self, channel: str, agent_id: str) -> bool:
+    def remove_acl_entry(self, channel: str, user_id: str) -> bool:
         with self._lock:
             entries = self._acl.get(channel, {})
-            return entries.pop(agent_id, None) is not None
+            return entries.pop(user_id, None) is not None
 
-    def check_access(self, channel: str, agent_id: str, required: str = "read") -> bool:
+    def check_access(self, channel: str, user_id: str, required: str = "read") -> bool:
         with self._lock:
             meta = self._channels.get(channel)
             if meta is None:
                 return True  # unregistered channels are public
-            if meta.owner == agent_id:
+            if meta.owner == user_id:
                 return True
             if meta.visibility == "public" and required in ("read", "write"):
                 return True
-            entry = self._acl.get(channel, {}).get(agent_id)
+            entry = self._acl.get(channel, {}).get(user_id)
             if entry is None:
                 return False
             return PERMISSION_LEVELS.get(entry.permission, 0) >= PERMISSION_LEVELS.get(required, 0)

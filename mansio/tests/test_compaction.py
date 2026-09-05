@@ -42,7 +42,7 @@ class TestRegistryCompaction:
                 "_system:registry",
                 "agent-a",
                 "register",
-                f'{{"agent_id": "agent-a", "round": {i}}}',
+                f'{{"user_id": "agent-a", "round": {i}}}',
                 metadata={"secret_hash": f"hash-{i}", "action": "register"},
             )
 
@@ -60,7 +60,7 @@ class TestRegistryCompaction:
                     "_system:registry",
                     agent,
                     "register",
-                    f'{{"agent_id": "{agent}", "round": {i}}}',
+                    f'{{"user_id": "{agent}", "round": {i}}}',
                     metadata={"secret_hash": f"hash-{agent}-{i}"},
                 )
 

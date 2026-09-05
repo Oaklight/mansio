@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from mansio.protocols import Backend, Compactable, Presenceable
-from mansio.types import AgentPresence, ClaimResult, Message
+from mansio.types import ClaimResult, Message, UserPresence
 
 try:
     import nats
@@ -920,43 +920,43 @@ class NATSBackend(Backend, Presenceable, Compactable):
 
     # ── Presence ──────────────────────────────────────────────
 
-    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
-        """Record a heartbeat for *agent_id*."""
+    def heartbeat(self, user_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *user_id*."""
         now = datetime.now(timezone.utc).isoformat()
         with self._presence_lock:
-            self._presence[agent_id] = {
+            self._presence[user_id] = {
                 "last_seen": now,
                 "metadata": metadata,
             }
 
-    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+    def users(self, timeout_seconds: int = 120) -> list[UserPresence]:
         """Return all known agents with computed online/offline status."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
-        result: list[AgentPresence] = []
+        result: list[UserPresence] = []
         with self._presence_lock:
-            for agent_id, rec in self._presence.items():
+            for user_id, rec in self._presence.items():
                 status = "online" if rec["last_seen"] >= cutoff else "offline"
                 result.append(
-                    AgentPresence(
-                        agent_id=agent_id,
+                    UserPresence(
+                        user_id=user_id,
                         status=status,
                         last_seen=rec["last_seen"],
                         metadata=rec["metadata"],
                     )
                 )
-        result.sort(key=lambda a: a.agent_id)
+        result.sort(key=lambda a: a.user_id)
         return result
 
-    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
+    def user_status(self, user_id: str, timeout_seconds: int = 120) -> UserPresence | None:
         """Return presence for a single agent, or ``None`` if unknown."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         with self._presence_lock:
-            rec = self._presence.get(agent_id)
+            rec = self._presence.get(user_id)
             if rec is None:
                 return None
             status = "online" if rec["last_seen"] >= cutoff else "offline"
-            return AgentPresence(
-                agent_id=agent_id,
+            return UserPresence(
+                user_id=user_id,
                 status=status,
                 last_seen=rec["last_seen"],
                 metadata=rec["metadata"],

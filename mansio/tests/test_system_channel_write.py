@@ -92,11 +92,11 @@ class TestSystemAgentsChannelWrite:
         http.close()
 
     def test_supertoken_can_publish_to_system_agents(self, auth_server) -> None:
-        """A supertoken (agent_id=NULL) should be able to write anything to _system:agents."""
+        """A supertoken (user_id=NULL) should be able to write anything to _system:agents."""
         from mansio._vendor.httpclient import Client as HttpClient
 
         url, store = auth_server
-        token_entry = store.create_token(agent_id=None, label="Admin supertoken")
+        token_entry = store.create_token(user_id=None, label="Admin supertoken")
         token = token_entry["token"]
 
         http = HttpClient(headers={"Authorization": f"Bearer {token}"})

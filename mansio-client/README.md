@@ -88,7 +88,7 @@ mansio-client memory recall "fact"
 
 ### Presence
 
-`heartbeat()`, `agents()`, `agent_status(agent_id)` — agent online/offline detection and roster queries.
+`heartbeat()`, `users()`, `user_status(user_id)` — agent online/offline detection and roster queries.
 
 ### Semantic APIs
 

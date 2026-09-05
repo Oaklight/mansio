@@ -231,9 +231,9 @@ class TestConcurrentPresence:
         n_agents = 8
         n_heartbeats = 100
 
-        def heartbeat_worker(agent_id: str):
+        def heartbeat_worker(user_id: str):
             for i in range(n_heartbeats):
-                bus.heartbeat(agent_id, metadata={"i": i})
+                bus.heartbeat(user_id, metadata={"i": i})
 
         threads = [
             threading.Thread(target=heartbeat_worker, args=(f"agent-{a}",)) for a in range(n_agents)
@@ -243,7 +243,7 @@ class TestConcurrentPresence:
         for t in threads:
             t.join()
 
-        agents = bus.agents()
+        agents = bus.users()
         assert len(agents) == n_agents
 
     def test_concurrent_heartbeat_and_agents_list(self):
@@ -259,9 +259,9 @@ class TestConcurrentPresence:
         def agents_reader():
             while not stop.is_set():
                 try:
-                    agents = bus.agents()
+                    agents = bus.users()
                     for a in agents:
-                        assert a.agent_id is not None
+                        assert a.user_id is not None
                         assert a.status in ("online", "offline")
                 except Exception as exc:
                     errors.append(str(exc))
@@ -388,8 +388,8 @@ class TestConcurrentMixedOps:
                 bus.heartbeat(f"agent-{i % 5}")
             while not stop.is_set():
                 try:
-                    bus.agents()
-                    bus.agent_status("agent-0")
+                    bus.users()
+                    bus.user_status("agent-0")
                 except Exception as exc:
                     errors.append(f"presence: {exc}")
                     return

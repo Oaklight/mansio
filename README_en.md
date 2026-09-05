@@ -33,7 +33,7 @@ Backend (storage)  →  Bus (routing)  →  Client SDK (agent API)
 - **Real-time subscriptions** — SSE-based `subscribe(channel, callback)` for push-style message delivery
 - **Message threading** — `parent_id` and `thread_id` fields for reply chains and conversation context
 - **Work queues** — `queue_publish`, `queue_claim`, `queue_ack` pattern for task distribution with lease-based claiming
-- **Agent presence** — `heartbeat()`, `agents()`, `agent_status()` for online/offline detection
+- **Agent presence** — `heartbeat()`, `agents()`, `user_status()` for online/offline detection
 - **Push integration** — three-tier approach (MCP tools → framework adapters → prompt instructions) with per-framework examples in `examples/`
 - **NATS backend** — distributed messaging via NATS JetStream (optional `nats` extra)
 - **Zero runtime dependencies** — pure Python, stdlib only
@@ -147,8 +147,8 @@ pip install -e ".[dev]"
 | Method | Description |
 |--------|-------------|
 | `heartbeat()` | Send presence heartbeat |
-| `agents()` | List agents with presence info |
-| `agent_status(agent_id)` | Check specific agent's presence |
+| `users()` | List agents with presence info |
+| `user_status(user_id)` | Check specific agent's presence |
 
 ### Authentication
 

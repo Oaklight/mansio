@@ -136,7 +136,7 @@ class TestParseArgsClient:
                 "send",
                 "-s",
                 "http://localhost:8742",
-                "-a",
+                "-u",
                 "my-agent",
                 "-c",
                 "tasks",
@@ -146,7 +146,7 @@ class TestParseArgsClient:
         assert args.command == "client"
         assert args.action == "send"
         assert args.server == "http://localhost:8742"
-        assert args.agent == "my-agent"
+        assert args.user == "my-agent"
         assert args.channel == "tasks"
         assert args.msg_type == "chat"
         assert args.message == "hello world"
@@ -158,7 +158,7 @@ class TestParseArgsClient:
                 "send",
                 "-s",
                 "http://x:8742",
-                "-a",
+                "-u",
                 "aaa",
                 "-c",
                 "ch",
@@ -176,7 +176,7 @@ class TestParseArgsClient:
                 "poll",
                 "-s",
                 "http://localhost:8742",
-                "-a",
+                "-u",
                 "my-agent",
                 "-c",
                 "tasks",
@@ -194,7 +194,7 @@ class TestParseArgsClient:
                 "poll",
                 "-s",
                 "http://x:8742",
-                "-a",
+                "-u",
                 "aaa",
                 "-c",
                 "ch",
@@ -210,7 +210,7 @@ class TestParseArgsClient:
                 "poll",
                 "-s",
                 "http://x:8742",
-                "-a",
+                "-u",
                 "aaa",
                 "-c",
                 "ch",
@@ -227,7 +227,7 @@ class TestParseArgsClient:
                 "channels",
                 "-s",
                 "http://localhost:8742",
-                "-a",
+                "-u",
                 "my-agent",
             ]
         )
@@ -240,7 +240,7 @@ class TestParseArgsClient:
                 "dm",
                 "-s",
                 "http://localhost:8742",
-                "-a",
+                "-u",
                 "alice",
                 "--to",
                 "bob",
@@ -248,14 +248,14 @@ class TestParseArgsClient:
             ]
         )
         assert args.action == "dm"
-        assert args.to_agent == "bob"
+        assert args.to_user == "bob"
         assert args.message == "hey bob!"
 
     def test_client_send_missing_server(self):
         with pytest.raises(SystemExit):
-            parse_args(["client", "send", "-a", "aaa", "-c", "ch", "msg"])
+            parse_args(["client", "send", "-u", "aaa", "-c", "ch", "msg"])
 
-    def test_client_send_missing_agent(self):
+    def test_client_send_missing_user(self):
         with pytest.raises(SystemExit):
             parse_args(["client", "send", "-s", "http://x:8742", "-c", "ch", "msg"])
 
@@ -400,7 +400,7 @@ class TestClientIntegration:
                 "send",
                 "-s",
                 http_server_url,
-                "-a",
+                "-u",
                 "test-agent",
                 "-c",
                 "test-ch",
@@ -423,7 +423,7 @@ class TestClientIntegration:
                 "poll",
                 "-s",
                 http_server_url,
-                "-a",
+                "-u",
                 "test-agent",
                 "-c",
                 "test-ch",
@@ -448,7 +448,7 @@ class TestClientIntegration:
                 "send",
                 "-s",
                 http_server_url,
-                "-a",
+                "-u",
                 "test-agent",
                 "-c",
                 "my-channel",
@@ -468,7 +468,7 @@ class TestClientIntegration:
                 "channels",
                 "-s",
                 http_server_url,
-                "-a",
+                "-u",
                 "test-agent",
             ],
             capture_output=True,
@@ -489,7 +489,7 @@ class TestClientIntegration:
                 "dm",
                 "-s",
                 http_server_url,
-                "-a",
+                "-u",
                 "alice",
                 "--to",
                 "bob",

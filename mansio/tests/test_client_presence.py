@@ -7,7 +7,7 @@ import time
 from .conftest import make_client
 
 # ──────────────────────────────────────────────────────────────────
-# Presence: heartbeat / agents / agent_status
+# Presence: heartbeat / users / user_status
 # ──────────────────────────────────────────────────────────────────
 
 
@@ -16,9 +16,9 @@ class TestHeartbeat:
         url, store, bus, server = mansio_server
         client = make_client(url, store, "agent-alpha")
         client.heartbeat()
-        result = bus.agent_status("agent-alpha")
+        result = bus.user_status("agent-alpha")
         assert result is not None
-        assert result.agent_id == "agent-alpha"
+        assert result.user_id == "agent-alpha"
         assert result.status == "online"
         client.close()
 
@@ -26,7 +26,7 @@ class TestHeartbeat:
         url, store, bus, server = mansio_server
         client = make_client(url, store, "agent-alpha")
         client.heartbeat(metadata={"display_name": "Alpha", "version": "1.0"})
-        result = bus.agent_status("agent-alpha")
+        result = bus.user_status("agent-alpha")
         assert result is not None
         assert result.metadata == {"display_name": "Alpha", "version": "1.0"}
         client.close()
@@ -39,9 +39,9 @@ class TestAgents:
         client_b = make_client(url, store, "agent-bbb")
         client_a.heartbeat()
         client_b.heartbeat()
-        agents = client_a.agents()
+        agents = client_a.users()
         assert len(agents) == 2
-        ids = [a.agent_id for a in agents]
+        ids = [a.user_id for a in agents]
         assert "agent-aaa" in ids
         assert "agent-bbb" in ids
         assert all(a.status == "online" for a in agents)
@@ -50,30 +50,30 @@ class TestAgents:
 
 
 class TestAgentStatus:
-    def test_agent_status_returns_single(self, mansio_server):
+    def test_user_status_returns_single(self, mansio_server):
         url, store, bus, server = mansio_server
         client = make_client(url, store, "agent-gamma")
         client.heartbeat(metadata={"role": "worker"})
-        result = client.agent_status("agent-gamma")
+        result = client.user_status("agent-gamma")
         assert result is not None
-        assert result.agent_id == "agent-gamma"
+        assert result.user_id == "agent-gamma"
         assert result.status == "online"
         assert result.metadata == {"role": "worker"}
         client.close()
 
-    def test_agent_status_unknown_returns_none(self, mansio_server):
+    def test_user_status_unknown_returns_none(self, mansio_server):
         url, store, bus, server = mansio_server
         client = make_client(url, store, "agent-gamma")
-        result = client.agent_status("nonexistent")
+        result = client.user_status("nonexistent")
         assert result is None
         client.close()
 
-    def test_agent_status_offline_after_timeout(self, mansio_server):
+    def test_user_status_offline_after_timeout(self, mansio_server):
         url, store, bus, server = mansio_server
         client = make_client(url, store, "agent-gamma")
         client.heartbeat()
         time.sleep(1.5)
-        result = client.agent_status("agent-gamma", timeout_seconds=1)
+        result = client.user_status("agent-gamma", timeout_seconds=1)
         assert result is not None
         assert result.status == "offline"
         client.close()

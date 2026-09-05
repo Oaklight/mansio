@@ -40,7 +40,7 @@ def _create_legacy_db(conn: sqlite3.Connection) -> None:
             metadata TEXT
         );
         CREATE TABLE agent_presence (
-            agent_id TEXT PRIMARY KEY,
+            user_id TEXT PRIMARY KEY,
             last_seen TEXT NOT NULL,
             metadata TEXT
         );

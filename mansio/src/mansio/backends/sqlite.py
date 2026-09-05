@@ -19,10 +19,10 @@ from mansio.protocols import Backend, ChannelStore, Compactable, Deletable, Pres
 from mansio.types import (
     PERMISSION_LEVELS,
     ACLEntry,
-    AgentPresence,
     ChannelMeta,
     ClaimResult,
     Message,
+    UserPresence,
 )
 
 _CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
@@ -45,7 +45,7 @@ def _infer_channel_type(name: str) -> str:
 logger = get_logger(__name__)
 
 # Current schema version — bump when the schema changes.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS messages (
@@ -59,8 +59,8 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_channel_id ON messages (channel, id);
 CREATE INDEX IF NOT EXISTS idx_channel_ts ON messages (channel, timestamp);
-CREATE TABLE IF NOT EXISTS agent_presence (
-    agent_id TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS user_presence (
+    user_id TEXT PRIMARY KEY,
     last_seen TEXT NOT NULL,
     metadata TEXT
 );
@@ -72,11 +72,11 @@ CREATE TABLE IF NOT EXISTS channels (
 );
 CREATE TABLE IF NOT EXISTS channel_acl (
     channel TEXT NOT NULL REFERENCES channels(name) ON DELETE CASCADE,
-    agent_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
     permission TEXT NOT NULL DEFAULT 'write',
     granted_at TEXT NOT NULL,
     granted_by TEXT,
-    PRIMARY KEY (channel, agent_id)
+    PRIMARY KEY (channel, user_id)
 );
 """
 
@@ -243,17 +243,39 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
         );
         CREATE TABLE IF NOT EXISTS channel_acl (
             channel    TEXT NOT NULL REFERENCES channels(name) ON DELETE CASCADE,
-            agent_id   TEXT NOT NULL,
+            user_id   TEXT NOT NULL,
             permission TEXT NOT NULL DEFAULT 'read',
             granted_at TEXT NOT NULL DEFAULT '',
             granted_by TEXT,
-            PRIMARY KEY (channel, agent_id)
+            PRIMARY KEY (channel, user_id)
         );
+    """)
+
+
+def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+    """Rename agent_id -> user_id in user_presence and channel_acl tables."""
+    conn.executescript("""
+        ALTER TABLE agent_presence RENAME TO user_presence;
+        ALTER TABLE user_presence RENAME COLUMN agent_id TO user_id;
+        CREATE TABLE IF NOT EXISTS channel_acl_new (
+            channel    TEXT NOT NULL REFERENCES channels(name) ON DELETE CASCADE,
+            user_id    TEXT NOT NULL,
+            permission TEXT NOT NULL DEFAULT 'read',
+            granted_at TEXT NOT NULL DEFAULT '',
+            granted_by TEXT,
+            PRIMARY KEY (channel, user_id)
+        );
+        INSERT OR IGNORE INTO channel_acl_new
+            SELECT channel, agent_id, permission, granted_at, granted_by
+            FROM channel_acl;
+        DROP TABLE channel_acl;
+        ALTER TABLE channel_acl_new RENAME TO channel_acl;
     """)
 
 
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _migrate_v1_to_v2,
+    3: _migrate_v2_to_v3,
 }
 
 
@@ -860,12 +882,9 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             if acl:
                 self._conn.executemany(
                     "INSERT OR REPLACE INTO channel_acl "
-                    "(channel, agent_id, permission, granted_at, granted_by) "
+                    "(channel, user_id, permission, granted_at, granted_by) "
                     "VALUES (?, ?, ?, ?, ?)",
-                    [
-                        (e.channel, e.agent_id, e.permission, e.granted_at, e.granted_by)
-                        for e in acl
-                    ],
+                    [(e.channel, e.user_id, e.permission, e.granted_at, e.granted_by) for e in acl],
                 )
             self._conn.commit()
 
@@ -922,10 +941,10 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             if entries:
                 self._conn.executemany(
                     "INSERT INTO channel_acl "
-                    "(channel, agent_id, permission, granted_at, granted_by) "
+                    "(channel, user_id, permission, granted_at, granted_by) "
                     "VALUES (?, ?, ?, ?, ?)",
                     [
-                        (e.channel, e.agent_id, e.permission, e.granted_at, e.granted_by)
+                        (e.channel, e.user_id, e.permission, e.granted_at, e.granted_by)
                         for e in entries
                     ],
                 )
@@ -934,14 +953,14 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
     def get_acl(self, channel: str) -> list[ACLEntry]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT channel, agent_id, permission, granted_at, granted_by "
-                "FROM channel_acl WHERE channel = ? ORDER BY agent_id",
+                "SELECT channel, user_id, permission, granted_at, granted_by "
+                "FROM channel_acl WHERE channel = ? ORDER BY user_id",
                 (channel,),
             ).fetchall()
             return [
                 ACLEntry(
                     channel=r[0],
-                    agent_id=r[1],
+                    user_id=r[1],
                     permission=r[2],
                     granted_at=r[3],
                     granted_by=r[4],
@@ -953,11 +972,11 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
         with self._lock:
             self._conn.execute(
                 "INSERT OR REPLACE INTO channel_acl "
-                "(channel, agent_id, permission, granted_at, granted_by) "
+                "(channel, user_id, permission, granted_at, granted_by) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (
                     entry.channel,
-                    entry.agent_id,
+                    entry.user_id,
                     entry.permission,
                     entry.granted_at,
                     entry.granted_by,
@@ -965,16 +984,16 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             )
             self._conn.commit()
 
-    def remove_acl_entry(self, channel: str, agent_id: str) -> bool:
+    def remove_acl_entry(self, channel: str, user_id: str) -> bool:
         with self._lock:
             cursor = self._conn.execute(
-                "DELETE FROM channel_acl WHERE channel = ? AND agent_id = ?",
-                (channel, agent_id),
+                "DELETE FROM channel_acl WHERE channel = ? AND user_id = ?",
+                (channel, user_id),
             )
             self._conn.commit()
             return cursor.rowcount > 0
 
-    def check_access(self, channel: str, agent_id: str, required: str = "read") -> bool:
+    def check_access(self, channel: str, user_id: str, required: str = "read") -> bool:
         with self._lock:
             row = self._conn.execute(
                 "SELECT owner, visibility FROM channels WHERE name = ?", (channel,)
@@ -982,13 +1001,13 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             if row is None:
                 return True  # unregistered channels are public
             ch_owner, ch_vis = row[0], row[1]
-            if ch_owner == agent_id:
+            if ch_owner == user_id:
                 return True
             if ch_vis == "public" and required in ("read", "write"):
                 return True
             acl_row = self._conn.execute(
-                "SELECT permission FROM channel_acl WHERE channel = ? AND agent_id = ?",
-                (channel, agent_id),
+                "SELECT permission FROM channel_acl WHERE channel = ? AND user_id = ?",
+                (channel, user_id),
             ).fetchone()
             if acl_row is None:
                 return False
@@ -996,34 +1015,34 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
 
     # ── Presence ──────────────────────────────────────────────
 
-    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
-        """Record a heartbeat for *agent_id*."""
+    def heartbeat(self, user_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *user_id*."""
         now = datetime.now(timezone.utc).isoformat()
         meta_json = json.dumps(metadata) if metadata else None
         with self._lock:
             self._conn.execute(
-                "INSERT INTO agent_presence (agent_id, last_seen, metadata) "
+                "INSERT INTO user_presence (user_id, last_seen, metadata) "
                 "VALUES (?, ?, ?) "
-                "ON CONFLICT(agent_id) DO UPDATE SET last_seen = excluded.last_seen, "
+                "ON CONFLICT(user_id) DO UPDATE SET last_seen = excluded.last_seen, "
                 "metadata = excluded.metadata",
-                (agent_id, now, meta_json),
+                (user_id, now, meta_json),
             )
             self._conn.commit()
 
-    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+    def users(self, timeout_seconds: int = 120) -> list[UserPresence]:
         """Return all known agents with computed online/offline status."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         with self._lock:
             rows = self._conn.execute(
-                "SELECT agent_id, last_seen, metadata FROM agent_presence ORDER BY agent_id"
+                "SELECT user_id, last_seen, metadata FROM user_presence ORDER BY user_id"
             ).fetchall()
-        result: list[AgentPresence] = []
+        result: list[UserPresence] = []
         for row in rows:
             status = "online" if row["last_seen"] >= cutoff else "offline"
             meta = json.loads(row["metadata"]) if row["metadata"] else None
             result.append(
-                AgentPresence(
-                    agent_id=row["agent_id"],
+                UserPresence(
+                    user_id=row["user_id"],
                     status=status,
                     last_seen=row["last_seen"],
                     metadata=meta,
@@ -1031,20 +1050,20 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             )
         return result
 
-    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
+    def user_status(self, user_id: str, timeout_seconds: int = 120) -> UserPresence | None:
         """Return presence for a single agent, or ``None`` if unknown."""
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)).isoformat()
         with self._lock:
             row = self._conn.execute(
-                "SELECT agent_id, last_seen, metadata FROM agent_presence WHERE agent_id = ?",
-                (agent_id,),
+                "SELECT user_id, last_seen, metadata FROM user_presence WHERE user_id = ?",
+                (user_id,),
             ).fetchone()
         if row is None:
             return None
         status = "online" if row["last_seen"] >= cutoff else "offline"
         meta = json.loads(row["metadata"]) if row["metadata"] else None
-        return AgentPresence(
-            agent_id=row["agent_id"],
+        return UserPresence(
+            user_id=row["user_id"],
             status=status,
             last_seen=row["last_seen"],
             metadata=meta,
