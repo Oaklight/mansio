@@ -156,11 +156,11 @@ class Bus:
 
 ```python
 class MansioClient:
-    def __init__(target: Bus | str, agent_id: str, *,
+    def __init__(target: Bus | str, user_id: str, *,
                  secret=None, display_name=None)
 
     @classmethod
-    def register(target, agent_id, *, display_name=None)
+    def register(target, user_id, *, display_name=None)
         -> tuple[MansioClient, str]
 
     def close() -> None
@@ -187,15 +187,15 @@ class MansioClient:
 #### Semantic API — Sugar Methods
 
 ```python
-    # Notes (writes to notebook:{agent_id})
+    # Notes (writes to notebook:{user_id})
     def note_write(content, tags=None) -> str
     def note_read(tags=None, limit=10) -> list[Message]
 
-    # Thoughts (writes to notebook:{agent_id}, msg_type="thought")
+    # Thoughts (writes to notebook:{user_id}, msg_type="thought")
     def thought_record(thinking_mode, focus_area, thought_process) -> str
     def thought_read(limit=10) -> list[Message]
 
-    # Memory (writes to memory:{agent_id})
+    # Memory (writes to memory:{user_id})
     def memory_store(content, memory_type="general") -> str
     def memory_recall(query, limit=5) -> list[Message]
 
@@ -235,7 +235,7 @@ client = MansioClient(bus, "agent-1", secret=secret)
 
 - Secrets are `sk-{48 hex chars}`, stored as `sha256:{hash}` in `_system:registry`
 - Registration via `MansioClient.register()` returns `(client, secret)` tuple
-- Cross-session reconnect: same `agent_id` + `secret`
+- Cross-session reconnect: same `user_id` + `secret`
 
 ---
 
@@ -245,14 +245,14 @@ Enforced by Client SDK (semantic API methods), not by Bus.
 
 | Type | Pattern | Used By |
 |------|---------|---------|
-| Notebook | `notebook:{agent_id}` | `note_write`, `thought_record` |
-| Memory | `memory:{agent_id}` | `memory_store`, `memory_recall` |
+| Notebook | `notebook:{user_id}` | `note_write`, `thought_record` |
+| Memory | `memory:{user_id}` | `memory_store`, `memory_recall` |
 | DM | `dm:{agent_a}:{agent_b}` (sorted) | `dm_send`, `dm_read` |
 | Broadcast | `broadcast:{topic}` | `broadcast_list`, `broadcast_read` |
 | System | `_system:registry` | Agent registration |
 | System | `_system:agents` | Presence announcement |
-| System | `_system:cursors:{agent_id}` | Cursor persistence |
-| System | `_system:notifications:{agent_id}` | `notification_check` |
+| System | `_system:cursors:{user_id}` | Cursor persistence |
+| System | `_system:notifications:{user_id}` | `notification_check` |
 
 ---
 
@@ -265,9 +265,9 @@ Two read modes:
 | `channel_poll(ch)` | ✅ Auto-advances | Track new messages incrementally |
 | `channel_read(ch)` | ❌ No effect | Random access, view history |
 
-Cursors persist across sessions via `_system:cursors:{agent_id}`:
+Cursors persist across sessions via `_system:cursors:{user_id}`:
 - `close()` saves cursor snapshot
-- New `MansioClient` with same `agent_id` restores from latest snapshot
+- New `MansioClient` with same `user_id` restores from latest snapshot
 - `channel_poll()` resumes from where the previous session left off
 
 ---

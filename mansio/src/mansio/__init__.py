@@ -12,10 +12,10 @@ from mansio.transport_http import HttpTransport, MansioAPIError
 from mansio.types import (
     PERMISSION_LEVELS,
     ACLEntry,
-    AgentPresence,
     ChannelMeta,
     ClaimResult,
     Message,
+    UserPresence,
 )
 
 # Backward compatibility aliases — access triggers DeprecationWarning.
@@ -24,7 +24,7 @@ from mansio.types import (
 __all__ = [
     "ACLEntry",
     "PERMISSION_LEVELS",
-    "AgentPresence",
+    "UserPresence",
     "Backend",
     "ChannelMeta",
     "ChannelStore",

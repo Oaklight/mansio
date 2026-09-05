@@ -489,7 +489,7 @@ class TestClientListen:
         with patch.object(MansioClient, "__init__", lambda self, *a, **kw: None):
             client = MansioClient.__new__(MansioClient)
             client._transport = MagicMock()
-            client._agent_id = "test"
+            client._user_id = "test"
             client._display_name = "test"
             client._cursors = {}
 
@@ -519,7 +519,7 @@ class TestClientListen:
         with patch.object(MansioClient, "__init__", lambda self, *a, **kw: None):
             client = MansioClient.__new__(MansioClient)
             client._transport = MagicMock()
-            client._agent_id = "test"
+            client._user_id = "test"
             client._display_name = "test"
             client._cursors = {}
 

@@ -41,7 +41,7 @@ def _make_server(tmp_path):
 
 
 class TestNoteWrite:
-    """note_write must publish to notebook:{agent_id} without crashing."""
+    """note_write must publish to notebook:{user_id} without crashing."""
 
     def test_note_write_returns_message_id(self, tmp_path) -> None:
         url, store, server = _make_server(tmp_path)
@@ -98,7 +98,7 @@ class TestNoteWrite:
 
 
 class TestThoughtRecord:
-    """thought_record must publish to notebook:{agent_id} without crashing."""
+    """thought_record must publish to notebook:{user_id} without crashing."""
 
     def test_thought_record_returns_message_id(self, tmp_path) -> None:
         url, store, server = _make_server(tmp_path)
@@ -133,7 +133,7 @@ class TestThoughtRecord:
 
 
 class TestMemoryStore:
-    """memory_store must publish to memory:{agent_id} without crashing."""
+    """memory_store must publish to memory:{user_id} without crashing."""
 
     def test_memory_store_returns_message_id(self, tmp_path) -> None:
         url, store, server = _make_server(tmp_path)

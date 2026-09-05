@@ -21,7 +21,7 @@ class TestCreateAndValidate:
     def test_create_returns_plaintext(self, store: TokenStore) -> None:
         entry = store.create_token("agent-alice", "Alice's bot")
         assert entry["token"].startswith("mst-")
-        assert entry["agent_id"] == "agent-alice"
+        assert entry["user_id"] == "agent-alice"
         assert entry["label"] == "Alice's bot"
         assert entry["id"]
         assert entry["created_at"]
@@ -51,7 +51,7 @@ class TestCreateAndValidate:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         conn = store._conn()
         conn.execute(
-            "INSERT INTO tokens (id, token_hash, token_prefix, agent_id, label, created_at) "
+            "INSERT INTO tokens (id, token_hash, token_prefix, user_id, label, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             ("legacy01", token_hash, token[:8], "agent-legacy", "old token", "2024-01-01"),
         )
@@ -78,33 +78,33 @@ class TestCreateAndValidate:
 
 
 class TestSupertoken:
-    """Supertoken (agent_id=None) behavior."""
+    """Supertoken (user_id=None) behavior."""
 
     def test_create_supertoken(self, store: TokenStore) -> None:
-        entry = store.create_token(agent_id=None, label="admin token")
-        assert entry["agent_id"] is None
+        entry = store.create_token(user_id=None, label="admin token")
+        assert entry["user_id"] is None
 
     def test_validate_supertoken_returns_none(self, store: TokenStore) -> None:
-        entry = store.create_token(agent_id=None)
+        entry = store.create_token(user_id=None)
         result = store.validate(entry["token"])
         # None means supertoken (wildcard), not "invalid"
         assert result is None
 
 
 class TestRejectEmptyAgentId:
-    """Empty-string agent_id must be rejected (fixes #106)."""
+    """Empty-string user_id must be rejected (fixes #106)."""
 
     def test_empty_string_raises(self, store: TokenStore) -> None:
         with pytest.raises(ValueError, match="non-empty"):
-            store.create_token(agent_id="")
+            store.create_token(user_id="")
 
     def test_whitespace_only_raises(self, store: TokenStore) -> None:
         with pytest.raises(ValueError, match="non-empty"):
-            store.create_token(agent_id="   ")
+            store.create_token(user_id="   ")
 
     def test_none_still_allowed(self, store: TokenStore) -> None:
-        entry = store.create_token(agent_id=None)
-        assert entry["agent_id"] is None
+        entry = store.create_token(user_id=None)
+        assert entry["user_id"] is None
 
 
 class TestDelete:
@@ -136,7 +136,7 @@ class TestRotate:
         assert result["token"] != old_token
         assert result["token"].startswith("mst-")
         # Metadata preserved
-        assert result["agent_id"] == "agent-alice"
+        assert result["user_id"] == "agent-alice"
         assert result["label"] == "bot"
         assert result["id"] == entry["id"]
 

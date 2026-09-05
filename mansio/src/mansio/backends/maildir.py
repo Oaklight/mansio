@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Literal
 
 from mansio.protocols import Backend, Compactable, Deletable, Presenceable
-from mansio.types import AgentPresence, ClaimResult, Message
+from mansio.types import ClaimResult, Message, UserPresence
 
 
 def _channel_to_dirname(channel: str) -> str:
@@ -927,8 +927,8 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
         """Persist presence data to sidecar JSON."""
         self._presence_path().write_text(json.dumps(data, ensure_ascii=False, indent=2))
 
-    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
-        """Record a heartbeat for *agent_id*.
+    def heartbeat(self, user_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *user_id*.
 
         Upserts ``last_seen`` to now and stores optional *metadata*.
         Presence is persisted to ``_presence.json`` under the root
@@ -936,23 +936,23 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
         """
         with self._lock:
             data = self._load_presence()
-            entry = data.get(agent_id, {})
+            entry = data.get(user_id, {})
             entry["last_seen"] = datetime.now(timezone.utc).isoformat()
             if metadata is not None:
                 entry["metadata"] = metadata
-            data[agent_id] = entry
+            data[user_id] = entry
             self._save_presence(data)
 
-    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+    def users(self, timeout_seconds: int = 120) -> list[UserPresence]:
         """Return all known agents with computed online/offline status."""
         with self._lock:
             data = self._load_presence()
 
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(seconds=timeout_seconds)
-        result: list[AgentPresence] = []
-        for agent_id in sorted(data):  # sorted by agent_id
-            entry = data[agent_id]
+        result: list[UserPresence] = []
+        for user_id in sorted(data):  # sorted by user_id
+            entry = data[user_id]
             last_seen = entry.get("last_seen", "")
             try:
                 ls_dt = datetime.fromisoformat(last_seen)
@@ -961,8 +961,8 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
             status = "online" if ls_dt >= cutoff else "offline"
             meta = entry.get("metadata")
             result.append(
-                AgentPresence(
-                    agent_id=agent_id,
+                UserPresence(
+                    user_id=user_id,
                     status=status,
                     last_seen=last_seen,
                     metadata=meta,
@@ -970,12 +970,12 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
             )
         return result
 
-    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
+    def user_status(self, user_id: str, timeout_seconds: int = 120) -> UserPresence | None:
         """Return presence for a single agent, or ``None`` if unknown."""
         with self._lock:
             data = self._load_presence()
 
-        entry = data.get(agent_id)
+        entry = data.get(user_id)
         if entry is None:
             return None
 
@@ -987,8 +987,8 @@ class MaildirBackend(Backend, Presenceable, Compactable, Deletable):
         except (ValueError, TypeError):
             ls_dt = datetime.min.replace(tzinfo=timezone.utc)
         status = "online" if ls_dt >= cutoff else "offline"
-        return AgentPresence(
-            agent_id=agent_id,
+        return UserPresence(
+            user_id=user_id,
             status=status,
             last_seen=last_seen,
             metadata=entry.get("metadata"),

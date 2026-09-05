@@ -597,7 +597,7 @@ class AdminServer:
                 return {"users": [], "enabled": False}
             users = token_store.list_users()
             try:
-                presence = {a.agent_id: a for a in bus.agents(timeout_seconds=120)}
+                presence = {a.user_id: a for a in bus.users(timeout_seconds=120)}
             except NotImplementedError:
                 presence = {}
             for u in users:
@@ -623,7 +623,7 @@ class AdminServer:
             if token_store.user_exists(user_id):
                 return {"error": "Conflict", "message": f"User '{user_id}' already exists"}, 409
             label = data.get("label", "initial token")
-            entry = token_store.create_token(agent_id=user_id, label=label)
+            entry = token_store.create_token(user_id=user_id, label=label)
             return {"ok": True, "user_id": user_id, "token": entry}, 201
 
     def _setup_user_detail_delete_routes(self) -> None:
@@ -639,7 +639,7 @@ class AdminServer:
             if not tokens:
                 return {"error": "Not Found", "message": f"User '{user_id}' not found"}, 404
             try:
-                p = bus.agent_status(user_id)
+                p = bus.user_status(user_id)
             except NotImplementedError:
                 p = None
             return {
@@ -677,7 +677,7 @@ class AdminServer:
                 return {"error": "Not Found", "message": f"User '{user_id}' not found"}, 404
             data = request.json() if request.body else {}
             label = data.get("label", "")
-            entry = token_store.create_token(agent_id=user_id, label=label)
+            entry = token_store.create_token(user_id=user_id, label=label)
             return {"ok": True, "token": entry}, 201
 
     def _setup_token_routes(self) -> None:
@@ -698,13 +698,13 @@ class AdminServer:
                     "message": "Token store not configured",
                 }, 503
             data = request.json() if request.body else {}
-            agent_id = data.get("agent_id")
-            if not isinstance(agent_id, str) or not agent_id.strip():
+            user_id = data.get("user_id")
+            if not isinstance(user_id, str) or not user_id.strip():
                 return {
                     "error": "Bad Request",
-                    "message": "agent_id must be a non-empty string",
+                    "message": "user_id must be a non-empty string",
                 }, 400
-            entry = token_store.create_token(agent_id=agent_id.strip(), label=data.get("label", ""))
+            entry = token_store.create_token(user_id=user_id.strip(), label=data.get("label", ""))
             return {"ok": True, "token": entry}, 201
 
         @self._app.delete("/api/tokens/<token_id>")

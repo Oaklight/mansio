@@ -340,7 +340,7 @@ class TestPresenceTimeoutValidation:
         http = HttpClient()
         resp = http.get(f"{server_url}/v1/presence/some-agent?timeout={timeout_val}")
         assert resp.status_code == 400, (
-            f"GET /v1/presence/<agent_id>?timeout={timeout_val!r}: "
+            f"GET /v1/presence/<user_id>?timeout={timeout_val!r}: "
             f"expected 400, got {resp.status_code}"
         )
         http.close()
@@ -349,7 +349,7 @@ class TestPresenceTimeoutValidation:
         http = HttpClient()
         resp = http.get(f"{server_url}/v1/presence/some-agent?timeout=-1")
         assert resp.status_code == 400, (
-            "GET /v1/presence/<agent_id>?timeout=-1: expected 400, got " + str(resp.status_code)
+            "GET /v1/presence/<user_id>?timeout=-1: expected 400, got " + str(resp.status_code)
         )
         http.close()
 

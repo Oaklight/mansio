@@ -217,10 +217,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Server URL (e.g. http://localhost:8742)",
     )
     _client_common.add_argument(
-        "-a",
-        "--agent",
+        "-u",
+        "--user",
         required=True,
-        help="Agent ID",
+        help="User ID",
     )
     _client_common.add_argument(
         "--api-token",
@@ -255,7 +255,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # client dm
     dm = client_sub.add_parser("dm", parents=[_client_common], help="Send a direct message")
-    dm.add_argument("--to", required=True, dest="to_agent", help="Recipient agent ID")
+    dm.add_argument("--to", required=True, dest="to_user", help="Recipient user ID")
     dm.add_argument("message", help="Message content")
 
     return parser
@@ -578,8 +578,8 @@ def _cmd_client_send(args: argparse.Namespace) -> None:
     """
     from mansio.transport_http import HttpTransport
 
-    transport = HttpTransport(args.server, agent_id=args.agent, token=args.api_token)
-    msg_id = transport.publish(args.channel, args.agent, args.msg_type, args.message)
+    transport = HttpTransport(args.server, user_id=args.user, token=args.api_token)
+    msg_id = transport.publish(args.channel, args.user, args.msg_type, args.message)
     print(msg_id)
     transport.close()
 
@@ -592,7 +592,7 @@ def _cmd_client_poll(args: argparse.Namespace) -> None:
     """
     from mansio.transport_http import HttpTransport
 
-    transport = HttpTransport(args.server, agent_id=args.agent, token=args.api_token)
+    transport = HttpTransport(args.server, user_id=args.user, token=args.api_token)
 
     if args.follow:
         # SSE mode: subscribe and print each message as JSON line
@@ -626,7 +626,7 @@ def _cmd_client_channels(args: argparse.Namespace) -> None:
     """
     from mansio.transport_http import HttpTransport
 
-    transport = HttpTransport(args.server, agent_id=args.agent, token=args.api_token)
+    transport = HttpTransport(args.server, user_id=args.user, token=args.api_token)
     for ch in transport.channels():
         print(ch)
     transport.close()
@@ -641,11 +641,11 @@ def _cmd_client_dm(args: argparse.Namespace) -> None:
     from mansio.transport_http import HttpTransport
 
     # Compute canonical DM channel (same logic as MansioClient._dm_channel)
-    pair = sorted([args.agent, args.to_agent])
+    pair = sorted([args.user, args.to_user])
     channel = f"dm:{pair[0]}:{pair[1]}"
 
-    transport = HttpTransport(args.server, agent_id=args.agent, token=args.api_token)
-    msg_id = transport.publish(channel, args.agent, "chat", args.message)
+    transport = HttpTransport(args.server, user_id=args.user, token=args.api_token)
+    msg_id = transport.publish(channel, args.user, "chat", args.message)
     print(msg_id)
     transport.close()
 

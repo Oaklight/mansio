@@ -495,23 +495,23 @@ class TestNATSBackendPresence:
 
     def test_heartbeat_records_agent(self, backend: NATSBackend):
         backend.heartbeat("agent-a")
-        agents = backend.agents()
+        agents = backend.users()
         assert len(agents) == 1
-        assert agents[0].agent_id == "agent-a"
+        assert agents[0].user_id == "agent-a"
         assert agents[0].status == "online"
 
     def test_heartbeat_with_metadata(self, backend: NATSBackend):
         backend.heartbeat("agent-a", metadata={"name": "Alice"})
-        result = backend.agent_status("agent-a")
+        result = backend.user_status("agent-a")
         assert result is not None
         assert result.metadata == {"name": "Alice"}
 
     def test_agent_unknown(self, backend: NATSBackend):
-        assert backend.agent_status("nonexistent") is None
+        assert backend.user_status("nonexistent") is None
 
     def test_agent_offline_by_timeout(self, backend: NATSBackend):
         backend.heartbeat("agent-a")
-        result = backend.agent_status("agent-a", timeout_seconds=0)
+        result = backend.user_status("agent-a", timeout_seconds=0)
         assert result is not None
         assert result.status == "offline"
 
@@ -519,8 +519,8 @@ class TestNATSBackendPresence:
         backend.heartbeat("charlie")
         backend.heartbeat("alice")
         backend.heartbeat("bob")
-        agents = backend.agents()
-        assert [a.agent_id for a in agents] == ["alice", "bob", "charlie"]
+        agents = backend.users()
+        assert [a.user_id for a in agents] == ["alice", "bob", "charlie"]
 
 
 class TestNATSBackendGetStats:

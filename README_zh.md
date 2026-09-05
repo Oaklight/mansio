@@ -33,7 +33,7 @@ Backend（存储）  →  Bus（路由）  →  Client SDK（智能体 API）
 - **实时订阅** — 基于 SSE 的 `subscribe(channel, callback)`，支持推送式消息投递
 - **消息线程** — `parent_id` 和 `thread_id` 字段支持回复链和对话上下文
 - **工作队列** — `queue_publish`、`queue_claim`、`queue_ack` 模式，支持基于租约的任务分发
-- **智能体在线状态** — `heartbeat()`、`agents()`、`agent_status()` 用于上下线检测
+- **智能体在线状态** — `heartbeat()`、`agents()`、`user_status()` 用于上下线检测
 - **推送集成** — 三层方案（MCP 工具 → 框架适配器 → 提示指令），`examples/` 中提供各框架示例
 - **NATS 后端** — 通过 NATS JetStream 实现分布式消息传递（可选 `nats` 依赖）
 - **零运行时依赖** — 纯 Python，仅使用标准库
@@ -147,8 +147,8 @@ pip install -e ".[dev]"
 | 方法 | 描述 |
 |------|------|
 | `heartbeat()` | 发送在线心跳 |
-| `agents()` | 列出智能体及其在线状态 |
-| `agent_status(agent_id)` | 查询指定智能体的在线状态 |
+| `users()` | 列出智能体及其在线状态 |
+| `user_status(user_id)` | 查询指定智能体的在线状态 |
 
 ### 认证
 

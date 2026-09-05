@@ -89,7 +89,7 @@ Messages are the fundamental data unit. All communication is carried out through
 class Message:
     id: str              # UUID v7 (time-ordered), used as cursor
     channel: str         # Channel name
-    sender: str          # Sender's agent_id
+    sender: str          # Sender's user_id
     msg_type: str        # Application-level message type
     payload: str         # Message content (JSON string or plain text)
     timestamp: str       # ISO 8601 timestamp
@@ -282,13 +282,13 @@ Transport is a purely internal abstraction; users never interact with it directl
 ##### Identity Model
 
 ```
-agent_id      Unique system identifier, user-chosen, format-constrained
+user_id      Unique system identifier, user-chosen, format-constrained
               (lowercase alphanumeric, hyphens, underscores, dots; 3-64 chars)
 secret        Mansio-generated credential, stored as SHA256 hash
-display_name  Optional display name, can duplicate, defaults to agent_id
+display_name  Optional display name, can duplicate, defaults to user_id
 ```
 
-Analogy: agent_id ≈ WeChat ID (unique), display_name ≈ nickname (can duplicate).
+Analogy: user_id ≈ WeChat ID (unique), display_name ≈ nickname (can duplicate).
 
 ##### Registration & Connection
 
@@ -328,7 +328,7 @@ Agent registration information is stored in the `_system:registry` channel, foll
 ```python
 # Message written during registration
 channel = "_system:registry"
-sender = agent_id
+sender = user_id
 msg_type = "register"
 metadata = {
     "display_name": "Code Bot",
@@ -363,9 +363,9 @@ The Client SDK applies the same rules locally for fast feedback. The Bus layer i
 
 | Channel Type | Naming Pattern | Usage | Access Control |
 |-------------|----------------|-------|----------------|
-| History | `history:{agent_id}` | Dialogue/Work log | Private, auto-written by SDK |
-| Notebook | `notebook:{agent_id}` | Thinking process, temp notes (incl. Thought) | Private, agent writes actively |
-| Memory | `memory:{agent_id}` | Long-term memory (Semantic) | Private |
+| History | `history:{user_id}` | Dialogue/Work log | Private, auto-written by SDK |
+| Notebook | `notebook:{user_id}` | Thinking process, temp notes (incl. Thought) | Private, agent writes actively |
+| Memory | `memory:{user_id}` | Long-term memory (Semantic) | Private |
 | Broadcast | `broadcast:{topic}` | Announcements, task lists, member lists | Public read-only |
 | Group | `group:{group_id}` | Group chat | Member read/write |
 | DM | `dm:{agent_a}:{agent_b}` | Direct message (IDs lexicographically sorted) | Both parties read/write |
@@ -452,11 +452,11 @@ channel_list() -> list[str]
 The following methods are semantic wrappers (syntactic sugar) over channel operations, auto-routing to the appropriate channel with the correct `msg_type`:
 
 ```python
-# ── Notebook (writes to notebook:{agent_id}) ──
+# ── Notebook (writes to notebook:{user_id}) ──
 note_write(content: str, tags: list[str] | None = None) -> str
 note_read(tags: list[str] | None = None, limit: int = 10) -> list[Message]
 
-# ── Thought (writes to notebook:{agent_id}, msg_type="thought") ──
+# ── Thought (writes to notebook:{user_id}, msg_type="thought") ──
 thought_record(
     thinking_mode: str,    # reasoning | planning | reflection | recalling | brainstorming | exploring
     focus_area: str,
@@ -464,7 +464,7 @@ thought_record(
 ) -> str
 thought_read(limit: int = 10) -> list[Message]
 
-# ── Memory (writes to memory:{agent_id}) ──
+# ── Memory (writes to memory:{user_id}) ──
 memory_store(content: str, memory_type: str = "general") -> str
 memory_recall(query: str, limit: int = 5) -> list[Message]
 # Semantic search for memory_recall is provided by external components
@@ -492,15 +492,15 @@ notification_check() -> list[Message]
 
 ```
 note_write(content, tags)
-  → channel_send(f"notebook:{self.agent_id}", content, msg_type="note",
+  → channel_send(f"notebook:{self.user_id}", content, msg_type="note",
                   metadata={"tags": tags})
 
 thought_record(mode, focus, process)
-  → channel_send(f"notebook:{self.agent_id}", process, msg_type="thought",
+  → channel_send(f"notebook:{self.user_id}", process, msg_type="thought",
                   metadata={"thinking_mode": mode, "focus_area": focus})
 
 memory_store(content, memory_type)
-  → channel_send(f"memory:{self.agent_id}", content, msg_type="memory",
+  → channel_send(f"memory:{self.user_id}", content, msg_type="memory",
                   metadata={"memory_type": memory_type})
 
 dm_send(to_agent, content)
@@ -520,12 +520,12 @@ MansioClient maintains per-channel cursors for incremental message reading.
 
 ##### Cursor Persistence
 
-Cursor state is stored in the `_system:cursors:{agent_id}` channel for cross-session recovery:
+Cursor state is stored in the `_system:cursors:{user_id}` channel for cross-session recovery:
 
 ```python
 # Client SDK periodically or at key points persists cursors
 channel_send(
-    f"_system:cursors:{self.agent_id}",
+    f"_system:cursors:{self.user_id}",
     json.dumps(self._cursors),  # {"channel_a": "last_msg_id", ...}
     msg_type="cursor_snapshot",
 )
@@ -538,9 +538,9 @@ channel_send(
 ```
 Agent dies
   → Respawn
-  → Create MansioClient with same agent_id + secret
+  → Create MansioClient with same user_id + secret
   → _announce() writes new register message
-  → _restore_cursors() reads latest snapshot from _system:cursors:{agent_id}
+  → _restore_cursors() reads latest snapshot from _system:cursors:{user_id}
   → channel_poll() resumes from the breakpoint
 ```
 
@@ -788,7 +788,7 @@ thought_record(
 )
 
 # Stored as Message:
-# channel = "notebook:{agent_id}"
+# channel = "notebook:{user_id}"
 # msg_type = "thought"
 # payload = thought_process
 # metadata = {"thinking_mode": "reasoning", "focus_area": "API design evaluation"}
@@ -854,11 +854,11 @@ client = MansioClient("http://mansio:8741", "coder-1", secret="sk-xxx")
 The Client SDK selects backends via connection strings, integrating configuration into code:
 
 ```python
-MansioClient("mansio.db", agent_id)           # SQLite
-MansioClient(":memory:", agent_id)             # Memory
-MansioClient("redis://host:6379", agent_id)    # Redis
-MansioClient("amqp://host:5672", agent_id)     # RabbitMQ
-MansioClient("http://host:8741", agent_id)     # Remote service
+MansioClient("mansio.db", user_id)           # SQLite
+MansioClient(":memory:", user_id)             # Memory
+MansioClient("redis://host:6379", user_id)    # Redis
+MansioClient("amqp://host:5672", user_id)     # RabbitMQ
+MansioClient("http://host:8741", user_id)     # Remote service
 ```
 
 ### 7.2 Configuration File (Future, for MansioServer deployment)
@@ -909,7 +909,7 @@ Configuration files ultimately resolve to connection strings + constructor param
 | Delayed Messages | Scheduled delivery | Backend |
 | Moderator Agent | Broadcast review mechanism | Client SDK |
 | Async API | asyncio support | Full stack |
-| Message Interruption | interrupt:{agent_id} channel + priority | Agent SDK layer |
+| Message Interruption | interrupt:{user_id} channel + priority | Agent SDK layer |
 | Per-channel Aliases | Similar to WeChat group cards | Client SDK |
 | Agent Heartbeat | Liveness detection and expiration | Client SDK |
 
@@ -931,11 +931,11 @@ Configuration files ultimately resolve to connection strings + constructor param
 
 **Rationale**: Server-side validation in the Frontend prevents malformed channel names from reaching the Bus regardless of client implementation. Client-side validation in the SDK provides fast feedback. The Bus layer remains generic without embedding business semantics.
 
-### D3: Identity Authentication via agent_id + secret
+### D3: Identity Authentication via user_id + secret
 
-**Decision**: agent_id is user-chosen (format-constrained), secret is Mansio-generated, and authentication enforcement is controlled via Bus configuration.
+**Decision**: user_id is user-chosen (format-constrained), secret is Mansio-generated, and authentication enforcement is controlled via Bus configuration.
 
-**Rationale**: Simple, mature credential pattern supporting cross-session recovery (reconnect with same agent_id + secret). No-auth mode lowers the development/testing barrier.
+**Rationale**: Simple, mature credential pattern supporting cross-session recovery (reconnect with same user_id + secret). No-auth mode lowers the development/testing barrier.
 
 ### D4: Registry Stored in _system:registry Channel
 
@@ -945,7 +945,7 @@ Configuration files ultimately resolve to connection strings + constructor param
 
 ### D5: Cursor Persistence in _system Channel
 
-**Decision**: Cursor snapshots are stored in the `_system:cursors:{agent_id}` channel.
+**Decision**: Cursor snapshots are stored in the `_system:cursors:{user_id}` channel.
 
 **Rationale**: Reuses the message storage mechanism; cross-session recovery reads the latest snapshot from the channel. No additional state storage infrastructure needed.
 

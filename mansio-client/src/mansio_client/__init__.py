@@ -12,10 +12,10 @@ from mansio_client.injectors import (
     WebhookInjector,
 )
 from mansio_client.transport import HttpTransport, MansioAPIError
-from mansio_client.types import AgentPresence, ClaimResult, Message
+from mansio_client.types import UserPresence, ClaimResult, Message
 
 __all__ = [
-    "AgentPresence",
+    "UserPresence",
     "ClaimResult",
     "ClaudeCodeInjector",
     "FederationLink",

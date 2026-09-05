@@ -15,7 +15,7 @@ from mansio.admin.metrics import MetricsCollector
 from mansio.backends import SQLiteBackend
 from mansio.protocols import Backend, ChannelStore, Compactable, Deletable, Presenceable
 from mansio.system_policy import CompactionPolicy, system_channel_policy
-from mansio.types import ACLEntry, AgentPresence, ChannelMeta, ClaimResult, Message
+from mansio.types import ACLEntry, ChannelMeta, ClaimResult, Message, UserPresence
 
 # Thread-safe monotonic sequence for _uuid7 fallback
 _seq_lock = threading.Lock()
@@ -202,7 +202,7 @@ class Bus:
         intent: str | None = None,
         offset: int = 0,
         *,
-        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
@@ -216,17 +216,17 @@ class Bus:
             thread_id: If provided, only return messages in this thread.
             intent: If provided, only return messages with this intent.
             offset: Number of messages to skip before returning results.
-            agent_id: If provided, enforce read ACL for this agent.
+            user_id: If provided, enforce read ACL for this agent.
 
         Returns:
             Messages in chronological order (oldest first).
 
         Raises:
-            PermissionError: If agent_id is provided and the agent
+            PermissionError: If user_id is provided and the agent
                 lacks read permission.
         """
-        if agent_id is not None and not self.check_access(channel, agent_id, "read"):
-            raise PermissionError(f"agent '{agent_id}' lacks read permission on '{channel}'")
+        if user_id is not None and not self.check_access(channel, user_id, "read"):
+            raise PermissionError(f"agent '{user_id}' lacks read permission on '{channel}'")
         return self._backend.query(
             channel,
             after=after,
@@ -255,7 +255,7 @@ class Bus:
         channel: str,
         callback: Callable[[Message], None],
         *,
-        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> str:
         """Register an in-process callback for new messages on a channel.
 
@@ -265,17 +265,17 @@ class Bus:
         Args:
             channel: Channel to watch.
             callback: Function called with each new Message.
-            agent_id: If provided, enforce read ACL for this agent.
+            user_id: If provided, enforce read ACL for this agent.
 
         Returns:
             Subscription ID for use with unsubscribe().
 
         Raises:
-            PermissionError: If agent_id is provided and the agent
+            PermissionError: If user_id is provided and the agent
                 lacks read permission.
         """
-        if agent_id is not None and not self.check_access(channel, agent_id, "read"):
-            raise PermissionError(f"agent '{agent_id}' lacks read permission on '{channel}'")
+        if user_id is not None and not self.check_access(channel, user_id, "read"):
+            raise PermissionError(f"agent '{user_id}' lacks read permission on '{channel}'")
         sub_id = uuid.uuid4().hex[:8]
         self._subs[channel][sub_id] = callback
         return sub_id
@@ -380,14 +380,14 @@ class Bus:
             parts = channel.split(":")
             agents = sorted(parts[1:])  # canonicalize
             acl = [
-                ACLEntry(channel=channel, agent_id=a, permission="write", granted_at=now)
+                ACLEntry(channel=channel, user_id=a, permission="write", granted_at=now)
                 for a in agents
             ]
             meta = ChannelMeta(name=channel, owner=sender, visibility="private", created_at=now)
         elif channel.startswith(("notebook:", "memory:")):
             owner = channel.split(":", 1)[1]
             meta = ChannelMeta(name=channel, owner=owner, visibility="private", created_at=now)
-            acl = [ACLEntry(channel=channel, agent_id=owner, permission="admin", granted_at=now)]
+            acl = [ACLEntry(channel=channel, user_id=owner, permission="admin", granted_at=now)]
         elif channel.startswith("broadcast:"):
             meta = ChannelMeta(name=channel, owner=sender, visibility="public", created_at=now)
             acl = None
@@ -472,7 +472,7 @@ class Bus:
         cs = self._require_channel_store()
         return cs.get_channel(name)
 
-    def check_access(self, channel: str, agent_id: str, required: str = "read") -> bool:
+    def check_access(self, channel: str, user_id: str, required: str = "read") -> bool:
         """Check if an agent has the required permission on a channel.
 
         Returns True for backends that don't implement ChannelStore
@@ -480,7 +480,7 @@ class Bus:
         """
         if not isinstance(self._backend, ChannelStore):
             return True
-        return self._backend.check_access(channel, agent_id, required)
+        return self._backend.check_access(channel, user_id, required)
 
     def get_acl(self, channel: str) -> list[ACLEntry]:
         """Return ACL entries for a channel."""
@@ -497,10 +497,10 @@ class Bus:
         cs = self._require_channel_store()
         cs.add_acl_entry(entry)
 
-    def remove_acl_entry(self, channel: str, agent_id: str) -> bool:
+    def remove_acl_entry(self, channel: str, user_id: str) -> bool:
         """Remove an ACL entry."""
         cs = self._require_channel_store()
-        return cs.remove_acl_entry(channel, agent_id)
+        return cs.remove_acl_entry(channel, user_id)
 
     # ── Deletion (optional — Deletable backends only) ────────
 
@@ -511,26 +511,26 @@ class Bus:
             )
         return self._backend
 
-    def delete_channel(self, channel: str, *, agent_id: str | None = None) -> int:
+    def delete_channel(self, channel: str, *, user_id: str | None = None) -> int:
         """Delete a channel and all its messages.
 
         Also removes any in-process subscriptions for the channel.
 
         Args:
             channel: Channel name to delete.
-            agent_id: If provided, enforce admin ACL for this agent.
+            user_id: If provided, enforce admin ACL for this agent.
 
         Returns:
             Number of messages deleted.
 
         Raises:
             NotImplementedError: If backend is not Deletable.
-            PermissionError: If agent_id is provided and the agent
+            PermissionError: If user_id is provided and the agent
                 lacks admin permission.
         """
         dl = self._require_deletable()
-        if agent_id is not None and not self.check_access(channel, agent_id, "admin"):
-            raise PermissionError(f"agent '{agent_id}' lacks admin permission on '{channel}'")
+        if user_id is not None and not self.check_access(channel, user_id, "admin"):
+            raise PermissionError(f"agent '{user_id}' lacks admin permission on '{channel}'")
         count = dl.delete_channel(channel)
         # Clean up in-process subscriptions
         self._subs.pop(channel, None)
@@ -541,34 +541,34 @@ class Bus:
             self._backend.delete_channel_meta(channel)
         return count
 
-    def delete_message(self, message_id: str, *, agent_id: str | None = None) -> bool:
+    def delete_message(self, message_id: str, *, user_id: str | None = None) -> bool:
         """Delete a single message by ID.
 
-        When *agent_id* is provided, the agent must either be the
+        When *user_id* is provided, the agent must either be the
         message sender (write-level) or have admin permission on
         the message's channel.
 
         Args:
             message_id: ID of the message to delete.
-            agent_id: If provided, enforce ownership or admin ACL.
+            user_id: If provided, enforce ownership or admin ACL.
 
         Returns:
             True if the message was found and deleted.
 
         Raises:
             NotImplementedError: If backend is not Deletable.
-            PermissionError: If agent_id is provided and the agent
+            PermissionError: If user_id is provided and the agent
                 is neither the sender nor a channel admin.
         """
         dl = self._require_deletable()
-        if agent_id is not None:
+        if user_id is not None:
             msg = self._backend.get_message(message_id)
             if (
                 msg is not None
-                and msg.sender != agent_id
-                and not self.check_access(msg.channel, agent_id, "admin")
+                and msg.sender != user_id
+                and not self.check_access(msg.channel, user_id, "admin")
             ):
-                raise PermissionError(f"agent '{agent_id}' cannot delete message '{message_id}'")
+                raise PermissionError(f"agent '{user_id}' cannot delete message '{message_id}'")
         return dl.delete_message(message_id)
 
     # ── Presence (optional — Presenceable backends only) ─────
@@ -580,32 +580,32 @@ class Bus:
             )
         return self._backend
 
-    def heartbeat(self, agent_id: str, metadata: dict | None = None) -> None:
-        """Record a heartbeat for *agent_id*.
+    def heartbeat(self, user_id: str, metadata: dict | None = None) -> None:
+        """Record a heartbeat for *user_id*.
 
         Raises:
             NotImplementedError: If backend is not Presenceable.
         """
         pr = self._require_presence()
-        pr.heartbeat(agent_id, metadata)
+        pr.heartbeat(user_id, metadata)
 
-    def agents(self, timeout_seconds: int = 120) -> list[AgentPresence]:
+    def users(self, timeout_seconds: int = 120) -> list[UserPresence]:
         """Return all known agents with computed online/offline status.
 
         Raises:
             NotImplementedError: If backend is not Presenceable.
         """
         pr = self._require_presence()
-        return pr.agents(timeout_seconds)
+        return pr.users(timeout_seconds)
 
-    def agent_status(self, agent_id: str, timeout_seconds: int = 120) -> AgentPresence | None:
+    def user_status(self, user_id: str, timeout_seconds: int = 120) -> UserPresence | None:
         """Return presence for a single agent, or ``None`` if unknown.
 
         Raises:
             NotImplementedError: If backend is not Presenceable.
         """
         pr = self._require_presence()
-        return pr.agent_status(agent_id, timeout_seconds)
+        return pr.user_status(user_id, timeout_seconds)
 
     def stats(self) -> dict:
         """Return aggregate statistics for admin dashboard.

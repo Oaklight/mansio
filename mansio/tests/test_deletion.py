@@ -389,7 +389,7 @@ class TestHttpDeletionAuth:
             "_system:registry",
             "agent-a",
             "register",
-            '{"agent_id": "agent-a"}',
+            '{"user_id": "agent-a"}',
             metadata={"secret_hash": "h", "action": "register"},
         )
         status, data = self._request(
@@ -403,7 +403,7 @@ class TestHttpDeletionAuth:
             "_system:registry",
             "agent-a",
             "register",
-            '{"agent_id": "agent-a"}',
+            '{"user_id": "agent-a"}',
             metadata={"secret_hash": "h", "action": "register"},
         )
         status, data = self._request(

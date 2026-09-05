@@ -23,7 +23,7 @@ Authentication:
     When a TokenStore is configured, all /v1/* endpoints (except
     /health and /v1/auth/check) require ``Authorization: Bearer mst-...``.
     The token is validated server-side, and the sender field in publish
-    requests must match the token's agent_id. Supertokens (agent_id=NULL)
+    requests must match the token's user_id. Supertokens (user_id=NULL)
     bypass sender checks.
 """
 
@@ -77,7 +77,7 @@ _NO_CONSECUTIVE_SPECIALS = re.compile(r"[._-]{2}")
 _RESERVED_PREFIXES = ("_system:", "dm:", "notebook:", "memory:", "broadcast:")
 _SYSTEM_CHANNEL_RE = re.compile(r"^[\w_][\w:.-]{1,126}[\w]$")
 
-# Per-request auth result: str (agent_id), None (supertoken), True (no auth)
+# Per-request auth result: str (user_id), None (supertoken), True (no auth)
 _auth_result_var: contextvars.ContextVar[Any] = contextvars.ContextVar("auth_result", default=True)
 
 
@@ -105,7 +105,7 @@ def _is_private_channel(channel: str) -> bool:
     return any(channel.startswith(p) for p in _PRIVATE_CHANNEL_PREFIXES)
 
 
-def _agent_involved(agent_id: str, channel: str, sender: str) -> bool:
+def _user_involved(user_id: str, channel: str, sender: str) -> bool:
     """Check if an agent is involved in a message (sender or channel member).
 
     For **public** channels every authenticated agent is considered
@@ -117,9 +117,9 @@ def _agent_involved(agent_id: str, channel: str, sender: str) -> bool:
     """
     if not _is_private_channel(channel):
         return True
-    if sender == agent_id:
+    if sender == user_id:
         return True
-    return agent_id in channel.split(":")
+    return user_id in channel.split(":")
 
 
 def _validate_channel_name(
@@ -196,7 +196,7 @@ def _validate_and_auth_publish(
     # System channels: agents can only write to their own system channels
     if channel.startswith("_system:"):
         # Allow: _system:agents with msg_type="presence" (SDK _announce())
-        # Allow: _system:cursors:{agent_id} (own cursor persistence)
+        # Allow: _system:cursors:{user_id} (own cursor persistence)
         # System channels are write-restricted
         # Deny: _system:agents with arbitrary msg_types
         allowed_system = (f"_system:cursors:{auth_result}",)
@@ -525,7 +525,7 @@ async def _dm_unregistered_warning(bus: Any, channel: str, sender: str) -> str |
     if len(parts) != 3:
         return None
     other = parts[1] if parts[2] == sender else parts[2]
-    status = await asyncio.to_thread(bus.agent_status, other)
+    status = await asyncio.to_thread(bus.user_status, other)
     if status is None:
         return f"target agent '{other}' is not registered; message stored but may never be read"
     return None
@@ -752,7 +752,7 @@ class HttpFrontend:
                     headers={"WWW-Authenticate": 'Bearer realm="mansio"'},
                 )
 
-            # result is str (agent_id) or None (supertoken)
+            # result is str (user_id) or None (supertoken)
             _auth_result_var.set(result)
             return None
 
@@ -845,7 +845,7 @@ class HttpFrontend:
 
             auth_result = _auth_result_var.get()
             if isinstance(auth_result, str):
-                msgs = [m for m in msgs if _agent_involved(auth_result, m.channel, m.sender)]
+                msgs = [m for m in msgs if _user_involved(auth_result, m.channel, m.sender)]
 
             total = await asyncio.to_thread(bus.message_count, channel)
             has_more = len(msgs) == limit
@@ -901,18 +901,18 @@ class HttpFrontend:
 
         @self._app.get("/v1/registry/lookup")
         async def registry_lookup(request: Request) -> dict | tuple:
-            agent_id = (request.query_params.get("agent_id") or [""])[0].strip()
-            if not agent_id:
+            user_id = (request.query_params.get("user_id") or [""])[0].strip()
+            if not user_id:
                 return {
                     "error": "Bad Request",
-                    "message": "Query param 'agent_id' required",
+                    "message": "Query param 'user_id' required",
                 }, 400
             token_store = self._token_store
             if token_store is not None and await asyncio.to_thread(
-                token_store.user_exists, agent_id
+                token_store.user_exists, user_id
             ):
-                return {"found": True, "agent_id": agent_id}
-            return {"found": False, "agent_id": agent_id}
+                return {"found": True, "user_id": user_id}
+            return {"found": False, "user_id": user_id}
 
     def _setup_deletion_routes(self) -> None:
         """Register channel and message deletion routes."""
@@ -1219,14 +1219,14 @@ class HttpFrontend:
             body = request.json()
             if not body or not isinstance(body, dict):
                 return {"error": "JSON body required"}, 400
-            agent_id = body.get("agent_id", "").strip()
-            if not agent_id:
-                return {"error": "agent_id required"}, 400
+            user_id = body.get("user_id", "").strip()
+            if not user_id:
+                return {"error": "user_id required"}, 400
             metadata = body.get("metadata")
             meta_err = _validate_metadata(metadata)
             if meta_err:
                 return meta_err
-            await asyncio.to_thread(bus.heartbeat, agent_id, metadata)
+            await asyncio.to_thread(bus.heartbeat, user_id, metadata)
             return {"ok": True}
 
         @self._app.get("/v1/presence")
@@ -1235,11 +1235,11 @@ class HttpFrontend:
             timeout = _parse_query_timeout(raw_timeout)
             if isinstance(timeout, tuple):
                 return timeout
-            agents = await asyncio.to_thread(bus.agents, timeout)
+            agents = await asyncio.to_thread(bus.users, timeout)
             return {
                 "agents": [
                     {
-                        "agent_id": a.agent_id,
+                        "user_id": a.user_id,
                         "status": a.status,
                         "last_seen": a.last_seen,
                         "metadata": a.metadata,
@@ -1248,17 +1248,17 @@ class HttpFrontend:
                 ]
             }
 
-        @self._app.get("/v1/presence/<agent_id>")
-        async def presence_agent(request: Request, agent_id: str = "") -> dict | tuple:
+        @self._app.get("/v1/presence/<user_id>")
+        async def presence_agent(request: Request, user_id: str = "") -> dict | tuple:
             raw_timeout = (request.query_params.get("timeout") or ["120"])[0]
             timeout = _parse_query_timeout(raw_timeout)
             if isinstance(timeout, tuple):
                 return timeout
-            result = await asyncio.to_thread(bus.agent_status, agent_id, timeout)
+            result = await asyncio.to_thread(bus.user_status, user_id, timeout)
             if result is None:
                 return {"error": "agent not found"}, 404
             return {
-                "agent_id": result.agent_id,
+                "user_id": result.user_id,
                 "status": result.status,
                 "last_seen": result.last_seen,
                 "metadata": result.metadata,
@@ -1369,7 +1369,7 @@ class HttpFrontend:
                 "acl": [
                     {
                         "channel": e.channel,
-                        "agent_id": e.agent_id,
+                        "user_id": e.user_id,
                         "permission": e.permission,
                         "granted_at": e.granted_at,
                         "granted_by": e.granted_by,
@@ -1408,7 +1408,7 @@ class HttpFrontend:
             entries = [
                 ACLEntry(
                     channel=channel,
-                    agent_id=raw["agent_id"],
+                    user_id=raw["user_id"],
                     permission=raw.get("permission", "read"),
                     granted_at=now,
                     granted_by=granted_by,
@@ -1438,9 +1438,9 @@ class HttpFrontend:
                 return denied
 
             body = request.json()
-            agent_id = body.get("agent_id", "").strip()
-            if not agent_id:
-                return {"error": "Bad Request", "message": "'agent_id' is required"}, 400
+            user_id = body.get("user_id", "").strip()
+            if not user_id:
+                return {"error": "Bad Request", "message": "'user_id' is required"}, 400
 
             permission = body.get("permission", "read")
             if permission not in ("read", "write", "admin"):
@@ -1456,7 +1456,7 @@ class HttpFrontend:
             granted_by = auth_result if isinstance(auth_result, str) else None
             entry = ACLEntry(
                 channel=channel,
-                agent_id=agent_id,
+                user_id=user_id,
                 permission=permission,
                 granted_at=now,
                 granted_by=granted_by,
@@ -1474,26 +1474,26 @@ class HttpFrontend:
                 "status": "ok",
                 "entry": {
                     "channel": entry.channel,
-                    "agent_id": entry.agent_id,
+                    "user_id": entry.user_id,
                     "permission": entry.permission,
                 },
             }, 201
 
     def _setup_acl_remove_route(self) -> None:
-        """Register DELETE /v1/channels/<channel>/acl/<agent_id>."""
+        """Register DELETE /v1/channels/<channel>/acl/<user_id>."""
         bus = self._bus
         assert bus is not None
 
-        @self._app.delete("/v1/channels/<channel>/acl/<agent_id>")
+        @self._app.delete("/v1/channels/<channel>/acl/<user_id>")
         async def remove_acl_entry(
-            request: Request, channel: str = "", agent_id: str = ""
+            request: Request, channel: str = "", user_id: str = ""
         ) -> dict | tuple:
             denied = await _require_acl_admin(bus, channel)
             if denied:
                 return denied
 
             try:
-                removed = await asyncio.to_thread(bus.remove_acl_entry, channel, agent_id)
+                removed = await asyncio.to_thread(bus.remove_acl_entry, channel, user_id)
             except NotImplementedError:
                 return {
                     "error": "Not Implemented",
@@ -1503,7 +1503,7 @@ class HttpFrontend:
             if not removed:
                 return {
                     "error": "Not Found",
-                    "message": f"No ACL entry for '{agent_id}' on '{channel}'",
+                    "message": f"No ACL entry for '{user_id}' on '{channel}'",
                 }, 404
 
             return {"status": "ok"}
@@ -1683,7 +1683,7 @@ def _setup_sse_subscriptions(
                         drop_counter[0] += 1
 
             def _cb(msg: Message) -> None:
-                if isinstance(auth_result, str) and not _agent_involved(
+                if isinstance(auth_result, str) and not _user_involved(
                     auth_result, msg.channel, msg.sender
                 ):
                     return
@@ -1762,7 +1762,7 @@ async def _sse_event_generator(session: _SSESession) -> Any:
                     missed = [
                         m
                         for m in missed
-                        if _agent_involved(session.auth_result, m.channel, m.sender)
+                        if _user_involved(session.auth_result, m.channel, m.sender)
                     ]
                 for m in missed:
                     data = json.dumps(
