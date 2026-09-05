@@ -79,7 +79,7 @@ jobs:
 
       - name: Verify package imports
         run: |
-          python -c "from mansio_client import MansioClient, HttpTransport, MansioAPIError, Message, AgentPresence, ClaimResult, __version__; print(f'mansio-client {__version__} OK')"
+          python -c "from mansio_client import MansioClient, HttpTransport, MansioAPIError, Message, UserPresence, ClaimResult, __version__; print(f'mansio-client {__version__} OK')"
 
       - name: Verify CLI entry point
         run: mansio-client --version
