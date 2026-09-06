@@ -368,7 +368,7 @@ Channel 命名规则在**服务端（Bus/Frontend 层）强制执行**，Client 
 | Memory | `memory:{agent_id}` | 长期记忆（语义记忆） | **私有 — 仅所属 agent 可写入**，跨 agent 写入返回 403 |
 | Broadcast | `broadcast:{topic}` | 公告、任务列表、成员列表 | **仅 supertoken 可写入**，普通 agent 只读 |
 | Group | `group:{group_id}` | 群聊 | 成员可读写 |
-| DM | `dm:{agent_a}:{agent_b}` | 私聊（双方 ID 按字典序排列） | 双方可读写 |
+| DM | `dm:{user_a}:{user_b}` | 私聊（双方 ID 按字典序排列） | 双方可读写 |
 | System | `_system:{purpose}` | 内部管理（注册表、cursor 等） | **受限写入**（见下文） |
 
 ##### System Channel 鉴权
@@ -474,8 +474,8 @@ memory_recall(query: str, limit: int = 5) -> list[Message]
 # Client SDK 层仅提供接口定义，默认实现为按时间倒序返回。
 
 # ── DM（写入 dm:{sorted_pair}）──
-dm_send(to_agent: str, content: str) -> str
-dm_read(with_agent: str, limit: int = 10) -> list[Message]
+dm_send(to_user: str, content: str) -> str
+dm_read(with_user: str, limit: int = 10) -> list[Message]
 
 # ── Group ──
 group_create(name: str, members: list[str]) -> str
@@ -505,7 +505,7 @@ memory_store(content, memory_type)
   → channel_send(f"memory:{self.agent_id}", content, msg_type="memory",
                   metadata={"memory_type": memory_type})
 
-dm_send(to_agent, content)
+dm_send(to_user, content)
   → channel_send(f"dm:{sorted_pair}", content, msg_type="chat")
 ```
 

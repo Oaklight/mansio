@@ -118,10 +118,10 @@ _TOOLS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "to_agent": {"type": "string", "description": "Recipient agent ID."},
+                "to_user": {"type": "string", "description": "Recipient user ID."},
                 "content": {"type": "string", "description": "Message content."},
             },
-            "required": ["to_agent", "content"],
+            "required": ["to_user", "content"],
         },
     },
     {
@@ -130,9 +130,9 @@ _TOOLS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "with_agent": {
+                "with_user": {
                     "type": "string",
-                    "description": "The other agent's ID.",
+                    "description": "The other user's ID.",
                 },
                 "limit": {
                     "type": "integer",
@@ -140,7 +140,7 @@ _TOOLS: list[dict[str, Any]] = [
                     "default": 10,
                 },
             },
-            "required": ["with_agent"],
+            "required": ["with_user"],
         },
     },
     {
@@ -292,11 +292,11 @@ def _tool_poll(client: MansioClient, args: dict[str, Any]) -> Any:
 
 
 def _tool_dm_send(client: MansioClient, args: dict[str, Any]) -> Any:
-    return {"message_id": client.dm_send(args["to_agent"], args["content"])}
+    return {"message_id": client.dm_send(args["to_user"], args["content"])}
 
 
 def _tool_dm_read(client: MansioClient, args: dict[str, Any]) -> Any:
-    msgs = client.dm_read(args["with_agent"], limit=args.get("limit", 10))
+    msgs = client.dm_read(args["with_user"], limit=args.get("limit", 10))
     return [_msg_to_dict(m) for m in msgs]
 
 

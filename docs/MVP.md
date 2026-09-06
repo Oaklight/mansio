@@ -200,8 +200,8 @@ class MansioClient:
     def memory_recall(query, limit=5) -> list[Message]
 
     # DM (writes to dm:{sorted_pair})
-    def dm_send(to_agent, content) -> str
-    def dm_read(with_agent, limit=10) -> list[Message]
+    def dm_send(to_user, content) -> str
+    def dm_read(with_user, limit=10) -> list[Message]
 
     # Broadcast (reads from broadcast:{topic})
     def broadcast_list() -> list[str]
@@ -247,7 +247,7 @@ Enforced by Client SDK (semantic API methods), not by Bus.
 |------|---------|---------|
 | Notebook | `notebook:{user_id}` | `note_write`, `thought_record` |
 | Memory | `memory:{user_id}` | `memory_store`, `memory_recall` |
-| DM | `dm:{agent_a}:{agent_b}` (sorted) | `dm_send`, `dm_read` |
+| DM | `dm:{user_a}:{user_b}` (sorted) | `dm_send`, `dm_read` |
 | Broadcast | `broadcast:{topic}` | `broadcast_list`, `broadcast_read` |
 | System | `_system:registry` | Agent registration |
 | System | `_system:agents` | Presence announcement |

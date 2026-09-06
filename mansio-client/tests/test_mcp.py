@@ -274,7 +274,7 @@ class TestCallTool(unittest.TestCase):
             self.client,
             "mansio_dm_send",
             {
-                "to_agent": "agent-b",
+                "to_user": "agent-b",
                 "content": "hi",
             },
         )
@@ -286,7 +286,7 @@ class TestCallTool(unittest.TestCase):
             self.client,
             "mansio_dm_read",
             {
-                "with_agent": "agent-b",
+                "with_user": "agent-b",
             },
         )
         assert len(result) == 1

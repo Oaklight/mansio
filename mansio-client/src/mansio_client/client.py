@@ -194,16 +194,16 @@ class MansioClient:
     # ── DM ────────────────────────────────────────────────────────
 
     @staticmethod
-    def _dm_channel(agent_a: str, agent_b: str) -> str:
-        pair = sorted([agent_a, agent_b])
+    def _dm_channel(user_a: str, user_b: str) -> str:
+        pair = sorted([user_a, user_b])
         return f"dm:{pair[0]}:{pair[1]}"
 
-    def dm_send(self, to_agent: str, content: str) -> str:
-        channel = self._dm_channel(self._user_id, to_agent)
+    def dm_send(self, to_user: str, content: str) -> str:
+        channel = self._dm_channel(self._user_id, to_user)
         return self.channel_send(channel, content, msg_type="chat")
 
-    def dm_read(self, with_agent: str, limit: int = 10) -> list[Message]:
-        channel = self._dm_channel(self._user_id, with_agent)
+    def dm_read(self, with_user: str, limit: int = 10) -> list[Message]:
+        channel = self._dm_channel(self._user_id, with_user)
         return self.channel_read(channel, limit=limit)
 
     # ── Notes ─────────────────────────────────────────────────────

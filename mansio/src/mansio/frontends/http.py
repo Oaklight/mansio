@@ -957,7 +957,7 @@ class HttpFrontend:
                     # Public/user channels: scoped tokens cannot delete
                     return {
                         "error": "Forbidden",
-                        "message": "Only admin tokens can delete public channels",
+                        "message": "Scoped tokens cannot delete shared channels",
                     }, 403
 
             try:

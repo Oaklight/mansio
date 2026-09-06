@@ -368,7 +368,7 @@ The Client SDK applies the same rules locally for fast feedback. The Bus layer i
 | Memory | `memory:{user_id}` | Long-term memory (Semantic) | Private |
 | Broadcast | `broadcast:{topic}` | Announcements, task lists, member lists | Public read-only |
 | Group | `group:{group_id}` | Group chat | Member read/write |
-| DM | `dm:{agent_a}:{agent_b}` | Direct message (IDs lexicographically sorted) | Both parties read/write |
+| DM | `dm:{user_a}:{user_b}` | Direct message (IDs lexicographically sorted) | Both parties read/write |
 | System | `_system:{purpose}` | Internal management (registry, cursors, etc.) | System internal (restricted writes — see below) |
 
 ##### Access Control
@@ -472,8 +472,8 @@ memory_recall(query: str, limit: int = 5) -> list[Message]
 # default implementation returns messages in reverse chronological order.
 
 # ── DM (writes to dm:{sorted_pair}) ──
-dm_send(to_agent: str, content: str) -> str
-dm_read(with_agent: str, limit: int = 10) -> list[Message]
+dm_send(to_user: str, content: str) -> str
+dm_read(with_user: str, limit: int = 10) -> list[Message]
 
 # ── Group ──
 group_create(name: str, members: list[str]) -> str
@@ -503,7 +503,7 @@ memory_store(content, memory_type)
   → channel_send(f"memory:{self.user_id}", content, msg_type="memory",
                   metadata={"memory_type": memory_type})
 
-dm_send(to_agent, content)
+dm_send(to_user, content)
   → channel_send(f"dm:{sorted_pair}", content, msg_type="chat")
 ```
 

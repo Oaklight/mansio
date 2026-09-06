@@ -76,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("check", help="Quick check for new messages")
 
     dm = sub.add_parser("dm", help="Send a DM")
-    dm.add_argument("--to", required=True, dest="to_agent")
+    dm.add_argument("--to", required=True, dest="to_user")
     dm.add_argument("message")
 
     note = sub.add_parser("note", help="Write a note")
@@ -149,7 +149,7 @@ def _cmd_channels(_args: argparse.Namespace, client: MansioClient) -> None:
 
 
 def _cmd_dm(args: argparse.Namespace, client: MansioClient) -> None:
-    print(client.dm_send(args.to_agent, args.message))
+    print(client.dm_send(args.to_user, args.message))
 
 
 def _cmd_check(_args: argparse.Namespace, client: MansioClient) -> None:
