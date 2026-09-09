@@ -1,9 +1,9 @@
 # /// zerodep
-# version = "0.3.2"
+# version = "0.3.3"
 # deps = ["httpclient"]
 # tier = "subsystem"
 # category = "network"
-# note = "Install/update via: https://zerodep.readthedocs.io/en/latest/guide/cli/"
+# note = "Install/update via `zerodep add sse`"
 # ///
 """Zero-dependency SSE (Server-Sent Events) client.
 
@@ -52,8 +52,8 @@ import dataclasses
 import os
 import sys
 import time
-from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Iterator
-from typing import Any
+from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator
+from typing import Any, Callable
 
 __all__ = [
     # Constants
@@ -78,20 +78,22 @@ __all__ = [
 
 
 def _ensure_sibling_path(name: str) -> str:
-    """Return the sibling module directory and prepend it to ``sys.path``."""
-    sibling_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", name)
-    if sibling_dir not in sys.path:
-        sys.path.insert(0, sibling_dir)
-    return sibling_dir
+    """Add sibling module paths to ``sys.path`` for flat and nested layouts."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    for candidate in [base, os.path.normpath(os.path.join(base, "..", name))]:
+        if candidate not in sys.path:
+            sys.path.insert(0, candidate)
+    return base
 
 
 # ── Sibling httpclient import (guarded) ──
 
 try:
-    from mansio._vendor.httpclient import HttpConnectionError as _HttpConnectionError
-    from mansio._vendor.httpclient import HttpTimeoutError as _HttpTimeoutError
-    from mansio._vendor.httpclient import async_get as _http_async_get
-    from mansio._vendor.httpclient import get as _http_get
+    _ensure_sibling_path("httpclient")
+    from httpclient import HttpConnectionError as _HttpConnectionError
+    from httpclient import HttpTimeoutError as _HttpTimeoutError
+    from httpclient import async_get as _http_async_get
+    from httpclient import get as _http_get
 
     _HAS_HTTPCLIENT = True
 except (ImportError, AttributeError):
@@ -298,7 +300,9 @@ class SSEError(Exception):
 class SSEConnectionError(SSEError):
     """Raised when max retries exhausted."""
 
-    def __init__(self, url: str, retries: int, last_error: Exception | None = None) -> None:
+    def __init__(
+        self, url: str, retries: int, last_error: Exception | None = None
+    ) -> None:
         self.url = url
         self.retries = retries
         self.last_error = last_error
@@ -341,7 +345,9 @@ class _SSEClientMixin:
         return _SSEParser(
             last_id=self._last_event_id,
             retry=(
-                self._retry_interval if self._retry_interval != DEFAULT_RETRY_INTERVAL else None
+                self._retry_interval
+                if self._retry_interval != DEFAULT_RETRY_INTERVAL
+                else None
             ),
         )
 
@@ -409,7 +415,8 @@ class SSEClient(_SSEClientMixin):
             )
         elif transport is None:
             raise ValueError(
-                "SSEClient requires a transport; pass a callable or omit to use sibling httpclient"
+                "SSEClient requires a transport; pass a callable "
+                "or omit to use sibling httpclient"
             )
         else:
             self._transport = transport

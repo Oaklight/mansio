@@ -1,9 +1,9 @@
 # /// zerodep
-# version = "0.4.4"
+# version = "0.5.0"
 # deps = []
 # tier = "subsystem"
 # category = "network"
-# note = "Install/update via: https://zerodep.readthedocs.io/en/latest/guide/cli/"
+# note = "Install/update via `zerodep add httpclient`"
 # ///
 
 """Zero-dependency sync + async HTTP REST client.
@@ -41,6 +41,7 @@ import asyncio
 import base64
 import hashlib
 import http.client
+import http.cookies
 import json as _json
 import logging
 import os
@@ -329,7 +330,16 @@ class Response:
         url: Final URL after redirects.
     """
 
-    __slots__ = ("status_code", "headers", "content", "url", "_text", "_json")
+    __slots__ = (
+        "status_code",
+        "headers",
+        "content",
+        "url",
+        "_text",
+        "_json",
+        "_raw_set_cookies",
+        "_cookies",
+    )
 
     def __init__(
         self,
@@ -337,6 +347,7 @@ class Response:
         headers: CaseInsensitiveDict,
         content: bytes,
         url: str,
+        raw_set_cookies: list[str] | None = None,
     ) -> None:
         self.status_code = status_code
         self.headers = headers
@@ -344,6 +355,8 @@ class Response:
         self.url = url
         self._text: str | None = None
         self._json: Any = None
+        self._raw_set_cookies: list[str] = raw_set_cookies or []
+        self._cookies: dict[str, str] | None = None
 
     @property
     def text(self) -> str:
@@ -368,6 +381,13 @@ class Response:
         """Raise HTTPError if status is not 2xx."""
         if not self.ok:
             raise HTTPError(self.status_code, self.text, self.url)
+
+    @property
+    def cookies(self) -> dict[str, str]:
+        """Parse Set-Cookie headers into a ``{name: value}`` dict (cached)."""
+        if self._cookies is None:
+            self._cookies = _parse_cookies(self._raw_set_cookies)
+        return self._cookies
 
     def _guess_encoding(self) -> str:
         return _guess_encoding_from_headers(self.headers)
@@ -394,6 +414,35 @@ class Response:
 
     def __repr__(self) -> str:
         return f"<Response [{self.status_code}]>"
+
+
+def _parse_cookies(raw_set_cookies: list[str]) -> dict[str, str]:
+    """Parse raw Set-Cookie header values into a ``{name: value}`` dict."""
+    result: dict[str, str] = {}
+    for raw in raw_set_cookies:
+        sc = http.cookies.SimpleCookie()
+        try:
+            sc.load(raw)
+        except http.cookies.CookieError:
+            continue
+        for name, morsel in sc.items():
+            result[name] = morsel.value
+    return result
+
+
+def _expired_cookie_names(raw_set_cookies: list[str]) -> set[str]:
+    """Return names of cookies with Max-Age=0 (deletion markers)."""
+    names: set[str] = set()
+    for raw in raw_set_cookies:
+        sc = http.cookies.SimpleCookie()
+        try:
+            sc.load(raw)
+        except http.cookies.CookieError:
+            continue
+        for name, morsel in sc.items():
+            if morsel.get("max-age") == "0":
+                names.add(name)
+    return names
 
 
 def _guess_encoding_from_headers(headers: CaseInsensitiveDict) -> str:
@@ -450,7 +499,9 @@ class DigestAuth(Auth):
         """Not usable without a server challenge."""
         raise NotImplementedError("DigestAuth requires a server challenge")
 
-    def auth_headers_from_challenge(self, method: str, path: str, challenge: str) -> dict[str, str]:
+    def auth_headers_from_challenge(
+        self, method: str, path: str, challenge: str
+    ) -> dict[str, str]:
         """Compute Digest auth headers from a WWW-Authenticate challenge.
 
         Args:
@@ -481,7 +532,9 @@ class DigestAuth(Auth):
         ha2 = hash_fn(f"{method}:{path}".encode()).hexdigest()
 
         if qop == "auth":
-            response = hash_fn(f"{ha1}:{nonce}:{nc_hex}:{cnonce}:{qop}:{ha2}".encode()).hexdigest()
+            response = hash_fn(
+                f"{ha1}:{nonce}:{nc_hex}:{cnonce}:{qop}:{ha2}".encode()
+            ).hexdigest()
         else:
             response = hash_fn(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
 
@@ -608,6 +661,8 @@ class StreamingResponse:
         "_content_length",
         "_bytes_remaining",
         "_closed",
+        "_raw_set_cookies",
+        "_cookies",
     )
 
     status_code: int
@@ -624,6 +679,8 @@ class StreamingResponse:
     _content_length: int | None
     _bytes_remaining: int | None
     _closed: bool
+    _raw_set_cookies: list[str]
+    _cookies: dict[str, str] | None
 
     def __init__(self) -> None:
         raise TypeError("Use _from_sync() or _from_async()")
@@ -637,13 +694,16 @@ class StreamingResponse:
         resp: http.client.HTTPResponse,
         conn: http.client.HTTPConnection,
         content_encoding: str = "",
+        raw_set_cookies: list[str] | None = None,
     ) -> "StreamingResponse":
         obj = object.__new__(cls)
         obj.status_code = status_code
         obj.headers = headers
         obj.url = url
         obj._encoding = _guess_encoding_from_headers(headers)
-        obj._decompressor = _make_decompressor(content_encoding) if content_encoding else None
+        obj._decompressor = (
+            _make_decompressor(content_encoding) if content_encoding else None
+        )
         obj._sync_resp = resp
         obj._sync_conn = conn
         obj._async_reader = None
@@ -653,6 +713,8 @@ class StreamingResponse:
         obj._content_length = None
         obj._bytes_remaining = None
         obj._closed = False
+        obj._raw_set_cookies = raw_set_cookies or []
+        obj._cookies = None
         return obj
 
     @classmethod
@@ -667,13 +729,16 @@ class StreamingResponse:
         content_length: int | None,
         timeout: float,
         content_encoding: str = "",
+        raw_set_cookies: list[str] | None = None,
     ) -> "StreamingResponse":
         obj = object.__new__(cls)
         obj.status_code = status_code
         obj.headers = headers
         obj.url = url
         obj._encoding = _guess_encoding_from_headers(headers)
-        obj._decompressor = _make_decompressor(content_encoding) if content_encoding else None
+        obj._decompressor = (
+            _make_decompressor(content_encoding) if content_encoding else None
+        )
         obj._sync_resp = None
         obj._sync_conn = None
         obj._async_reader = reader
@@ -683,6 +748,8 @@ class StreamingResponse:
         obj._content_length = content_length
         obj._bytes_remaining = content_length
         obj._closed = False
+        obj._raw_set_cookies = raw_set_cookies or []
+        obj._cookies = None
         return obj
 
     @property
@@ -696,18 +763,11 @@ class StreamingResponse:
             raise HTTPError(self.status_code, "", self.url)
 
     @property
-    def content(self) -> bytes:
-        """Read entire body. Prefer iter_bytes() for large responses."""
-        return self.read()
-
-    @property
-    def text(self) -> str:
-        """Decode body as text."""
-        return self.content.decode(self._encoding)
-
-    def json(self) -> Any:
-        """Parse body as JSON."""
-        return _json.loads(self.content)
+    def cookies(self) -> dict[str, str]:
+        """Parse Set-Cookie headers into a ``{name: value}`` dict (cached)."""
+        if self._cookies is None:
+            self._cookies = _parse_cookies(self._raw_set_cookies)
+        return self._cookies
 
     # ── Sync iteration ──
 
@@ -734,12 +794,15 @@ class StreamingResponse:
         """Yield response body line by line (decoded)."""
         if self._sync_resp is None:
             raise RuntimeError("iter_lines() on async response")
+        buf = b""
         try:
-            while True:
-                line = self._sync_resp.readline()
-                if not line:
-                    break
-                yield line.decode(self._encoding, errors="replace").rstrip("\r\n")
+            for chunk in self.iter_bytes():
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    yield line.rstrip(b"\r").decode(self._encoding, errors="replace")
+            if buf:
+                yield buf.rstrip(b"\r").decode(self._encoding, errors="replace")
         except (OSError, http.client.HTTPException) as exc:
             raise HttpConnectionError(str(exc)) from exc
 
@@ -820,24 +883,35 @@ class StreamingResponse:
             size_str = size_line.decode("latin-1").split(";")[0].strip()
             if not size_str:
                 break
-            chunk_size = int(size_str, 16)
+            try:
+                chunk_size = int(size_str, 16)
+            except ValueError:
+                preview = size_str[:100]
+                raise HttpConnectionError(
+                    f"Invalid chunked encoding: expected hex chunk size, "
+                    f"got {preview!r} (upstream may have injected an error mid-stream)"
+                ) from None
             if chunk_size == 0:
-                await asyncio.wait_for(reader.readline(), timeout=timeout)  # trailing \r\n
+                await asyncio.wait_for(
+                    reader.readline(), timeout=timeout
+                )  # trailing \r\n
                 break
-            data = await asyncio.wait_for(reader.readexactly(chunk_size), timeout=timeout)
+            data = await asyncio.wait_for(
+                reader.readexactly(chunk_size), timeout=timeout
+            )
             await asyncio.wait_for(reader.readline(), timeout=timeout)  # trailing \r\n
             yield data
 
     async def aiter_lines(self) -> AsyncIterator[str]:
         """Async yield response body line by line (decoded)."""
-        buf = ""
+        buf = b""
         async for chunk in self.aiter_bytes():
-            buf += chunk.decode(self._encoding, errors="replace")
-            while "\n" in buf:
-                line, buf = buf.split("\n", 1)
-                yield line.rstrip("\r")
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                yield line.rstrip(b"\r").decode(self._encoding, errors="replace")
         if buf:
-            yield buf.rstrip("\r")
+            yield buf.rstrip(b"\r").decode(self._encoding, errors="replace")
 
     async def aread(self) -> bytes:
         """Async consume entire stream into bytes."""
@@ -861,7 +935,7 @@ class StreamingResponse:
         await self.aclose()
 
     def close(self) -> None:
-        """Close the underlying sync connection."""
+        """Close the underlying connection (sync or async best-effort)."""
         if self._closed:
             return
         self._closed = True
@@ -881,6 +955,15 @@ class StreamingResponse:
             except Exception:
                 logger.debug(
                     "failed to close sync connection for %s",
+                    self.url,
+                    exc_info=True,
+                )
+        if self._async_writer is not None:
+            try:
+                self._async_writer.close()
+            except Exception:
+                logger.debug(
+                    "failed to close async writer for %s",
                     self.url,
                     exc_info=True,
                 )
@@ -1251,7 +1334,9 @@ def _socks5_handshake_sync(
     # Phase 2: username/password auth (RFC 1929)
     if method == _SOCKS5_METHOD_USERPASS:
         if not username or not password:
-            raise Socks5Error("SOCKS5 proxy requires authentication but no credentials provided")
+            raise Socks5Error(
+                "SOCKS5 proxy requires authentication but no credentials provided"
+            )
         uname = username.encode()
         passwd = password.encode()
         sock.sendall(
@@ -1269,7 +1354,9 @@ def _socks5_handshake_sync(
     if len(host_bytes) > 255:
         raise Socks5Error(f"SOCKS5 target hostname too long: {len(host_bytes)} bytes")
     sock.sendall(
-        struct.pack("BBBB", _SOCKS5_VER, _SOCKS5_CMD_CONNECT, 0x00, _SOCKS5_ATYPE_DOMAIN)
+        struct.pack(
+            "BBBB", _SOCKS5_VER, _SOCKS5_CMD_CONNECT, 0x00, _SOCKS5_ATYPE_DOMAIN
+        )
         + struct.pack("B", len(host_bytes))
         + host_bytes
         + struct.pack("!H", port)
@@ -1344,9 +1431,13 @@ async def _socks5_handshake_async(
         # Phase 3: connect request
         host_bytes = host.encode()
         if len(host_bytes) > 255:
-            raise Socks5Error(f"SOCKS5 target hostname too long: {len(host_bytes)} bytes")
+            raise Socks5Error(
+                f"SOCKS5 target hostname too long: {len(host_bytes)} bytes"
+            )
         writer.write(
-            struct.pack("BBBB", _SOCKS5_VER, _SOCKS5_CMD_CONNECT, 0x00, _SOCKS5_ATYPE_DOMAIN)
+            struct.pack(
+                "BBBB", _SOCKS5_VER, _SOCKS5_CMD_CONNECT, 0x00, _SOCKS5_ATYPE_DOMAIN
+            )
             + struct.pack("B", len(host_bytes))
             + host_bytes
             + struct.pack("!H", port)
@@ -1384,7 +1475,9 @@ def _build_url(url: str, params: dict[str, Any] | None = None) -> str:
     if not params:
         return url
     sep = "&" if "?" in url else "?"
-    encoded = urlencode({k: v for k, v in params.items() if v is not None}, quote_via=quote)
+    encoded = urlencode(
+        {k: v for k, v in params.items() if v is not None}, quote_via=quote
+    )
     return f"{url}{sep}{encoded}"
 
 
@@ -1403,7 +1496,9 @@ def _parse_url(url: str) -> tuple[str, str, int, str, bool]:
 # -- Shared request preparation helpers --
 
 
-def _headers_set_default(req_headers: CaseInsensitiveDict, key: str, value: str) -> None:
+def _headers_set_default(
+    req_headers: CaseInsensitiveDict, key: str, value: str
+) -> None:
     """Set *key*/*value* only when the key is not already present.
 
     With ``CaseInsensitiveDict``, ``setdefault`` already handles case
@@ -1434,6 +1529,7 @@ def _prepare_request(
     files: dict[str, Any] | list[tuple[str, Any]] | None,
     params: dict[str, Any] | None,
     auth: tuple[str, str] | Auth | None,
+    cookies: dict[str, str] | None = None,
 ) -> tuple[str, bytes | None, CaseInsensitiveDict, Auth | None]:
     """Build URL, encode body, assemble headers, and normalize auth.
 
@@ -1442,8 +1538,9 @@ def _prepare_request(
     Header precedence (highest → lowest):
       1. auth headers (digest/basic — must override everything)
       2. user-supplied *headers*
-      3. body-derived defaults (Content-Type, Content-Length)
-      4. library defaults (User-Agent, Accept-Encoding)
+      3. cookies (serialised as ``Cookie`` header if not already set)
+      4. body-derived defaults (Content-Type, Content-Length)
+      5. library defaults (User-Agent, Accept-Encoding)
 
     All keys are normalised to lowercase via :class:`CaseInsensitiveDict`;
     no duplicate header names are ever emitted.
@@ -1465,6 +1562,12 @@ def _prepare_request(
         _headers_set_default(req_headers, "Content-Type", content_type)
     if body is not None:
         _headers_set_default(req_headers, "Content-Length", str(len(body)))
+
+    # Cookies — serialised as a single Cookie header (user header wins)
+    if cookies:
+        sc = http.cookies.SimpleCookie(cookies)
+        cookie_header = sc.output(header="", sep="; ").strip()
+        _headers_set_default(req_headers, "Cookie", cookie_header)
 
     # User headers win over all of the above
     _headers_merge_user(req_headers, headers)
@@ -1569,7 +1672,9 @@ def _sync_connect_via_proxy(
     if not is_https:
         conn = http.client.HTTPConnection(proxy_host, proxy_port, timeout=timeout)
         if proxy_user and proxy_pass:
-            req_headers["Proxy-Authorization"] = _proxy_auth_header(proxy_user, proxy_pass)
+            req_headers["Proxy-Authorization"] = _proxy_auth_header(
+                proxy_user, proxy_pass
+            )
         # For HTTP proxies, the full URL is used as the request path
         return conn, url
 
@@ -1577,7 +1682,9 @@ def _sync_connect_via_proxy(
     tunnel_conn = http.client.HTTPConnection(proxy_host, proxy_port, timeout=timeout)
     connect_headers: dict[str, str] = {"Host": f"{host}:{port}"}
     if proxy_user and proxy_pass:
-        connect_headers["Proxy-Authorization"] = _proxy_auth_header(proxy_user, proxy_pass)
+        connect_headers["Proxy-Authorization"] = _proxy_auth_header(
+            proxy_user, proxy_pass
+        )
     tunnel_conn.request("CONNECT", f"{host}:{port}", headers=connect_headers)
     tunnel_resp = tunnel_conn.getresponse()
     if tunnel_resp.status != 200:
@@ -1649,7 +1756,9 @@ def _sync_acquire_connection(
     """
     if proxy:
         if _is_socks_proxy(proxy):
-            return _sync_connect_via_socks5(host, port, path, is_https, timeout, verify, proxy)
+            return _sync_connect_via_socks5(
+                host, port, path, is_https, timeout, verify, proxy
+            )
         return _sync_connect_via_proxy(
             host, port, path, is_https, timeout, verify, proxy, req_headers, url
         )
@@ -1693,7 +1802,12 @@ def _sync_release_or_close(
     """
     if not close_conn:
         return
-    if _pool and not proxy and not stream and resp_headers.get("connection", "").lower() != "close":
+    if (
+        _pool
+        and not proxy
+        and not stream
+        and resp_headers.get("connection", "").lower() != "close"
+    ):
         _pool.release(host, port, is_https, conn)
     else:
         conn.close()
@@ -1706,6 +1820,7 @@ def _build_sync_response(
     resp: http.client.HTTPResponse,
     conn: http.client.HTTPConnection,
     stream: bool,
+    raw_set_cookies: list[str] | None = None,
 ) -> tuple[Response | StreamingResponse, bool]:
     """Build a final sync response (streaming or buffered).
 
@@ -1721,12 +1836,19 @@ def _build_sync_response(
             resp,
             conn,
             content_encoding=content_encoding,
+            raw_set_cookies=raw_set_cookies,
         ), False
 
     resp_body = resp.read()
     if content_encoding:
         resp_body = _decompress_body(resp_body, content_encoding)
-    return Response(status, resp_headers, resp_body, url), True
+    return Response(
+        status,
+        resp_headers,
+        resp_body,
+        url,
+        raw_set_cookies=raw_set_cookies,
+    ), True
 
 
 def _wrap_sync_errors(
@@ -1769,6 +1891,7 @@ def _sync_request(
     stream: bool = False,
     auth: tuple[str, str] | Auth | None = None,
     proxy: str | None = None,
+    cookies: dict[str, str] | None = None,
     _pool: _SyncConnectionPool | None = None,
 ) -> Response | StreamingResponse:
     """Perform a synchronous HTTP request.
@@ -1782,11 +1905,12 @@ def _sync_request(
            d. Connection lifecycle (pool release or close)
     """
     url, body, req_headers, auth_obj = _prepare_request(
-        method, url, headers, data, json, files, params, auth
+        method, url, headers, data, json, files, params, auth, cookies
     )
 
     redirects = 0
     _digest_attempted = False
+    accumulated_set_cookies: list[str] = []
     while True:
         scheme, host, port, path, is_https = _parse_url(url)
         close_conn = True
@@ -1810,7 +1934,11 @@ def _sync_request(
             try:
                 conn.request(method, request_path, body=body, headers=req_headers)
                 resp = conn.getresponse()
-                resp_headers = CaseInsensitiveDict(resp.getheaders())
+                raw_headers = resp.getheaders()
+                accumulated_set_cookies.extend(
+                    v for k, v in raw_headers if k.lower() == "set-cookie"
+                )
+                resp_headers = CaseInsensitiveDict(raw_headers)
                 status = resp.status
 
                 if _is_redirect(status, resp_headers):
@@ -1831,10 +1959,14 @@ def _sync_request(
                     redirects += 1
                     continue
 
-                if _should_attempt_digest(auth_obj, status, resp_headers, _digest_attempted):
+                if _should_attempt_digest(
+                    auth_obj, status, resp_headers, _digest_attempted
+                ):
                     resp.read()
                     www_auth = resp_headers["www-authenticate"]
-                    req_headers.update(auth_obj.auth_headers_from_challenge(method, path, www_auth))
+                    req_headers.update(
+                        auth_obj.auth_headers_from_challenge(method, path, www_auth)
+                    )
                     _digest_attempted = True
                     conn.close()
                     continue
@@ -1846,6 +1978,7 @@ def _sync_request(
                     resp,
                     conn,
                     stream,
+                    raw_set_cookies=accumulated_set_cookies,
                 )
                 return result
             finally:
@@ -1873,14 +2006,14 @@ def _sync_request(
 async def _async_read_response_headers(
     reader: asyncio.StreamReader,
     timeout: float,
-) -> tuple[int, CaseInsensitiveDict]:
+) -> tuple[int, CaseInsensitiveDict, list[str]]:
     """Read HTTP status line and headers from an asyncio StreamReader.
 
     Does NOT consume the body -- the reader is left positioned at the
     start of the response body.
 
     Returns:
-        (status_code, headers_dict).
+        (status_code, headers_dict, raw_set_cookies).
     """
     # Status line: "HTTP/1.1 200 OK\r\n"
     status_line = await asyncio.wait_for(reader.readline(), timeout=timeout)
@@ -1892,6 +2025,7 @@ async def _async_read_response_headers(
 
     # Headers until empty line
     headers: CaseInsensitiveDict = CaseInsensitiveDict()
+    raw_set_cookies: list[str] = []
     while True:
         line = await asyncio.wait_for(reader.readline(), timeout=timeout)
         decoded = line.decode("latin-1").rstrip("\r\n")
@@ -1899,9 +2033,13 @@ async def _async_read_response_headers(
             break
         if ":" in decoded:
             k, v = decoded.split(":", 1)
-            headers[k.strip()] = v.strip()
+            k_stripped = k.strip()
+            v_stripped = v.strip()
+            if k_stripped.lower() == "set-cookie":
+                raw_set_cookies.append(v_stripped)
+            headers[k_stripped] = v_stripped
 
-    return status_code, headers
+    return status_code, headers, raw_set_cookies
 
 
 async def _async_read_chunked_body(
@@ -1995,11 +2133,13 @@ async def _async_connect_via_proxy_tunnel(
     connect_line = f"CONNECT {host}:{port} HTTP/1.1\r\n"
     connect_headers = f"Host: {host}:{port}\r\n"
     if proxy_user and proxy_pass:
-        connect_headers += f"Proxy-Authorization: {_proxy_auth_header(proxy_user, proxy_pass)}\r\n"
+        connect_headers += (
+            f"Proxy-Authorization: {_proxy_auth_header(proxy_user, proxy_pass)}\r\n"
+        )
     connect_headers += "\r\n"
     proxy_writer.write((connect_line + connect_headers).encode("latin-1"))
     await asyncio.wait_for(proxy_writer.drain(), timeout=timeout)
-    tunnel_status, _ = await _async_read_response_headers(proxy_reader, timeout)
+    tunnel_status, _, _ = await _async_read_response_headers(proxy_reader, timeout)
     if tunnel_status != 200:
         proxy_writer.close()
         # Tier 3: best-effort silent -- proxy tunnel teardown
@@ -2042,7 +2182,9 @@ async def _async_connect_via_socks5(
         timeout=timeout,
     )
     try:
-        await _socks5_handshake_async(reader, writer, host, port, timeout, proxy_user, proxy_pass)
+        await _socks5_handshake_async(
+            reader, writer, host, port, timeout, proxy_user, proxy_pass
+        )
     except Exception:
         writer.close()
         try:
@@ -2096,7 +2238,9 @@ async def _async_acquire_connection(
                     timeout=timeout,
                 )
                 if proxy_user and proxy_pass:
-                    req_headers["Proxy-Authorization"] = _proxy_auth_header(proxy_user, proxy_pass)
+                    req_headers["Proxy-Authorization"] = _proxy_auth_header(
+                        proxy_user, proxy_pass
+                    )
                 return reader, writer, url
             reader, writer = await _async_connect_via_proxy_tunnel(
                 host, port, timeout, verify, proxy
@@ -2186,7 +2330,12 @@ async def _async_release_or_close(
     """
     if not close_writer:
         return
-    if _pool and not proxy and not stream and resp_headers.get("connection", "").lower() != "close":
+    if (
+        _pool
+        and not proxy
+        and not stream
+        and resp_headers.get("connection", "").lower() != "close"
+    ):
         await _pool.release(host, port, is_https, reader, writer)
     else:
         writer.close()
@@ -2213,6 +2362,7 @@ def _build_async_streaming_response(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     timeout: float,
+    raw_set_cookies: list[str] | None = None,
 ) -> StreamingResponse:
     """Build an async StreamingResponse from response metadata."""
     content_encoding = resp_headers.get("content-encoding", "")
@@ -2230,6 +2380,7 @@ def _build_async_streaming_response(
         content_length,
         timeout,
         content_encoding=content_encoding,
+        raw_set_cookies=raw_set_cookies,
     )
 
 
@@ -2251,6 +2402,7 @@ async def _async_request(
     stream: bool = False,
     auth: tuple[str, str] | Auth | None = None,
     proxy: str | None = None,
+    cookies: dict[str, str] | None = None,
     _pool: _AsyncConnectionPool | None = None,
 ) -> Response | StreamingResponse:
     """Perform an asynchronous HTTP request using asyncio streams.
@@ -2264,11 +2416,12 @@ async def _async_request(
            d. Connection lifecycle (pool release or close)
     """
     url, body, req_headers, auth_obj = _prepare_request(
-        method, url, headers, data, json, files, params, auth
+        method, url, headers, data, json, files, params, auth, cookies
     )
 
     redirects = 0
     _digest_attempted = False
+    accumulated_set_cookies: list[str] = []
     while True:
         scheme, host, port, path, is_https = _parse_url(url)
 
@@ -2294,7 +2447,10 @@ async def _async_request(
                 writer.write(body)
             await asyncio.wait_for(writer.drain(), timeout=timeout)
 
-            status, resp_headers = await _async_read_response_headers(reader, timeout)
+            status, resp_headers, iter_set_cookies = await _async_read_response_headers(
+                reader, timeout
+            )
+            accumulated_set_cookies.extend(iter_set_cookies)
 
             if _is_redirect(status, resp_headers):
                 await _async_read_body(reader, resp_headers, timeout)
@@ -2314,10 +2470,14 @@ async def _async_request(
                 redirects += 1
                 continue
 
-            if _should_attempt_digest(auth_obj, status, resp_headers, _digest_attempted):
+            if _should_attempt_digest(
+                auth_obj, status, resp_headers, _digest_attempted
+            ):
                 await _async_read_body(reader, resp_headers, timeout)
                 www_auth = resp_headers["www-authenticate"]
-                req_headers.update(auth_obj.auth_headers_from_challenge(method, path, www_auth))
+                req_headers.update(
+                    auth_obj.auth_headers_from_challenge(method, path, www_auth)
+                )
                 _digest_attempted = True
                 await _async_close_writer_silent(writer)
                 close_writer = False
@@ -2332,13 +2492,20 @@ async def _async_request(
                     reader,
                     writer,
                     timeout,
+                    raw_set_cookies=accumulated_set_cookies,
                 )
 
             content_encoding = resp_headers.get("content-encoding", "")
             resp_body = await _async_read_body(reader, resp_headers, timeout)
             if content_encoding:
                 resp_body = _decompress_body(resp_body, content_encoding)
-            return Response(status, resp_headers, resp_body, url)
+            return Response(
+                status,
+                resp_headers,
+                resp_body,
+                url,
+                raw_set_cookies=accumulated_set_cookies,
+            )
         except asyncio.TimeoutError:
             raise HttpTimeoutError(
                 f"Request to {url} timed out after {timeout}s",
@@ -2453,7 +2620,10 @@ def _encode_multipart(
     if data:
         for name, value in data.items():
             part = (
-                f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"\r\n'
+                f"\r\n"
+                f"{value}\r\n"
             )
             parts.append(part.encode("utf-8"))
 
@@ -2582,6 +2752,11 @@ class Client:
     Thread-safe: the underlying connection pool uses its own
     ``threading.Lock`` to protect shared state.
 
+    The cookie jar is a flat ``dict[str, str]`` — cookies are **not**
+    scoped by domain or path.  This is suitable for single-origin use
+    (e.g. an API client talking to one service).  For multi-origin
+    scenarios, manage cookies per-domain yourself.
+
     Usage::
 
         with Client(headers={"Authorization": "Bearer token"}) as c:
@@ -2592,6 +2767,7 @@ class Client:
         self,
         *,
         headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         max_redirects: int = DEFAULT_MAX_REDIRECTS,
         verify: bool = True,
@@ -2600,6 +2776,7 @@ class Client:
         pool_size: int = DEFAULT_POOL_SIZE,
     ) -> None:
         self._base_headers = headers or {}
+        self._cookies: dict[str, str] = dict(cookies) if cookies else {}
         self._timeout = timeout
         self._max_redirects = max_redirects
         self._verify = verify
@@ -2614,6 +2791,11 @@ class Client:
         **kwargs: Any,
     ) -> Response | StreamingResponse:
         """Send an HTTP request."""
+        merged_cookies = dict(self._cookies)
+        per_request = kwargs.pop("cookies", None)
+        if per_request:
+            merged_cookies.update(per_request)
+        kwargs["cookies"] = merged_cookies or None
         kwargs.setdefault("timeout", self._timeout)
         kwargs.setdefault("max_redirects", self._max_redirects)
         kwargs.setdefault("verify", self._verify)
@@ -2621,7 +2803,12 @@ class Client:
         kwargs.setdefault("proxy", self._proxy)
         kwargs["_pool"] = self._pool
         kwargs["headers"] = _merge_headers(self._base_headers, kwargs.get("headers"))
-        return _sync_request(method, url, **kwargs)
+        result = _sync_request(method, url, **kwargs)
+        if result._raw_set_cookies:
+            self._cookies.update(result.cookies)
+            for name in _expired_cookie_names(result._raw_set_cookies):
+                self._cookies.pop(name, None)
+        return result
 
     def get(self, url: str, **kwargs: Any) -> Response | StreamingResponse:
         return self.request("GET", url, **kwargs)
@@ -2668,6 +2855,11 @@ class AsyncClient:
     Safe for concurrent use from multiple asyncio tasks.  The underlying
     connection pool uses its own ``asyncio.Lock`` to protect shared state.
 
+    The cookie jar is a flat ``dict[str, str]`` — cookies are **not**
+    scoped by domain or path.  This is suitable for single-origin use
+    (e.g. an API client talking to one service).  For multi-origin
+    scenarios, manage cookies per-domain yourself.
+
     Usage::
 
         async with AsyncClient(headers={"Authorization": "Bearer token"}) as c:
@@ -2678,6 +2870,7 @@ class AsyncClient:
         self,
         *,
         headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         max_redirects: int = DEFAULT_MAX_REDIRECTS,
         verify: bool = True,
@@ -2686,6 +2879,7 @@ class AsyncClient:
         pool_size: int = DEFAULT_POOL_SIZE,
     ) -> None:
         self._base_headers = headers or {}
+        self._cookies: dict[str, str] = dict(cookies) if cookies else {}
         self._timeout = timeout
         self._max_redirects = max_redirects
         self._verify = verify
@@ -2700,6 +2894,11 @@ class AsyncClient:
         **kwargs: Any,
     ) -> Response | StreamingResponse:
         """Send an async HTTP request."""
+        merged_cookies = dict(self._cookies)
+        per_request = kwargs.pop("cookies", None)
+        if per_request:
+            merged_cookies.update(per_request)
+        kwargs["cookies"] = merged_cookies or None
         kwargs.setdefault("timeout", self._timeout)
         kwargs.setdefault("max_redirects", self._max_redirects)
         kwargs.setdefault("verify", self._verify)
@@ -2707,7 +2906,12 @@ class AsyncClient:
         kwargs.setdefault("proxy", self._proxy)
         kwargs["_pool"] = self._pool
         kwargs["headers"] = _merge_headers(self._base_headers, kwargs.get("headers"))
-        return await _async_request(method, url, **kwargs)
+        result = await _async_request(method, url, **kwargs)
+        if result._raw_set_cookies:
+            self._cookies.update(result.cookies)
+            for name in _expired_cookie_names(result._raw_set_cookies):
+                self._cookies.pop(name, None)
+        return result
 
     async def get(self, url: str, **kwargs: Any) -> Response | StreamingResponse:
         return await self.request("GET", url, **kwargs)
