@@ -7,7 +7,6 @@ token management, and optional web UI.
 
 from __future__ import annotations
 
-import json
 import re
 import socket
 import threading
@@ -273,8 +272,7 @@ class AdminServer:
             if not path.startswith("/api/"):
                 return None
 
-            cookie_header = request.headers.get("cookie", "")
-            session_token = _extract_session_cookie(cookie_header)
+            session_token = request.cookies.get(SessionAuth.COOKIE_NAME)
             if session_token and auth.validate_session(session_token):
                 return None
 
@@ -346,8 +344,7 @@ class AdminServer:
         def auth_check(request: Any) -> dict:
             if auth is None:
                 return {"authenticated": True, "required": False}
-            cookie_header = request.headers.get("cookie", "")
-            session_token = _extract_session_cookie(cookie_header)
+            session_token = request.cookies.get(SessionAuth.COOKIE_NAME)
             authenticated = bool(session_token and auth.validate_session(session_token))
             return {"authenticated": authenticated, "required": True}
 
@@ -369,28 +366,25 @@ class AdminServer:
 
             auth._clear_failures(client_ip)
             session_token = auth.create_session()
-            return Response(
-                body=json.dumps({"ok": True}),
-                content_type="application/json; charset=utf-8",
-                headers={
-                    "Set-Cookie": f"{SessionAuth.COOKIE_NAME}={session_token}; HttpOnly; SameSite=Strict; Path=/",
-                },
+            resp = JSONResponse({"ok": True})
+            resp.set_cookie(
+                SessionAuth.COOKIE_NAME,
+                session_token,
+                httponly=True,
+                samesite="Strict",
+                path="/",
             )
+            return resp
 
         @self._app.post("/api/logout")
         def logout(request: Any) -> Response:
             if auth:
-                cookie_header = request.headers.get("cookie", "")
-                session_token = _extract_session_cookie(cookie_header)
+                session_token = request.cookies.get(SessionAuth.COOKIE_NAME)
                 if session_token:
                     auth.revoke_session(session_token)
-            return Response(
-                body=json.dumps({"ok": True}),
-                content_type="application/json; charset=utf-8",
-                headers={
-                    "Set-Cookie": f"{SessionAuth.COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
-                },
-            )
+            resp = JSONResponse({"ok": True})
+            resp.delete_cookie(SessionAuth.COOKIE_NAME, path="/")
+            return resp
 
     def _setup_dashboard_routes(self) -> None:
         """Stats and throughput routes."""
@@ -732,17 +726,6 @@ class AdminServer:
 
 
 # ── Helpers ──────────────────────────────────────────────────────
-
-
-def _extract_session_cookie(cookie_header: str) -> str | None:
-    """Extract mansio_session cookie value from a Cookie header string."""
-    if not cookie_header:
-        return None
-    for part in cookie_header.split(";"):
-        part = part.strip()
-        if part.startswith(f"{SessionAuth.COOKIE_NAME}="):
-            return part[len(SessionAuth.COOKIE_NAME) + 1 :]
-    return None
 
 
 def _msg_dict(m: Any) -> dict:
