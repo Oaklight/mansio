@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import contextvars
 import json
 import re
 import threading
@@ -76,9 +75,6 @@ _USER_CHANNEL_RE = re.compile(r"^(?=[^\W\d_])[\w.-]{1,63}[^\W_]$")
 _NO_CONSECUTIVE_SPECIALS = re.compile(r"[._-]{2}")
 _RESERVED_PREFIXES = ("_system:", "dm:", "notebook:", "memory:", "broadcast:")
 _SYSTEM_CHANNEL_RE = re.compile(r"^[\w_][\w:.-]{1,126}[\w]$")
-
-# Per-request auth result: str (user_id), None (supertoken), True (no auth)
-_auth_result_var: contextvars.ContextVar[Any] = contextvars.ContextVar("auth_result", default=True)
 
 
 _PRIVATE_CHANNEL_PREFIXES = ("notebook:", "memory:")
@@ -563,9 +559,8 @@ def _parse_queue_body(request: Any, required_field: str) -> tuple[dict, tuple | 
     return data, None
 
 
-def _resolve_claimed_by(data: dict) -> tuple[str, tuple | None]:
+def _resolve_claimed_by(auth_result: Any, data: dict) -> tuple[str, tuple | None]:
     """Resolve claimed_by from auth context or request body."""
-    auth_result = _auth_result_var.get()
     if auth_result is False:
         return "", ({"error": "Unauthorized", "message": "Valid token required"}, 401)
     if isinstance(auth_result, str):
@@ -718,7 +713,7 @@ class HttpFrontend:
                 return None
 
             if token_store is None:
-                _auth_result_var.set(True)
+                request.state.auth_result = True
                 return None
 
             if not await asyncio.to_thread(token_store.has_tokens):
@@ -756,7 +751,7 @@ class HttpFrontend:
                 )
 
             # result is str (user_id) or None (supertoken)
-            _auth_result_var.set(result)
+            request.state.auth_result = result
             return None
 
         @self._app.after_request
@@ -786,7 +781,7 @@ class HttpFrontend:
                 return parsed  # error tuple
             data = parsed
 
-            auth_result = _auth_result_var.get()
+            auth_result = request.state.auth_result
             data["channel"] = data["channel"].strip()
             data["sender"] = data["sender"].strip()
 
@@ -846,7 +841,7 @@ class HttpFrontend:
                 offset=offset,
             )
 
-            auth_result = _auth_result_var.get()
+            auth_result = request.state.auth_result
             if isinstance(auth_result, str):
                 msgs = [m for m in msgs if _user_involved(auth_result, m.channel, m.sender)]
 
@@ -866,7 +861,7 @@ class HttpFrontend:
             detail_param = (request.query_params.get("detail") or ["false"])[0]
             want_detail = detail_param.lower() == "true"
 
-            auth_result = _auth_result_var.get()
+            auth_result = request.state.auth_result
 
             if want_detail:
                 all_detail = await asyncio.to_thread(bus.channels_detail)
@@ -934,7 +929,7 @@ class HttpFrontend:
             if not channel_name:
                 return {"error": "Bad Request", "message": "Channel name required"}, 400
 
-            auth_result = _auth_result_var.get()
+            auth_result = request.state.auth_result
 
             # System channels: only supertoken or no-auth can delete
             if channel_name.startswith("_system:") and isinstance(auth_result, str):
@@ -986,7 +981,7 @@ class HttpFrontend:
             if not message_id:
                 return {"error": "Bad Request", "message": "Message ID required"}, 400
 
-            auth_result = _auth_result_var.get()
+            auth_result = request.state.auth_result
 
             # For scoped tokens, verify the message belongs to the agent
             if isinstance(auth_result, str):
@@ -1028,7 +1023,7 @@ class HttpFrontend:
 
         @self._app.post("/v1/admin/channels/cleanup")
         async def admin_cleanup(request: Request) -> dict | tuple:
-            auth_result = _auth_result_var.get()
+            auth_result = request.state.auth_result
 
             # Admin only: supertoken (None) or no-auth mode (True)
             if isinstance(auth_result, str):
@@ -1106,7 +1101,7 @@ class HttpFrontend:
 
         @self._app.post("/v1/admin/compact")
         async def admin_compact(request: Request) -> dict | tuple:
-            auth_result = _auth_result_var.get()
+            auth_result = request.state.auth_result
 
             # Admin only: supertoken (None) or no-auth mode (True)
             if isinstance(auth_result, str):
@@ -1173,7 +1168,8 @@ class HttpFrontend:
             data, err = _parse_queue_body(request, "channel")
             if err:
                 return err
-            claimed_by, err = _resolve_claimed_by(data)
+            auth_result = request.state.auth_result
+            claimed_by, err = _resolve_claimed_by(auth_result, data)
             if err:
                 return err
 
@@ -1189,7 +1185,8 @@ class HttpFrontend:
             data, err = _parse_queue_body(request, "message_id")
             if err:
                 return err
-            claimed_by, err = _resolve_claimed_by(data)
+            auth_result = request.state.auth_result
+            claimed_by, err = _resolve_claimed_by(auth_result, data)
             if err:
                 return err
 
@@ -1302,7 +1299,7 @@ class HttpFrontend:
             if not name:
                 return {"error": "Bad Request", "message": "'name' is required"}, 400
 
-            auth_result = _auth_result_var.get()
+            auth_result = request.state.auth_result
             owner = body.get("owner", "")
             if isinstance(auth_result, str):
                 owner = auth_result  # scoped tokens own what they create
@@ -1374,7 +1371,8 @@ class HttpFrontend:
 
         @self._app.get("/v1/channels/<channel>/acl")
         async def get_acl(request: Request, channel: str = "") -> dict | tuple:
-            denied = await _require_acl_admin(bus, channel)
+            auth_result = request.state.auth_result
+            denied = await _require_acl_admin(auth_result, bus, channel)
             if denied:
                 return denied
 
@@ -1412,7 +1410,8 @@ class HttpFrontend:
 
         @self._app.put("/v1/channels/<channel>/acl")
         async def set_acl(request: Request, channel: str = "") -> dict | tuple:
-            denied = await _require_acl_admin(bus, channel)
+            auth_result = request.state.auth_result
+            denied = await _require_acl_admin(auth_result, bus, channel)
             if denied:
                 return denied
 
@@ -1423,7 +1422,7 @@ class HttpFrontend:
 
             from mansio.types import ACLEntry
 
-            auth_result = _auth_result_var.get()
+            auth_result = request.state.auth_result
             now = _now_iso()
             granted_by = auth_result if isinstance(auth_result, str) else None
             entries = [
@@ -1454,7 +1453,8 @@ class HttpFrontend:
 
         @self._app.post("/v1/channels/<channel>/acl")
         async def add_acl_entry(request: Request, channel: str = "") -> dict | tuple:
-            denied = await _require_acl_admin(bus, channel)
+            auth_result = request.state.auth_result
+            denied = await _require_acl_admin(auth_result, bus, channel)
             if denied:
                 return denied
 
@@ -1472,7 +1472,7 @@ class HttpFrontend:
 
             from mansio.types import ACLEntry
 
-            auth_result = _auth_result_var.get()
+            auth_result = request.state.auth_result
             now = _now_iso()
             granted_by = auth_result if isinstance(auth_result, str) else None
             entry = ACLEntry(
@@ -1509,7 +1509,8 @@ class HttpFrontend:
         async def remove_acl_entry(
             request: Request, channel: str = "", user_id: str = ""
         ) -> dict | tuple:
-            denied = await _require_acl_admin(bus, channel)
+            auth_result = request.state.auth_result
+            denied = await _require_acl_admin(auth_result, bus, channel)
             if denied:
                 return denied
 
@@ -1545,7 +1546,7 @@ class HttpFrontend:
                     "message": "At least one channel required",
                 }, 400
 
-            auth_result = _auth_result_var.get()
+            auth_result = request.state.auth_result
             error = _check_subscribe_access(auth_result, ch_list)
             if error:
                 return error
@@ -1632,13 +1633,12 @@ def _match_channels(channels: list[str], pattern: str) -> list[str]:
     return [ch for ch in channels if fnmatch.fnmatch(ch, pattern)]
 
 
-async def _require_acl_admin(bus: Bus, channel: str) -> tuple[dict, int] | None:
+async def _require_acl_admin(auth_result: Any, bus: Bus, channel: str) -> tuple[dict, int] | None:
     """Check that the current user has admin access on *channel*.
 
     Returns an error tuple (dict, status) if denied, or None if allowed.
     Supertokens and no-auth mode always pass.
     """
-    auth_result = _auth_result_var.get()
     if isinstance(auth_result, str) and not await asyncio.to_thread(
         bus.check_access, channel, auth_result, "admin"
     ):
