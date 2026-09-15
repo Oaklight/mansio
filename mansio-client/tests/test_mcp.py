@@ -24,7 +24,7 @@ def _make_msg(**overrides: Any) -> Message:
     defaults = {
         "id": "msg-1",
         "channel": "general",
-        "sender": "agent-a",
+        "sender": "user-a",
         "msg_type": "chat",
         "payload": "hello",
         "timestamp": "2026-01-01T00:00:00Z",
@@ -274,7 +274,7 @@ class TestCallTool(unittest.TestCase):
             self.client,
             "mansio_dm_send",
             {
-                "to_user": "agent-b",
+                "to_user": "user-b",
                 "content": "hi",
             },
         )
@@ -286,7 +286,7 @@ class TestCallTool(unittest.TestCase):
             self.client,
             "mansio_dm_read",
             {
-                "with_user": "agent-b",
+                "with_user": "user-b",
             },
         )
         assert len(result) == 1
@@ -328,7 +328,7 @@ class TestCallTool(unittest.TestCase):
     def test_agents(self) -> None:
         self.client.users.return_value = [
             UserPresence(
-                user_id="agent-a",
+                user_id="user-a",
                 status="online",
                 last_seen="2026-01-01T00:00:00Z",
                 metadata={"display_name": "Agent A"},
@@ -336,7 +336,7 @@ class TestCallTool(unittest.TestCase):
         ]
         result = _call_tool(self.client, "mansio_agents", {})
         assert len(result) == 1
-        assert result[0]["user_id"] == "agent-a"
+        assert result[0]["user_id"] == "user-a"
         assert result[0]["metadata"]["display_name"] == "Agent A"
 
     def test_heartbeat(self) -> None:
