@@ -45,6 +45,7 @@ import mimetypes
 import os
 import re
 import signal
+import threading
 import sys
 from collections.abc import AsyncIterator, Callable
 from email.utils import formatdate
@@ -1367,7 +1368,7 @@ class App:
             self._server = server
 
             loop = asyncio.get_running_loop()
-            if sys.platform != "win32":
+            if sys.platform != "win32" and threading.current_thread() is threading.main_thread():
                 for sig in (signal.SIGINT, signal.SIGTERM):
                     loop.add_signal_handler(sig, self._shutdown_event.set)
 
