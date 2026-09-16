@@ -300,7 +300,9 @@ class HttpTransport:
         Returns:
             Number of messages deleted.
         """
-        resp = self._http.delete(f"{self._base_url}/v1/channels/{name}")
+        resp = self._http.delete(
+            f"{self._base_url}/v1/channels/{urllib.parse.quote(name, safe='')}"
+        )
         self._check_response(resp)
         return resp.json()["deleted"]
 
@@ -310,7 +312,9 @@ class HttpTransport:
         Returns:
             True if the message was deleted.
         """
-        resp = self._http.delete(f"{self._base_url}/v1/messages/{message_id}")
+        resp = self._http.delete(
+            f"{self._base_url}/v1/messages/{urllib.parse.quote(message_id, safe='')}"
+        )
         self._check_response(resp)
         return resp.json()["deleted"]
 
@@ -318,7 +322,9 @@ class HttpTransport:
 
     def acl_get(self, channel: str) -> list[ACLEntry]:
         """Return ACL entries for a channel."""
-        resp = self._http.get(f"{self._base_url}/v1/channels/{channel}/acl")
+        resp = self._http.get(
+            f"{self._base_url}/v1/channels/{urllib.parse.quote(channel, safe='')}/acl"
+        )
         self._check_response(resp)
         return [
             ACLEntry(
@@ -340,7 +346,10 @@ class HttpTransport:
         body = {
             "acl": [{"user_id": e.user_id, "permission": e.permission} for e in entries]
         }
-        resp = self._http.put(f"{self._base_url}/v1/channels/{channel}/acl", json=body)
+        resp = self._http.put(
+            f"{self._base_url}/v1/channels/{urllib.parse.quote(channel, safe='')}/acl",
+            json=body,
+        )
         self._check_response(resp)
         return resp.json()["count"]
 
@@ -351,7 +360,10 @@ class HttpTransport:
             The created ACLEntry.
         """
         body = {"user_id": user_id, "permission": permission}
-        resp = self._http.post(f"{self._base_url}/v1/channels/{channel}/acl", json=body)
+        resp = self._http.post(
+            f"{self._base_url}/v1/channels/{urllib.parse.quote(channel, safe='')}/acl",
+            json=body,
+        )
         self._check_response(resp)
         e = resp.json()["entry"]
         return ACLEntry(
@@ -367,7 +379,7 @@ class HttpTransport:
             True if the entry was removed.
         """
         resp = self._http.delete(
-            f"{self._base_url}/v1/channels/{channel}/acl/{user_id}"
+            f"{self._base_url}/v1/channels/{urllib.parse.quote(channel, safe='')}/acl/{urllib.parse.quote(user_id, safe='')}"
         )
         self._check_response(resp)
         return True

@@ -220,7 +220,7 @@ def _cmd_channel_create(args: argparse.Namespace, client: MansioClient) -> None:
 
 def _cmd_channel_delete(args: argparse.Namespace, client: MansioClient) -> None:
     count = client.channel_delete(args.name)
-    print(f"Deleted {count} messages from channel {args.name!r}")
+    print(f"Deleted channel {args.name!r} ({count} messages removed)")
 
 
 def _cmd_message_delete(args: argparse.Namespace, client: MansioClient) -> None:
