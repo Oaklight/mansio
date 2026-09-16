@@ -20,7 +20,7 @@ from collections.abc import Callable
 from typing import Any
 
 from mansio_client import MansioClient
-from mansio_client.types import Message
+from mansio_client.types import ACLEntry, Message
 
 # ── Protocol Constants ────────────────────────────────────────────
 
@@ -232,6 +232,154 @@ _TOOLS: list[dict[str, Any]] = [
             "properties": {},
         },
     },
+    {
+        "name": "mansio_channel_create",
+        "description": "Create a new channel.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Channel name to create.",
+                },
+                "visibility": {
+                    "type": "string",
+                    "description": "Channel visibility (default: public).",
+                    "enum": ["public", "private"],
+                    "default": "public",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "mansio_channel_delete",
+        "description": "Delete a channel and all its messages.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Channel name to delete.",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "mansio_message_delete",
+        "description": "Delete a single message by ID.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string",
+                    "description": "ID of the message to delete.",
+                },
+            },
+            "required": ["message_id"],
+        },
+    },
+    {
+        "name": "mansio_acl_get",
+        "description": "Get ACL entries for a channel.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string",
+                    "description": "Channel name.",
+                },
+            },
+            "required": ["channel"],
+        },
+    },
+    {
+        "name": "mansio_acl_set",
+        "description": "Replace all ACL entries for a channel.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string",
+                    "description": "Channel name.",
+                },
+                "entries": {
+                    "type": "array",
+                    "description": "List of ACL entries ({user_id, permission}).",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "user_id": {"type": "string"},
+                            "permission": {
+                                "type": "string",
+                                "enum": ["read", "write", "admin"],
+                                "default": "read",
+                            },
+                        },
+                        "required": ["user_id"],
+                    },
+                },
+            },
+            "required": ["channel", "entries"],
+        },
+    },
+    {
+        "name": "mansio_acl_add",
+        "description": "Add an ACL entry for a user on a channel.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string",
+                    "description": "Channel name.",
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "User to grant access.",
+                },
+                "permission": {
+                    "type": "string",
+                    "description": "Permission level (default: read).",
+                    "enum": ["read", "write", "admin"],
+                    "default": "read",
+                },
+            },
+            "required": ["channel", "user_id"],
+        },
+    },
+    {
+        "name": "mansio_acl_remove",
+        "description": "Remove a users ACL entry from a channel.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string",
+                    "description": "Channel name.",
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "User to remove.",
+                },
+            },
+            "required": ["channel", "user_id"],
+        },
+    },
+    {
+        "name": "mansio_registry_lookup",
+        "description": "Check if a user is registered on the server.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "string",
+                    "description": "User ID to look up.",
+                },
+            },
+            "required": ["user_id"],
+        },
+    },
 ]
 
 
@@ -339,6 +487,71 @@ def _tool_heartbeat(client: MansioClient, args: dict[str, Any]) -> Any:
     return {"status": "ok"}
 
 
+def _acl_to_dict(entry: ACLEntry) -> dict[str, Any]:
+    d: dict[str, Any] = {
+        "channel": entry.channel,
+        "user_id": entry.user_id,
+        "permission": entry.permission,
+    }
+    if entry.granted_at:
+        d["granted_at"] = entry.granted_at
+    if entry.granted_by is not None:
+        d["granted_by"] = entry.granted_by
+    return d
+
+
+def _tool_channel_create(client: MansioClient, args: dict[str, Any]) -> Any:
+    result = client.channel_create(
+        args["name"], visibility=args.get("visibility", "public")
+    )
+    return result
+
+
+def _tool_channel_delete(client: MansioClient, args: dict[str, Any]) -> Any:
+    count = client.channel_delete(args["name"])
+    return {"deleted": count}
+
+
+def _tool_message_delete(client: MansioClient, args: dict[str, Any]) -> Any:
+    client.message_delete(args["message_id"])
+    return {"status": "ok"}
+
+
+def _tool_acl_get(client: MansioClient, args: dict[str, Any]) -> Any:
+    entries = client.acl_get(args["channel"])
+    return [_acl_to_dict(e) for e in entries]
+
+
+def _tool_acl_set(client: MansioClient, args: dict[str, Any]) -> Any:
+    entries = [
+        ACLEntry(
+            channel=args["channel"],
+            user_id=e["user_id"],
+            permission=e.get("permission", "read"),
+        )
+        for e in args["entries"]
+    ]
+    count = client.acl_set(args["channel"], entries)
+    return {"status": "ok", "count": count}
+
+
+def _tool_acl_add(client: MansioClient, args: dict[str, Any]) -> Any:
+    entry = client.acl_add(
+        args["channel"], args["user_id"], args.get("permission", "read")
+    )
+    return _acl_to_dict(entry)
+
+
+def _tool_acl_remove(client: MansioClient, args: dict[str, Any]) -> Any:
+    client.acl_remove(args["channel"], args["user_id"])
+    return {"status": "ok"}
+
+
+def _tool_registry_lookup(client: MansioClient, args: dict[str, Any]) -> Any:
+    found = client.registry_lookup(args["user_id"])
+    return {"user_id": args["user_id"], "found": found}
+
+
 _DISPATCH: dict[str, Callable[[MansioClient, dict[str, Any]], Any]] = {
     "mansio_channels": _tool_channels,
     "mansio_send": _tool_send,
@@ -352,6 +565,14 @@ _DISPATCH: dict[str, Callable[[MansioClient, dict[str, Any]], Any]] = {
     "mansio_memory_recall": _tool_memory_recall,
     "mansio_agents": _tool_agents,
     "mansio_heartbeat": _tool_heartbeat,
+    "mansio_channel_create": _tool_channel_create,
+    "mansio_channel_delete": _tool_channel_delete,
+    "mansio_message_delete": _tool_message_delete,
+    "mansio_acl_get": _tool_acl_get,
+    "mansio_acl_set": _tool_acl_set,
+    "mansio_acl_add": _tool_acl_add,
+    "mansio_acl_remove": _tool_acl_remove,
+    "mansio_registry_lookup": _tool_registry_lookup,
 }
 
 

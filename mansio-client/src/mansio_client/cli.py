@@ -90,6 +90,37 @@ def _build_parser() -> argparse.ArgumentParser:
     recall = mem_sub.add_parser("recall")
     recall.add_argument("query")
 
+    ch_create = sub.add_parser("channel-create", help="Create a channel")
+    ch_create.add_argument("name")
+    ch_create.add_argument(
+        "--visibility", default="public", choices=["public", "private"]
+    )
+
+    ch_delete = sub.add_parser("channel-delete", help="Delete a channel")
+    ch_delete.add_argument("name")
+
+    msg_delete = sub.add_parser("message-delete", help="Delete a message")
+    msg_delete.add_argument("message_id")
+
+    acl = sub.add_parser("acl", help="Manage channel ACL")
+    acl_sub = acl.add_subparsers(dest="acl_action")
+    acl_get = acl_sub.add_parser("get", help="Get ACL entries")
+    acl_get.add_argument("channel")
+    acl_set = acl_sub.add_parser("set", help="Replace ACL entries (JSON)")
+    acl_set.add_argument("channel")
+    acl_set.add_argument("entries_json", help="JSON array of {user_id, permission}")
+    acl_add_p = acl_sub.add_parser("add", help="Add an ACL entry")
+    acl_add_p.add_argument("channel")
+    acl_add_p.add_argument("user_id")
+    acl_add_p.add_argument(
+        "--permission", default="read", choices=["read", "write", "admin"]
+    )
+    acl_rm = acl_sub.add_parser("remove", help="Remove an ACL entry")
+    acl_rm.add_argument("channel")
+    acl_rm.add_argument("user_id")
+
+    reg = sub.add_parser("registry-lookup", help="Check if a user is registered")
+    reg.add_argument("user_id")
     return parser
 
 
@@ -125,6 +156,11 @@ def _dispatch(args: argparse.Namespace, client: MansioClient) -> None:
         "check": _cmd_check,
         "note": _cmd_note,
         "memory": _cmd_memory,
+        "channel-create": _cmd_channel_create,
+        "channel-delete": _cmd_channel_delete,
+        "message-delete": _cmd_message_delete,
+        "acl": _cmd_acl,
+        "registry-lookup": _cmd_registry_lookup,
     }
     handlers[args.command](args, client)
 
@@ -175,6 +211,65 @@ def _cmd_memory(args: argparse.Namespace, client: MansioClient) -> None:
     else:
         print("usage: mansio-client memory {store,recall}", file=sys.stderr)
         sys.exit(1)
+
+
+def _cmd_channel_create(args: argparse.Namespace, client: MansioClient) -> None:
+    result = client.channel_create(args.name, visibility=args.visibility)
+    print(json.dumps(result, ensure_ascii=False))
+
+
+def _cmd_channel_delete(args: argparse.Namespace, client: MansioClient) -> None:
+    count = client.channel_delete(args.name)
+    print(f"Deleted {count} messages from channel {args.name!r}")
+
+
+def _cmd_message_delete(args: argparse.Namespace, client: MansioClient) -> None:
+    client.message_delete(args.message_id)
+    print(f"Deleted message {args.message_id}")
+
+
+def _cmd_acl(args: argparse.Namespace, client: MansioClient) -> None:
+    if args.acl_action == "get":
+        for entry in client.acl_get(args.channel):
+            print(
+                json.dumps(
+                    {"user_id": entry.user_id, "permission": entry.permission},
+                    ensure_ascii=False,
+                )
+            )
+    elif args.acl_action == "set":
+        from mansio_client.types import ACLEntry
+
+        raw = json.loads(args.entries_json)
+        entries = [
+            ACLEntry(
+                channel=args.channel,
+                user_id=e["user_id"],
+                permission=e.get("permission", "read"),
+            )
+            for e in raw
+        ]
+        count = client.acl_set(args.channel, entries)
+        print(f"Set {count} ACL entries")
+    elif args.acl_action == "add":
+        entry = client.acl_add(args.channel, args.user_id, args.permission)
+        print(
+            json.dumps(
+                {"user_id": entry.user_id, "permission": entry.permission},
+                ensure_ascii=False,
+            )
+        )
+    elif args.acl_action == "remove":
+        client.acl_remove(args.channel, args.user_id)
+        print(f"Removed ACL entry for {args.user_id!r}")
+    else:
+        print("usage: mansio-client acl {get,set,add,remove}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _cmd_registry_lookup(args: argparse.Namespace, client: MansioClient) -> None:
+    found = client.registry_lookup(args.user_id)
+    print(json.dumps({"user_id": args.user_id, "found": found}, ensure_ascii=False))
 
 
 def _msg_dict(msg) -> dict:

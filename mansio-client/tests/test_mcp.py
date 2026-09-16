@@ -8,7 +8,7 @@ from io import StringIO
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from mansio_client.types import UserPresence, Message
+from mansio_client.types import ACLEntry, UserPresence, Message
 
 from mansio_client.mcp import (
     _TOOLS,
@@ -34,6 +34,19 @@ def _make_msg(**overrides: Any) -> Message:
     }
     defaults.update(overrides)
     return Message(**defaults)
+
+
+def _make_acl_entry(**overrides: Any) -> ACLEntry:
+    """Create an ACLEntry with sensible defaults."""
+    defaults = {
+        "channel": "general",
+        "user_id": "user-a",
+        "permission": "write",
+        "granted_at": "2026-01-01T00:00:00Z",
+        "granted_by": None,
+    }
+    defaults.update(overrides)
+    return ACLEntry(**defaults)
 
 
 class TestMsgToDict(unittest.TestCase):
@@ -343,6 +356,112 @@ class TestCallTool(unittest.TestCase):
         result = _call_tool(self.client, "mansio_heartbeat", {})
         assert result == {"status": "ok"}
         self.client.heartbeat.assert_called_once()
+
+    def test_channel_create(self) -> None:
+        self.client.channel_create.return_value = {
+            "name": "test-ch",
+            "owner": "user-a",
+            "visibility": "public",
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        result = _call_tool(self.client, "mansio_channel_create", {"name": "test-ch"})
+        assert result["name"] == "test-ch"
+        self.client.channel_create.assert_called_once_with(
+            "test-ch", visibility="public"
+        )
+
+    def test_channel_create_private(self) -> None:
+        self.client.channel_create.return_value = {
+            "name": "secret",
+            "owner": "user-a",
+            "visibility": "private",
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        result = _call_tool(
+            self.client,
+            "mansio_channel_create",
+            {"name": "secret", "visibility": "private"},
+        )
+        assert result["visibility"] == "private"
+        self.client.channel_create.assert_called_once_with(
+            "secret", visibility="private"
+        )
+
+    def test_channel_delete(self) -> None:
+        self.client.channel_delete.return_value = 5
+        result = _call_tool(self.client, "mansio_channel_delete", {"name": "old-ch"})
+        assert result == {"deleted": 5}
+        self.client.channel_delete.assert_called_once_with("old-ch")
+
+    def test_message_delete(self) -> None:
+        self.client.message_delete.return_value = True
+        result = _call_tool(
+            self.client, "mansio_message_delete", {"message_id": "msg-99"}
+        )
+        assert result == {"status": "ok"}
+        self.client.message_delete.assert_called_once_with("msg-99")
+
+    def test_acl_get(self) -> None:
+        self.client.acl_get.return_value = [
+            _make_acl_entry(user_id="user-a", permission="admin"),
+            _make_acl_entry(user_id="user-b", permission="read"),
+        ]
+        result = _call_tool(self.client, "mansio_acl_get", {"channel": "general"})
+        assert len(result) == 2
+        assert result[0]["user_id"] == "user-a"
+        assert result[0]["permission"] == "admin"
+        self.client.acl_get.assert_called_once_with("general")
+
+    def test_acl_set(self) -> None:
+        self.client.acl_set.return_value = 2
+        result = _call_tool(
+            self.client,
+            "mansio_acl_set",
+            {
+                "channel": "general",
+                "entries": [
+                    {"user_id": "user-a", "permission": "admin"},
+                    {"user_id": "user-b"},
+                ],
+            },
+        )
+        assert result == {"status": "ok", "count": 2}
+
+    def test_acl_add(self) -> None:
+        self.client.acl_add.return_value = _make_acl_entry(
+            user_id="user-b", permission="write"
+        )
+        result = _call_tool(
+            self.client,
+            "mansio_acl_add",
+            {"channel": "general", "user_id": "user-b", "permission": "write"},
+        )
+        assert result["user_id"] == "user-b"
+        assert result["permission"] == "write"
+        self.client.acl_add.assert_called_once_with("general", "user-b", "write")
+
+    def test_acl_remove(self) -> None:
+        self.client.acl_remove.return_value = True
+        result = _call_tool(
+            self.client,
+            "mansio_acl_remove",
+            {"channel": "general", "user_id": "user-b"},
+        )
+        assert result == {"status": "ok"}
+        self.client.acl_remove.assert_called_once_with("general", "user-b")
+
+    def test_registry_lookup(self) -> None:
+        self.client.registry_lookup.return_value = True
+        result = _call_tool(
+            self.client, "mansio_registry_lookup", {"user_id": "user-a"}
+        )
+        assert result == {"user_id": "user-a", "found": True}
+        self.client.registry_lookup.assert_called_once_with("user-a")
+
+    def test_registry_lookup_not_found(self) -> None:
+        self.client.registry_lookup.return_value = False
+        result = _call_tool(self.client, "mansio_registry_lookup", {"user_id": "ghost"})
+        assert result == {"user_id": "ghost", "found": False}
 
     def test_unknown_tool(self) -> None:
         with self.assertRaises(ValueError, msg="Unknown tool: bogus"):

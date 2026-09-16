@@ -12,7 +12,7 @@ import re
 from typing import TYPE_CHECKING, Literal, overload
 
 from mansio_client.transport import HttpTransport
-from mansio_client.types import UserPresence, ClaimResult, Message
+from mansio_client.types import ACLEntry, UserPresence, ClaimResult, Message
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -323,6 +323,44 @@ class MansioClient:
         self, user_id: str, timeout_seconds: int = 120
     ) -> UserPresence | None:
         return self._transport.user_status(user_id, timeout_seconds)
+
+    # ── Channel Management ────────────────────────────────────────
+
+    def channel_create(self, name: str, visibility: str = "public") -> dict:
+        """Create a channel owned by this user."""
+        return self._transport.channel_create(name, self._user_id, visibility)
+
+    def channel_delete(self, name: str) -> int:
+        """Delete a channel. Returns number of messages deleted."""
+        return self._transport.channel_delete(name)
+
+    def message_delete(self, message_id: str) -> bool:
+        """Delete a single message by ID."""
+        return self._transport.message_delete(message_id)
+
+    # ── ACL ───────────────────────────────────────────────────────
+
+    def acl_get(self, channel: str) -> list[ACLEntry]:
+        """Return ACL entries for a channel."""
+        return self._transport.acl_get(channel)
+
+    def acl_set(self, channel: str, entries: list[ACLEntry]) -> int:
+        """Replace all ACL entries for a channel."""
+        return self._transport.acl_set(channel, entries)
+
+    def acl_add(self, channel: str, user_id: str, permission: str = "read") -> ACLEntry:
+        """Add an ACL entry for a channel."""
+        return self._transport.acl_add(channel, user_id, permission)
+
+    def acl_remove(self, channel: str, user_id: str) -> bool:
+        """Remove an ACL entry."""
+        return self._transport.acl_remove(channel, user_id)
+
+    # ── Registry ──────────────────────────────────────────────────
+
+    def registry_lookup(self, user_id: str) -> bool:
+        """Check if a user is registered."""
+        return self._transport.registry_lookup(user_id)
 
     # ── Subscribe / Unsubscribe ───────────────────────────────────
 
