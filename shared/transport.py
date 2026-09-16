@@ -16,7 +16,7 @@ from typing import Literal, overload
 
 from __PKG__._vendor.httpclient import Client as HttpClient
 from __PKG__._vendor.sse import SSEClient
-from __PKG__.types import ClaimResult, Message, UserPresence
+from __PKG__.types import ACLEntry, ClaimResult, Message, UserPresence
 
 
 class MansioAPIError(Exception):
@@ -280,6 +280,112 @@ class HttpTransport:
         if self._sse_thread and self._sse_thread.is_alive():
             self._sse_thread.join(timeout=3)
         self._http.close()
+
+    # ── Channel Management ────────────────────────────────────────
+
+    def channel_create(self, name: str, owner: str, visibility: str = "public") -> dict:
+        """Create a channel.
+
+        Returns:
+            Channel metadata dict (name, owner, visibility, created_at).
+        """
+        body = {"name": name, "owner": owner, "visibility": visibility}
+        resp = self._http.post(f"{self._base_url}/v1/channels", json=body)
+        self._check_response(resp)
+        return resp.json()["channel"]
+
+    def channel_delete(self, name: str) -> int:
+        """Delete a channel and all its messages.
+
+        Returns:
+            Number of messages deleted.
+        """
+        resp = self._http.delete(f"{self._base_url}/v1/channels/{name}")
+        self._check_response(resp)
+        return resp.json()["deleted"]
+
+    def message_delete(self, message_id: str) -> bool:
+        """Delete a single message by ID.
+
+        Returns:
+            True if the message was deleted.
+        """
+        resp = self._http.delete(f"{self._base_url}/v1/messages/{message_id}")
+        self._check_response(resp)
+        return resp.json()["deleted"]
+
+    # ── ACL ───────────────────────────────────────────────────────
+
+    def acl_get(self, channel: str) -> list[ACLEntry]:
+        """Return ACL entries for a channel."""
+        resp = self._http.get(f"{self._base_url}/v1/channels/{channel}/acl")
+        self._check_response(resp)
+        return [
+            ACLEntry(
+                channel=e["channel"],
+                user_id=e["user_id"],
+                permission=e["permission"],
+                granted_at=e.get("granted_at", ""),
+                granted_by=e.get("granted_by"),
+            )
+            for e in resp.json()["acl"]
+        ]
+
+    def acl_set(self, channel: str, entries: list[ACLEntry]) -> int:
+        """Replace all ACL entries for a channel.
+
+        Returns:
+            Number of entries set.
+        """
+        body = {
+            "acl": [{"user_id": e.user_id, "permission": e.permission} for e in entries]
+        }
+        resp = self._http.put(f"{self._base_url}/v1/channels/{channel}/acl", json=body)
+        self._check_response(resp)
+        return resp.json()["count"]
+
+    def acl_add(self, channel: str, user_id: str, permission: str = "read") -> ACLEntry:
+        """Add an ACL entry for a channel.
+
+        Returns:
+            The created ACLEntry.
+        """
+        body = {"user_id": user_id, "permission": permission}
+        resp = self._http.post(f"{self._base_url}/v1/channels/{channel}/acl", json=body)
+        self._check_response(resp)
+        e = resp.json()["entry"]
+        return ACLEntry(
+            channel=e["channel"],
+            user_id=e["user_id"],
+            permission=e["permission"],
+        )
+
+    def acl_remove(self, channel: str, user_id: str) -> bool:
+        """Remove an ACL entry.
+
+        Returns:
+            True if the entry was removed.
+        """
+        resp = self._http.delete(
+            f"{self._base_url}/v1/channels/{channel}/acl/{user_id}"
+        )
+        self._check_response(resp)
+        return True
+
+    # ── Registry ──────────────────────────────────────────────────
+
+    def registry_lookup(self, user_id: str) -> bool:
+        """Check if a user is registered.
+
+        Returns:
+            True if the user exists in the token store.
+        """
+        resp = self._http.get(
+            f"{self._base_url}/v1/registry/lookup",
+            params={"user_id": user_id},
+        )
+        self._check_response(resp)
+        return resp.json()["found"]
 
     # ── SSE Subscription ─────────────────────────────────────────
 
