@@ -350,7 +350,7 @@ _TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "mansio_acl_remove",
-        "description": "Remove a users ACL entry from a channel.",
+        "description": "Remove a user's ACL entry from a channel.",
         "inputSchema": {
             "type": "object",
             "properties": {
