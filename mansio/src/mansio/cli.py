@@ -556,7 +556,12 @@ def _start_http_frontend(args: argparse.Namespace, bus: Any, token_store: Any, l
     from mansio.frontends.http import HttpFrontend
 
     host, port = _parse_host_port(args.http)
-    http_frontend = HttpFrontend(host=host, port=port, token_store=token_store)
+    http_frontend = HttpFrontend(
+        host=host,
+        port=port,
+        token_store=token_store,
+        allow_unauthenticated=(token_store is None),
+    )
     http_frontend.attach(bus)
     http_thread = threading.Thread(
         target=http_frontend.serve_forever,
