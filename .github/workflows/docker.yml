@@ -1,25 +1,33 @@
 name: Docker
 
 on:
-  # Called by the Release workflow after the package is published to PyPI.
   workflow_call:
     inputs:
       tag:
-        description: 'Version to build (e.g. 0.1.0)'
+        description: "Version to build (e.g. 0.1.0)"
         required: true
         type: string
+      testpypi:
+        description: "Install from Test PyPI instead of PyPI"
+        required: false
+        type: boolean
+        default: false
     secrets:
       DOCKERHUB_USERNAME:
         required: true
       DOCKERHUB_TOKEN:
         required: true
-  # Manual trigger for ad-hoc rebuilds of an already-published version.
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Version to build (e.g. 0.1.0)'
+        description: "Version to build (e.g. 0.1.0)"
         required: true
         type: string
+      testpypi:
+        description: "Install from Test PyPI instead of PyPI"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,7 +49,6 @@ jobs:
         id: meta
         run: |
           VERSION="${{ inputs.tag }}"
-          # Normalize: strip an optional leading "v" so callers may pass either form.
           VERSION="${VERSION#v}"
           if [ -z "$VERSION" ]; then
             echo "::error::No version provided via inputs.tag"
@@ -51,26 +58,29 @@ jobs:
           echo "Building version: $VERSION"
 
       - name: Ensure build context has dist/
-        # The Dockerfile's `COPY dist/ /tmp/dist/` requires the source dir to
-        # exist in the build context. In CI we install from PyPI (no local
-        # wheel), so create an empty dist/ to make the COPY a harmless no-op.
         run: mkdir -p mansio/dist
 
       - name: Wait for PyPI availability
         run: |
           VERSION="${{ steps.meta.outputs.version }}"
-          echo "Waiting for mansio==$VERSION on PyPI..."
+          if [ "${{ inputs.testpypi }}" = "true" ]; then
+            PYPI_URL="https://test.pypi.org/pypi/mansio/$VERSION/json"
+            LABEL="Test PyPI"
+          else
+            PYPI_URL="https://pypi.org/pypi/mansio/$VERSION/json"
+            LABEL="PyPI"
+          fi
+          echo "Waiting for mansio==$VERSION on $LABEL..."
           for i in $(seq 1 45); do
-            CODE=$(curl -fsS -o /dev/null -w "%{http_code}" \
-              "https://pypi.org/pypi/mansio/$VERSION/json" || true)
+            CODE=$(curl -fsS -o /dev/null -w "%{http_code}" "$PYPI_URL" || true)
             if [ "$CODE" = "200" ]; then
-              echo "✅ mansio==$VERSION found on PyPI (attempt $i)"
+              echo "mansio==$VERSION found on $LABEL (attempt $i)"
               exit 0
             fi
             echo "  Attempt $i/45: not yet available (HTTP $CODE), waiting 20s..."
             sleep 20
           done
-          echo "❌ mansio==$VERSION not found on PyPI after 15 minutes"
+          echo "::error::mansio==$VERSION not found on $LABEL after 15 minutes"
           exit 1
 
       - name: Log in to Docker Hub
@@ -79,6 +89,30 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Determine tags
+        id: tags
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          IMAGE="oaklight/mansio"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tags=${IMAGE}:${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=${IMAGE}:${VERSION},${IMAGE}:latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare build args
+        id: build-args
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          ARGS="PACKAGE_VERSION=${VERSION}"
+          if [ "${{ inputs.testpypi }}" = "true" ]; then
+            ARGS="${ARGS}
+          EXTRA_INDEX_URL=https://test.pypi.org/simple/"
+          fi
+          echo "args<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$ARGS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v6
         with:
@@ -86,10 +120,7 @@ jobs:
           file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: |
-            PACKAGE_VERSION=${{ steps.meta.outputs.version }}
-          tags: |
-            oaklight/mansio:${{ steps.meta.outputs.version }}
-            oaklight/mansio:latest
+          build-args: ${{ steps.build-args.outputs.args }}
+          tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
