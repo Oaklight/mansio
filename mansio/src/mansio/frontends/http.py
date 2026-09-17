@@ -905,13 +905,18 @@ class HttpFrontend:
                 all_channels = _filter_visible_channels(auth_result, all_channels)
             return {"channels": all_channels}
 
+        self._setup_auth_check_route()
+
+    def _setup_auth_check_route(self) -> None:
+        """Register /v1/auth/check route."""
+
         @self._app.get("/v1/auth/check")
         async def auth_check(request: Request) -> dict:
-            has_tokens = bool(
-                self._token_store and await asyncio.to_thread(self._token_store.has_tokens)
-            )
+            ts = self._token_store
+            has_tokens = bool(ts and await asyncio.to_thread(ts.has_tokens))
             return {
-                "token_auth_enabled": has_tokens,
+                "auth_mode": "required" if ts is not None else "disabled",
+                "has_tokens": has_tokens,
             }
 
     def _setup_registry_route(self) -> None:
