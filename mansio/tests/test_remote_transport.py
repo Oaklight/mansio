@@ -26,7 +26,9 @@ from mansio.transport_http import HttpTransport
 def server_url():
     """Start a MansioServer with HttpFrontend on a random port, yield URL."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0)  # OS-assigned port
+    frontend = HttpFrontend(
+        host="127.0.0.1", port=0, allow_unauthenticated=True
+    )  # OS-assigned port
     server = MansioServer(bus)
     server.add_frontend(frontend)
 

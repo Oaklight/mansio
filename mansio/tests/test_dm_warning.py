@@ -27,7 +27,7 @@ class TestDMWarningHTTP:
         from mansio.frontends import HttpFrontend
 
         _bus = Bus(backend=MemoryBackend())
-        frontend = HttpFrontend(host="127.0.0.1", port=0)
+        frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
         server = MansioServer(_bus)
         server.add_frontend(frontend)
 

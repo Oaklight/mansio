@@ -29,7 +29,7 @@ from mansio.frontends import HttpFrontend
 def _start_server():
     """Start a MansioServer on a random port, return (url, server)."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0)
+    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
     server.add_frontend(frontend)
 
