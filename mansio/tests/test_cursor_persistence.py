@@ -42,8 +42,7 @@ def test_cursor_survives_client_killed_with_sigterm(server_url):
     _send(server_url, channel, ["m0", "m1", "m2"])
 
     proc = subprocess.Popen(
-        [sys.executable, "-c", textwrap.dedent(POLL_AND_WAIT), server_url,
-         "killed-agent", channel],
+        [sys.executable, "-c", textwrap.dedent(POLL_AND_WAIT), server_url, "killed-agent", channel],
         stdout=subprocess.PIPE,
         text=True,
     )
@@ -129,9 +128,7 @@ def test_restore_failure_propagates(server_url, monkeypatch):
     def failing_query(self, *args, **kwargs):
         raise ConnectionError("query rejected")
 
-    monkeypatch.setattr(
-        client_module.HttpTransport, "query", failing_query, raising=True
-    )
+    monkeypatch.setattr(client_module.HttpTransport, "query", failing_query, raising=True)
     with pytest.raises(ConnectionError):
         MansioClient(server_url, "broken-agent")
 
