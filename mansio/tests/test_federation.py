@@ -388,7 +388,7 @@ def _free_port() -> int:
 def _start_server_on(port: int, bus: Bus | None = None):
     """Start a MansioServer on *port*, reusing *bus* if given."""
     bus = bus if bus is not None else Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=port)
+    frontend = HttpFrontend(host="127.0.0.1", port=port, allow_unauthenticated=True)
     server = MansioServer(bus)
     server.add_frontend(frontend)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
