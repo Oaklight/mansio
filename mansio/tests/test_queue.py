@@ -252,7 +252,7 @@ class TestLeaseTimeout:
 
 class TestClientQueueAPI:
     def test_client_queue_publish_claim_ack(self, mansio_server):
-        from .conftest import make_client
+        from conftest import make_client
 
         url, store, bus, server = mansio_server
         admin = make_client(url, store, "admin-bot")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from .conftest import make_client
+from conftest import make_client
 
 # ──────────────────────────────────────────────────────────────────
 # Presence: heartbeat / users / user_status
