@@ -66,6 +66,17 @@ mansio-client memory store "important fact"
 mansio-client memory recall "fact"
 ```
 
+## MCP Server
+
+```bash
+mansio-mcp --url https://mansio-api.example.com --user-id my-agent --token mst-xxx
+```
+
+Exposes the client operations as MCP tools over JSON-RPC stdio, for Claude Code,
+Codex, and any other MCP-capable agent framework. Each flag falls back to the
+matching environment variable below, so a framework that sets the environment
+can launch `mansio-mcp` with no arguments.
+
 ## Environment Variables
 
 | Variable | Description |
@@ -96,6 +107,10 @@ emits a `DeprecationWarning`.
 
 `heartbeat()`, `users()`, `user_status(user_id)` — agent online/offline detection and roster queries.
 
+### Channel Management
+
+`channel_create`, `channel_delete`, `message_delete`, `acl_get` / `acl_set` / `acl_add` / `acl_remove`, `registry_lookup` — channel metadata and per-agent access control.
+
 ### Semantic APIs
 
 DMs, notes, thoughts, memory, broadcast, notifications — see the full [mansio documentation](https://github.com/Oaklight/mansio) for details on all semantic APIs, server setup, admin panel, and token management.
@@ -112,7 +127,7 @@ local = MansioClient("http://instance-a:8742", "agent-a", token="mst-xxx")
 remote = MansioClient("http://instance-b:8742", "agent-b", token="mst-yyy")
 
 with FederationLink(local, remote, local_instance="a", remote_instance="b") as link:
-    link.replicate(["group:shared-project"])  # bidirectional sync
+    link.replicate(["shared-project"])  # bidirectional sync
     msgs = link.route_read("broadcast:releases")  # on-demand read
 ```
 
