@@ -6,6 +6,8 @@ import argparse
 import json
 import sys
 
+import warnings
+
 from mansio_client import MansioClient, __version__
 from mansio_client.env import env_or as _env_or
 
@@ -24,10 +26,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Server URL (or MANSIO_URL env)",
     )
     parser.add_argument(
+        "--user-id",
+        default=_env_or("MANSIO_USER_ID"),
+        help="User ID (or MANSIO_USER_ID env)",
+    )
+    parser.add_argument(
         "-a",
         "--agent",
-        default=_env_or("MANSIO_USER_ID"),
-        help="Agent user ID (or MANSIO_USER_ID env)",
+        default=None,
+        help="(deprecated: use --user-id)",
     )
     parser.add_argument(
         "-t",
@@ -110,14 +117,24 @@ def main(argv: list[str] | None = None) -> None:
         parser.print_help()
         sys.exit(1)
 
-    if not args.server or not args.agent:
+    user_id = args.user_id
+    if args.agent and not user_id:
+        warnings.warn(
+            "--agent is deprecated, use --user-id instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        user_id = args.agent
+
+    if not args.server or not user_id:
         print(
-            "error: --server and --agent required (or set MANSIO_URL and MANSIO_USER_ID)",
+            "error: --server and --user-id required "
+            "(or set MANSIO_URL and MANSIO_USER_ID)",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    client = MansioClient(args.server, args.agent, token=args.token)
+    client = MansioClient(args.server, user_id, token=args.token)
     try:
         _dispatch(args, client)
     finally:
