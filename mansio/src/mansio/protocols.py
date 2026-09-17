@@ -7,6 +7,7 @@ Defines the Backend ABC and optional capability protocols
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Literal, Protocol, runtime_checkable
 
 from mansio._vendor.structlog import get_logger
@@ -385,6 +386,42 @@ class ChannelStore(Protocol):
 
         Returns:
             True if access is granted.
+        """
+        ...
+
+
+@runtime_checkable
+class Watchable(Protocol):
+    """Optional protocol for backends whose transport carries live notifications.
+
+    Backends that speak to a shared broker can see messages stored by
+    *other* processes sharing that broker.  Implementing this protocol
+    lets the Bus push those messages to its subscribers instead of only
+    the ones published through its own process.
+
+    Implementations must deliver only messages that arrive after
+    ``watch()`` returns — no replay of stored history — and must not
+    re-deliver messages this same backend instance stored, because the
+    Bus dispatches those to its subscribers during ``publish()``.
+    """
+
+    def watch(self, channel: str, callback: Callable[[Message], None]) -> str:
+        """Start delivering messages stored by other processes on *channel*.
+
+        Args:
+            channel: Channel to watch.
+            callback: Called with each message stored by another process.
+                May be invoked from a background thread.
+
+        Returns:
+            A watch ID for use with ``unwatch()``.
+        """
+        ...
+
+    def unwatch(self, watch_id: str) -> None:
+        """Stop a watch and release its transport resources.
+
+        Unknown IDs are ignored.
         """
         ...
 
