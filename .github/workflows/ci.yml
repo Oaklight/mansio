@@ -84,6 +84,9 @@ jobs:
       - name: Verify CLI entry point
         run: mansio-client --version
 
+      - name: Run client tests
+        run: python -m pytest mansio-client/tests/ -v
+
       - name: Verify package builds cleanly
         run: |
           pip install build
