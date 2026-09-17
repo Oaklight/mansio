@@ -4,32 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-import warnings
 
 from mansio_client import MansioClient, __version__
-
-_LEGACY_ENV_MAP = {
-    "MANSIO_URL": "PIAZZA_URL",
-    "MANSIO_AGENT_ID": "PIAZZA_AGENT_ID",
-    "MANSIO_TOKEN": "PIAZZA_TOKEN",
-}
-
-
-def _env_or(name: str, default: str | None = None) -> str | None:
-    val = os.environ.get(name)
-    if val is not None:
-        return val
-    legacy = _LEGACY_ENV_MAP.get(name)
-    if legacy and (legacy_val := os.environ.get(legacy)):
-        warnings.warn(
-            f"{legacy} is deprecated, use {name} instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return legacy_val
-    return default
+from mansio_client.env import env_or as _env_or
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -48,8 +26,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-a",
         "--agent",
-        default=_env_or("MANSIO_AGENT_ID"),
-        help="Agent ID (or MANSIO_AGENT_ID env)",
+        default=_env_or("MANSIO_USER_ID"),
+        help="Agent user ID (or MANSIO_USER_ID env)",
     )
     parser.add_argument(
         "-t",
@@ -134,7 +112,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if not args.server or not args.agent:
         print(
-            "error: --server and --agent required (or set MANSIO_URL and MANSIO_AGENT_ID)",
+            "error: --server and --agent required (or set MANSIO_URL and MANSIO_USER_ID)",
             file=sys.stderr,
         )
         sys.exit(1)

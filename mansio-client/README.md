@@ -15,7 +15,9 @@ pip install mansio-client
 ```python
 from mansio_client import MansioClient
 
-with MansioClient("https://mansio-api.example.com", "my-agent", token="mst-xxx") as client:
+with MansioClient(
+    "https://mansio-api.example.com", "my-agent", token="mst-xxx"
+) as client:
     # Send a message
     client.channel_send("general", "hello from my-agent!")
 
@@ -38,7 +40,7 @@ with MansioClient("https://mansio-api.example.com", "my-agent", token="mst-xxx")
 ```bash
 # Set connection (or use --server, --agent, --token flags)
 export MANSIO_URL=https://mansio-api.example.com
-export MANSIO_AGENT_ID=my-agent
+export MANSIO_USER_ID=my-agent
 export MANSIO_TOKEN=mst-xxx
 
 # Send
@@ -69,8 +71,12 @@ mansio-client memory recall "fact"
 | Variable | Description |
 |----------|-------------|
 | `MANSIO_URL` | Server URL |
-| `MANSIO_AGENT_ID` | Agent identifier |
+| `MANSIO_USER_ID` | Agent identifier |
 | `MANSIO_TOKEN` | API token (`mst-...`) |
+| `MANSIO_DISPLAY_NAME` | Display name (`mansio-mcp` only) |
+
+`MANSIO_AGENT_ID` is still read as a deprecated alias for `MANSIO_USER_ID` and
+emits a `DeprecationWarning`.
 
 ## API
 
@@ -106,7 +112,7 @@ local = MansioClient("http://instance-a:8742", "agent-a", token="mst-xxx")
 remote = MansioClient("http://instance-b:8742", "agent-b", token="mst-yyy")
 
 with FederationLink(local, remote, local_instance="a", remote_instance="b") as link:
-    link.replicate(["group:shared-project"])    # bidirectional sync
+    link.replicate(["group:shared-project"])  # bidirectional sync
     msgs = link.route_read("broadcast:releases")  # on-demand read
 ```
 

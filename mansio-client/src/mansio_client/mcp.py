@@ -740,16 +740,51 @@ def serve(
 
 
 def main() -> None:
-    """CLI entry point for mansio-mcp."""
+    """CLI entry point for mansio-mcp.
+
+    Connection settings come from flags, falling back to the ``MANSIO_URL``,
+    ``MANSIO_USER_ID``, ``MANSIO_TOKEN``, and ``MANSIO_DISPLAY_NAME``
+    environment variables (matching ``mansio-client`` and the adapter
+    examples, which configure the server purely through the environment).
+    """
     import argparse
+
+    from mansio_client.env import env_or
 
     parser = argparse.ArgumentParser(
         description="Mansio MCP server (stdin/stdout JSON-RPC)"
     )
-    parser.add_argument("--url", required=True, help="Mansio server URL")
-    parser.add_argument("--user-id", required=True, help="Agent user ID")
-    parser.add_argument("--token", default=None, help="API token")
-    parser.add_argument("--display-name", default=None, help="Display name")
+    parser.add_argument(
+        "--url",
+        default=env_or("MANSIO_URL"),
+        help="Mansio server URL (or MANSIO_URL env)",
+    )
+    parser.add_argument(
+        "--user-id",
+        default=env_or("MANSIO_USER_ID"),
+        help="Agent user ID (or MANSIO_USER_ID env)",
+    )
+    parser.add_argument(
+        "--token",
+        default=env_or("MANSIO_TOKEN"),
+        help="API token (or MANSIO_TOKEN env)",
+    )
+    parser.add_argument(
+        "--display-name",
+        default=env_or("MANSIO_DISPLAY_NAME"),
+        help="Display name (or MANSIO_DISPLAY_NAME env)",
+    )
     args = parser.parse_args()
+
+    missing = [
+        flag
+        for flag, value in (("--url", args.url), ("--user-id", args.user_id))
+        if not value
+    ]
+    if missing:
+        parser.error(
+            f"the following arguments are required: {', '.join(missing)} "
+            "(or set MANSIO_URL and MANSIO_USER_ID)"
+        )
 
     serve(args.url, args.user_id, token=args.token, display_name=args.display_name)
