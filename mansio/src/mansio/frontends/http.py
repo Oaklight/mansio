@@ -29,6 +29,13 @@ Authentication:
     every authenticated endpoint. Serving an open API is possible but never
     implicit: it requires ``allow_unauthenticated=True``, which logs a
     warning at startup.
+
+Presence:
+    Any authenticated request, and any live SSE subscription, refreshes
+    that user's ``last_seen``, so ``users()`` reflects who is actually
+    active without the client having to remember to heartbeat. Writes are
+    throttled per user. ``POST /v1/presence/heartbeat`` remains for clients
+    that are alive but idle.
 """
 
 from __future__ import annotations
@@ -38,14 +45,18 @@ import contextlib
 import json
 import re
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from mansio._vendor.httpserver import App, JSONResponse, Response, StreamingResponse
 from mansio._vendor.structlog import get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mansio._vendor.httpserver import Request
     from mansio.bus import Bus
     from mansio.token_store import TokenStore
@@ -68,6 +79,12 @@ _NO_TOKENS_MESSAGE = (
     "No API tokens configured. Create a token via the admin panel before connecting."
 )
 
+# Shortest interval between two presence writes for the same user. last_seen
+# only has to stay fresh enough that users() still counts the user as online,
+# so this sits well inside that presence timeout while holding even a busy
+# client to one write per interval.
+_PRESENCE_REFRESH_SECONDS = 30.0
+
 
 @dataclass
 class _SSESession:
@@ -81,6 +98,9 @@ class _SSESession:
     last_event_id: str | None = None
     drop_lock: threading.Lock | None = None
     drop_counter: list[int] | None = None
+    # Called as the stream stays alive so an idle subscriber still counts
+    # as present. None when the connection has no user identity.
+    on_activity: Callable[[], None] | None = None
 
 
 # Channel naming rules:
@@ -694,6 +714,57 @@ class HttpFrontend:
         self._allow_unauthenticated = allow_unauthenticated
         self._bus: Bus | None = None
         self._app = App(max_body_size=max_body_bytes)
+        # user_id → monotonic timestamp of its last presence write. Only
+        # touched from the event loop, so it needs no lock.
+        self._presence_written: dict[str, float] = {}
+        self._presence_tasks: set[asyncio.Task] = set()
+        self._presence_supported = True
+
+    # ── Presence ──────────────────────────────────────────────────
+
+    def _note_activity(self, user_id: str) -> None:
+        """Record that *user_id* is active, at most once per refresh interval.
+
+        Presence is derived from real API activity rather than from an
+        explicit heartbeat the client has to remember to send. Callers are
+        request handlers, so the write is dispatched to a background task:
+        a caller's publish must not wait on, or fail because of, a
+        bookkeeping write.
+        """
+        if not self._presence_supported:
+            return
+        now = time.monotonic()
+        written = self._presence_written.get(user_id)
+        if written is not None and now - written < _PRESENCE_REFRESH_SECONDS:
+            return
+        self._presence_written[user_id] = now
+        task = asyncio.create_task(self._write_presence(user_id))
+        self._presence_tasks.add(task)
+        task.add_done_callback(self._presence_tasks.discard)
+
+    async def _write_presence(self, user_id: str) -> None:
+        """Persist *user_id*'s activity as presence."""
+        bus = self._bus
+        if bus is None:
+            return
+        try:
+            await asyncio.to_thread(bus.heartbeat, user_id)
+        except NotImplementedError:
+            # This backend has no presence store and will not grow one while
+            # running, so stop attempting the write rather than repeating it
+            # for every user on every interval.
+            self._presence_supported = False
+            logger.info("Backend has no presence store — activity will not update last_seen")
+        except Exception as exc:
+            # Recovery: drop the throttle entry so the next request retries.
+            # The request that triggered this has already been answered and
+            # must not be affected by a failed bookkeeping write.
+            self._presence_written.pop(user_id, None)
+            logger.warning(
+                "Presence update failed",
+                user_id=user_id,
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
     def attach(self, bus: Bus) -> None:
         """Bind this frontend to a Bus and register routes.
@@ -825,6 +896,8 @@ class HttpFrontend:
 
             # result is str (user_id) or None (supertoken)
             request.state.auth_result = result
+            if isinstance(result, str):
+                self._note_activity(result)
             return None
 
         @self._app.after_request
@@ -1636,6 +1709,10 @@ class HttpFrontend:
                 bus, ch_list, auth_result
             )
 
+            on_activity = (
+                partial(self._note_activity, auth_result) if isinstance(auth_result, str) else None
+            )
+
             return StreamingResponse(
                 _sse_event_generator(
                     _SSESession(
@@ -1647,6 +1724,7 @@ class HttpFrontend:
                         last_event_id=last_event_id,
                         drop_lock=drop_lock,
                         drop_counter=drop_counter,
+                        on_activity=on_activity,
                     )
                 ),
                 content_type="text/event-stream",
@@ -1882,6 +1960,22 @@ def _drain_drop_counter(
     return ""
 
 
+async def _replay_missed_events(session: _SSESession) -> Any:
+    """Yield SSE events for messages published after ``last_event_id``."""
+    for ch in session.channels:
+        missed = await asyncio.to_thread(
+            session.bus.query, ch, after=session.last_event_id, limit=_SSE_REPLAY_LIMIT
+        )
+        if isinstance(session.auth_result, str):
+            missed = [m for m in missed if _user_involved(session.auth_result, m.channel, m.sender)]
+        for m in missed:
+            data = json.dumps(
+                {"channel": ch, "message": _msg_to_dict(m)},
+                ensure_ascii=False,
+            )
+            yield _format_sse_event(data, m.id)
+
+
 async def _sse_event_generator(session: _SSESession) -> Any:
     """Async generator that yields SSE events from the queue.
 
@@ -1898,22 +1992,8 @@ async def _sse_event_generator(session: _SSESession) -> Any:
 
         # ── Replay missed messages on reconnect ──────────────────
         if session.last_event_id:
-            for ch in session.channels:
-                missed = await asyncio.to_thread(
-                    session.bus.query, ch, after=session.last_event_id, limit=_SSE_REPLAY_LIMIT
-                )
-                if isinstance(session.auth_result, str):
-                    missed = [
-                        m
-                        for m in missed
-                        if _user_involved(session.auth_result, m.channel, m.sender)
-                    ]
-                for m in missed:
-                    data = json.dumps(
-                        {"channel": ch, "message": _msg_to_dict(m)},
-                        ensure_ascii=False,
-                    )
-                    yield _format_sse_event(data, m.id)
+            async for event in _replay_missed_events(session):
+                yield event
 
         # NOTE: Subscriptions are active during replay, so a message
         # published in the replay window can appear in both the replay
@@ -1923,6 +2003,10 @@ async def _sse_event_generator(session: _SSESession) -> Any:
 
         # ── Live stream ──────────────────────────────────────────
         while True:
+            # An open subscription is evidence the subscriber is present,
+            # even while it sends no requests of its own.
+            if session.on_activity is not None:
+                session.on_activity()
             try:
                 data = await asyncio.wait_for(session.queue.get(), timeout=15)
             except asyncio.TimeoutError:

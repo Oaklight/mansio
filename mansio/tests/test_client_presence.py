@@ -11,6 +11,79 @@ from conftest import make_client
 # ──────────────────────────────────────────────────────────────────
 
 
+def _wait_for_presence(bus, user_id: str, deadline: float = 3.0):
+    """Return presence for *user_id*, waiting for the background write."""
+    end = time.monotonic() + deadline
+    while time.monotonic() < end:
+        result = bus.user_status(user_id)
+        if result is not None:
+            return result
+        time.sleep(0.02)
+    return None
+
+
+class TestPresenceFromActivity:
+    """Authenticated activity is what makes a user present — no heartbeat."""
+
+    def test_connecting_marks_user_online(self, mansio_server):
+        url, store, bus, _srv = mansio_server
+        client = make_client(url, store, "agent-active")
+        result = _wait_for_presence(bus, "agent-active")
+        assert result is not None
+        assert result.status == "online"
+        client.close()
+
+    def test_users_lists_connected_client_without_heartbeat(self, mansio_server):
+        url, store, bus, _srv = mansio_server
+        client = make_client(url, store, "agent-roster")
+        _wait_for_presence(bus, "agent-roster")
+        assert "agent-roster" in [u.user_id for u in client.users()]
+        client.close()
+
+    def test_requests_inside_the_throttle_window_do_not_rewrite(self, mansio_server):
+        url, store, bus, _srv = mansio_server
+        client = make_client(url, store, "agent-throttle")
+        first = _wait_for_presence(bus, "agent-throttle")
+        assert first is not None
+        for _ in range(5):
+            client.channel_list()
+        assert bus.user_status("agent-throttle").last_seen == first.last_seen
+        client.close()
+
+    def test_a_request_past_the_window_refreshes_last_seen(self, mansio_server, monkeypatch):
+        from mansio.frontends import http as http_frontend
+
+        url, store, bus, _srv = mansio_server
+        client = make_client(url, store, "agent-refresh")
+        first = _wait_for_presence(bus, "agent-refresh")
+        assert first is not None
+
+        monkeypatch.setattr(http_frontend, "_PRESENCE_REFRESH_SECONDS", 0.0)
+        client.channel_list()
+        end = time.monotonic() + 3.0
+        while time.monotonic() < end:
+            if bus.user_status("agent-refresh").last_seen > first.last_seen:
+                break
+            time.sleep(0.02)
+        assert bus.user_status("agent-refresh").last_seen > first.last_seen
+        client.close()
+
+    def test_issued_token_alone_does_not_make_a_user_present(self, mansio_server):
+        _url, store, bus, _srv = mansio_server
+        store.create_token(user_id="agent-idle", label="never used")
+        assert bus.user_status("agent-idle") is None
+
+    def test_subscription_records_the_subscriber(self, mansio_server):
+        url, store, bus, _srv = mansio_server
+        client = make_client(url, store, "agent-sub")
+        sub_id = client.subscribe("general", lambda _m: None)
+        result = _wait_for_presence(bus, "agent-sub")
+        assert result is not None
+        assert result.status == "online"
+        client.unsubscribe(sub_id)
+        client.close()
+
+
 class TestHeartbeat:
     def test_heartbeat_sends_presence(self, mansio_server):
         url, store, bus, server = mansio_server
