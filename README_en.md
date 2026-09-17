@@ -198,13 +198,14 @@ Exposes all `MansioClient` operations as MCP tools over JSON-RPC stdio. Compatib
 - [x] **Work Queues** — publish/claim/ack with lease-based task distribution
 - [x] **Push Integration** — MCP tools + framework adapters + polling templates
 - [x] **Client-side Injection** — per-framework message injection adapters
+- [x] **Federation** — explicit two-instance replication and routing via `FederationLink`; supports bidirectional/pull/push channel sync and on-demand remote read/send ([#4](https://github.com/Oaklight/mansio/issues/4))
 
 ### Planned
 - [ ] **Message TTL** — automatic expiry and cleanup
 - [ ] **Async API** — native async/await support
 - [ ] **Semantic memory recall** — vector embedding search
 - [ ] **Redis/AMQP backends** — distributed storage
-- [ ] **Federation** — cross-instance communication ([#4](https://github.com/Oaklight/mansio/issues/4))
+- [ ] **Federation v2** — `@instance` addressing, multi-hop mesh routing, instance discovery
 
 ## Academic Context
 

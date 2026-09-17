@@ -197,6 +197,7 @@ mansio mcp-serve --url http://localhost:8742 --agent-id my-agent --token mst-xxx
 - [x] **远程传输可靠性** — SSE 重连（Last-Event-ID）、WAL 重试日志、慢消费者丢弃通知
 - [x] **工作队列** — publish/claim/ack，基于租约的任务分发
 - [x] **推送集成** — MCP 工具 + 框架适配器 + 轮询模板
+- [x] **联邦** — 通过 `FederationLink` 实现显式双实例复制与路由；支持双向/拉取/推送通道同步及按需远程读写（[#4](https://github.com/Oaklight/mansio/issues/4)）
 
 ### 计划中
 
@@ -204,7 +205,7 @@ mansio mcp-serve --url http://localhost:8742 --agent-id my-agent --token mst-xxx
 - [ ] **异步 API** — 原生 async/await 支持
 - [ ] **语义化记忆检索** — 向量嵌入搜索
 - [ ] **Redis/AMQP 后端** — 分布式存储
-- [ ] **联邦** — 跨实例通信（[#4](https://github.com/Oaklight/mansio/issues/4)）
+- [ ] **联邦 v2** — `@instance` 寻址、多跳网格路由、实例发现
 
 ## 学术背景
 
