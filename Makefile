@@ -1,11 +1,13 @@
-# Makefile for piazza package
+# Makefile for mansio package
 
 # Variables
-PACKAGE_NAME := piazza
-PACKAGE_DIR := piazza
-DOCKER_IMAGE := oaklight/piazza
-DIST_DIR := piazza/dist
-VERSION := $(shell grep -oE '__version__[[:space:]]*=[[:space:]]*"[^"]+"' $(PACKAGE_DIR)/src/piazza/__init__.py | grep -oE '"[^"]+"' | tr -d '"' || echo "0.0.1")
+PACKAGE_NAME := mansio
+PACKAGE_DIR := mansio
+CLIENT_DIR := mansio-client
+DOCKER_IMAGE := oaklight/mansio
+DIST_DIR := mansio/dist
+CLIENT_DIST_DIR := mansio-client/dist
+VERSION := $(shell grep -oE '__version__[[:space:]]*=[[:space:]]*"[^"]+"' $(PACKAGE_DIR)/src/mansio/__init__.py | grep -oE '"[^"]+"' | tr -d '"' || echo "0.0.1")
 
 # Optional variables
 V ?= $(VERSION)
@@ -21,9 +23,9 @@ all: format lint test
 
 format:
 	@echo "Running ruff check --fix..."
-	ruff check --fix $(PACKAGE_DIR)/src/ $(PACKAGE_DIR)/tests/
+	ruff check --fix $(PACKAGE_DIR)/src/ $(PACKAGE_DIR)/tests/ $(CLIENT_DIR)/src/ $(CLIENT_DIR)/tests/
 	@echo "Running ruff format..."
-	ruff format $(PACKAGE_DIR)/src/ $(PACKAGE_DIR)/tests/
+	ruff format $(PACKAGE_DIR)/src/ $(PACKAGE_DIR)/tests/ $(CLIENT_DIR)/src/ $(CLIENT_DIR)/tests/
 	@echo "Format complete."
 
 # ──────────────────────────────────────────────
@@ -32,9 +34,11 @@ format:
 
 lint:
 	@echo "Running ruff check..."
-	ruff check $(PACKAGE_DIR)/src/
-	@echo "Running ty check..."
+	ruff check $(PACKAGE_DIR)/src/ $(CLIENT_DIR)/src/
+	@echo "Running ty check on $(PACKAGE_DIR)..."
 	ty check --project $(PACKAGE_DIR)
+	@echo "Running ty check on $(CLIENT_DIR)..."
+	ty check --project $(CLIENT_DIR)
 	@echo "Type check complete."
 
 # ──────────────────────────────────────────────
@@ -43,7 +47,7 @@ lint:
 
 test:
 	@echo "Running tests..."
-	pytest $(PACKAGE_DIR)/tests/ -v --tb=short
+	pytest $(PACKAGE_DIR)/tests/ $(CLIENT_DIR)/tests/ -v --tb=short
 	@echo "Tests completed."
 
 # ──────────────────────────────────────────────
@@ -69,6 +73,20 @@ clean-package:
 build: build-package
 push: push-package
 clean: clean-package
+
+# ──────────────────────────────────────────────
+# Client package targets
+# ──────────────────────────────────────────────
+
+build-client:
+	@echo "Building mansio-client..."
+	python -m build $(CLIENT_DIR)/
+	@echo "Build complete. Distribution files are in $(CLIENT_DIST_DIR)/"
+
+push-client:
+	@echo "Pushing mansio-client to PyPI..."
+	twine upload $(CLIENT_DIST_DIR)/*
+	@echo "Client package pushed to PyPI."
 
 # ──────────────────────────────────────────────
 # Docker
@@ -126,10 +144,14 @@ help:
 	@echo "  lint           - Run ruff check and ty type checker"
 	@echo "  test           - Run tests with pytest"
 	@echo ""
-	@echo "Package:"
+	@echo "Package (mansio):"
 	@echo "  build-package  - Build the Python package"
 	@echo "  push-package   - Push the package to PyPI"
 	@echo "  clean-package  - Clean up build and distribution files"
+	@echo ""
+	@echo "Client (mansio-client):"
+	@echo "  build-client   - Build the client package"
+	@echo "  push-client    - Push the client package to PyPI"
 	@echo ""
 	@echo "Docker:"
 	@echo "  build-docker   - Build Docker image (local x64)"
@@ -160,4 +182,4 @@ help:
 	@echo ""
 	@echo "Detected version: $(VERSION)"
 
-.PHONY: all format lint test build-package push-package clean-package build push clean build-docker push-docker clean-docker help
+.PHONY: all format lint test build-package push-package clean-package build push clean build-client push-client build-docker push-docker clean-docker help
