@@ -38,11 +38,10 @@ Every adapter provides two integration points:
 
 ## Prerequisites
 
-Install `mansio-client` (for CLI polling) and/or `mansio` (for MCP server):
+Install `mansio-client` (provides both the CLI and the MCP server):
 
 ```bash
-pip install mansio-client          # CLI: mansio-client poll, check, send
-pip install mansio-client          # MCP server: mansio-mcp
+pip install mansio-client          # CLI: mansio-client  |  MCP: mansio-mcp
 ```
 
 Set connection defaults via environment variables:
