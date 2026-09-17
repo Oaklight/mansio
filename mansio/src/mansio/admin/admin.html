@@ -1709,7 +1709,7 @@ async function loadTokens() {
             ? `${data.tokens.length} token(s) configured`
             : 'Token auth not configured';
         if (data.tokens.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-secondary);text-align:center;padding:40px">No tokens yet — API is open until the first token is created</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-secondary);text-align:center;padding:40px">No tokens yet — API rejects all requests until a token is created</td></tr>';
             return;
         }
         tbody.innerHTML = data.tokens.map(t => `

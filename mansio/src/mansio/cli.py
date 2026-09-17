@@ -419,7 +419,9 @@ def _create_token_store(args: argparse.Namespace, logger: Any) -> Any:
     if token_count > 0:
         logger.info("Token auth enabled", token_count=token_count)
     else:
-        logger.info("Token auth ready (no tokens yet — API open until first token created)")
+        logger.info(
+            "Token auth ready (no tokens yet — API will reject requests until a token is created)"
+        )
     return token_store
 
 
