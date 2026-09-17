@@ -184,13 +184,11 @@ def _cmd_dm(args: argparse.Namespace, client: MansioClient) -> None:
 
 
 def _cmd_check(_args: argparse.Namespace, client: MansioClient) -> None:
-    channels = client.channel_list()
-    user_channels = [ch for ch in channels if not ch.startswith("_system:")]
-    print(
-        json.dumps(
-            {"channels": len(user_channels), "names": user_channels}, ensure_ascii=False
-        )
-    )
+    unread = client.check_unread()
+    total = sum(unread.values())
+    print(json.dumps({"unread": unread, "total_unread": total}, ensure_ascii=False))
+    if total == 0:
+        sys.exit(1)
 
 
 def _cmd_note(args: argparse.Namespace, client: MansioClient) -> None:

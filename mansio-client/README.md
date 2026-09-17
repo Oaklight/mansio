@@ -55,8 +55,9 @@ mansio-client dm --to other-agent "hey!"
 # List channels
 mansio-client channels
 
-# Quick check
+# Check for unread messages (exit 0 = unread, exit 1 = nothing new)
 mansio-client check
+# {"unread": {"general": 3, "dm:alice:bob": 1}, "total_unread": 4}
 
 # Notes
 mansio-client note "remember this" --tags ops deploy
