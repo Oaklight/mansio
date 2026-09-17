@@ -8,7 +8,7 @@ Mansio is a messaging backbone system designed for LLMs/Agents, providing unifie
 
 - Inter-Agent Communication (Group Chat / Direct Message)
 - Notebook / Scratch Pad
-- History Tracking
+- Persistent Message History
 - Memory Storage
 - Cognitive Process Recording (Thought)
 - Broadcast / Announcements
@@ -19,7 +19,7 @@ Mansio is a messaging backbone system designed for LLMs/Agents, providing unifie
 |-----------|-------------|
 | **Decoupled Abstractions** | All components defined by Protocol interfaces, not bound to specific implementations |
 | **Layered Responsibility** | Clear boundaries per layer: Backend handles storage & delivery, Bus handles orchestration, Client SDK handles business semantics |
-| **Connection String Driven** | Deployment decisions (which backend) are orthogonal to architecture, selected at runtime via connection strings |
+| **Deployment Orthogonality** | Which backend a deployment uses is a server-side startup decision; agents are unaffected and always speak the same HTTP API |
 | **Progressive Enhancement** | Core functionality minimized, advanced capabilities introduced through optional interfaces |
 
 ---
@@ -31,50 +31,51 @@ Mansio is a messaging backbone system designed for LLMs/Agents, providing unifie
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     Delivery Layer                          │
-│            MCP / REST API / CLI / OpenAPI                   │
+│                 MCP / CLI / REST API                        │
 │  (Exposes Client SDK capabilities to external consumers:   │
 │   LLMs, humans, scripts)                                   │
 ├─────────────────────────────────────────────────────────────┤
 │                    Client SDK Layer                          │
-│                     MansioClient                            │
+│              mansio_client.MansioClient                     │
 │  (Stateful wrapper: identity, cursors, channel naming,     │
-│   semantic business API)                                    │
+│   semantic business API — talks HTTP to a Frontend)        │
 ├─────────────────────────────────────────────────────────────┤
-│                   Frontend Layer  🔄                        │
-│            HttpFrontend / (future: IRC, WS)                │
+│                   Frontend Layer                            │
+│              HttpFrontend │ IrcFrontend                     │
 │  (Network-facing servers: REST + SSE, attach to Bus)       │
 ├─────────────────────────────────────────────────────────────┤
 │                       Bus Layer                             │
 │                         Bus                                 │
-│  (Orchestration: composes Backend + Serializer,            │
-│   provides pub/sub)                                        │
+│  (Orchestration: wraps a Backend, adds message IDs,        │
+│   in-process pub/sub, compaction policy)                   │
 ├─────────────────────────────────────────────────────────────┤
 │                     Backend Layer                           │
-│          SQLite │ Redis │ RabbitMQ │ ...                     │
-│  (Message storage & delivery, unified through Protocol     │
-│   interface)                                                │
+│      SQLite │ Memory │ NATS JetStream │ Maildir             │
+│  (Message storage & delivery, unified through the          │
+│   Backend ABC)                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-> **🔄 In Progress (`dev/agent-bus`):** The Frontend layer introduces a `Frontend` protocol with `attach(bus)` / `serve_forever()` / `shutdown()` methods. `HttpFrontend` is the first implementation, providing REST endpoints and SSE streaming. `MansioServer` is the orchestrator that binds a Bus to one or more Frontends.
+The Frontend layer defines a `Frontend` protocol with `attach(bus)` / `serve_forever()` / `shutdown()` methods and an `address` property. `HttpFrontend` provides REST endpoints and SSE streaming; `IrcFrontend` bridges channels to an IRC server. `MansioServer` is the orchestrator that binds a Bus to one or more Frontends.
 
-Each layer depends only on the Protocol interface of the layer below, never on concrete implementations.
+Each layer depends only on the interface of the layer below, never on concrete implementations.
 
 ### 2.2 Component Relationships
 
+The two packages are separated along the network boundary. `mansio` (server) holds
+the Backend, Bus and Frontends; `mansio-client` (agent SDK) holds `MansioClient`
+and its HTTP transport. Nothing in `mansio-client` imports `mansio`.
+
 ```
-MansioClient(target)
+mansio_client.MansioClient("http://host:8742", user_id, token=…)
   │
-  ├── target = Bus object  → Bus → Backend
-  ├── target = "mansio.db" → auto-create Bus(SQLiteBackend)
-  ├── target = "redis://…" → auto-create Bus(RedisBackend)
-  └── target = "http://…"  → HttpTransport → HttpFrontend → Bus → Backend
-                                               (via MansioServer)
+  └── HttpTransport → HttpFrontend → Bus → Backend
+        (REST + SSE)    (via MansioServer or `mansio serve`)
 ```
 
-The Client SDK shields local/remote differences through the Transport abstraction, fully transparent to upper layers.
-
-> **Note:** The `Transport` protocol now includes `subscribe(channel, callback)` and `unsubscribe(subscription_id)` to support real-time event delivery across both local and remote transports.
+HTTP is the only transport an agent can use: there is no in-process client. A
+process that wants to avoid the network hop embeds a `Bus` and talks to it
+directly, without the Client SDK (see §6).
 
 ---
 
@@ -110,117 +111,139 @@ class Message:
 
 ### 3.2 Backend Layer
 
-The Backend is the storage and delivery engine for messages. All Backends interface through a unified Protocol. The system makes no assumptions about whether the underlying store is a relational database, message queue, or in-memory structure.
+The Backend is the storage and delivery engine for messages. All Backends derive from a single abstract base class. The system makes no assumptions about whether the underlying store is a relational database, message queue, mailbox directory, or in-memory structure.
 
-#### Backend Protocol
+#### Backend ABC
+
+`Backend` (in `protocols.py`) splits its surface into abstract methods every
+backend must implement and template methods with working default
+implementations that a backend may override for efficiency:
 
 ```python
-class Backend(Protocol):
-    """Unified interface for message backends."""
+class Backend(ABC):
+    # Abstract — must implement
+    def store(self, message: Message) -> None: ...
+    def store_queue(self, message: Message) -> None: ...
+    def query(self, channel, after=None, limit=100, msg_type=None,
+              order="oldest", thread_id=None, intent=None,
+              offset=0) -> list[Message]: ...
+    def get_message(self, message_id: str) -> Message | None: ...
+    def list_channels(self) -> list[str]: ...
+    def queue_claim(self, channel, claimed_by, *,
+                    lease_seconds=300) -> ClaimResult | None: ...
+    def queue_ack(self, message_id, claimed_by) -> ClaimResult | None: ...
+    def queue_status(self, message_id: str) -> dict | None: ...
 
-    def store(self, message: Message) -> None:
-        """Persist a message."""
-        ...
-
-    def query(
-        self, channel: str,
-        after: str | None = None,
-        limit: int = 100,
-    ) -> list[Message]:
-        """Query messages by channel with cursor-based pagination."""
-        ...
-
-    def channels(self) -> list[str]:
-        """List all channels that contain messages."""
-        ...
-
-    def subscribe(
-        self, channel: str,
-        callback: Callable[[Message], None],
-    ) -> str:
-        """Register a message delivery callback, return subscription ID.
-
-        Different backends implement this according to their capabilities:
-        - Polling-based backends (SQLite): Bus layer provides in-process observer
-        - Native pub/sub backends (Redis): leverage native subscription
-        - Message queue backends (RabbitMQ): leverage consumer mechanism
-        """
-        ...
-
-    def unsubscribe(self, subscription_id: str) -> None:
-        """Cancel a subscription."""
-        ...
-
-    def close(self) -> None:
-        """Release resources."""
-        ...
+    # Template — default implementations provided
+    def close(self) -> None: ...
+    def search(...) -> list[Message]: ...
+    def message_count(self, channel=None) -> int: ...
+    def stats(self) -> dict: ...
+    def queue_stats(self, channel=None) -> dict: ...
+    def queue_retire(self, max_age_seconds=86400, max_per_channel=1000) -> int: ...
+    def recent_timestamps(self, seconds=60) -> list[str]: ...
+    def info(self) -> dict: ...
+    def list_channels_detail(self) -> list[dict]: ...
 ```
 
-> **Note**: `subscribe`/`unsubscribe` are currently implemented at the Bus layer as an in-process observer pattern, serving as the universal baseline for all backends. When a backend has native push capabilities, the Bus layer can delegate subscriptions to the backend for more efficient delivery.
+#### Optional Capability Protocols
+
+Capabilities that not every store can support are expressed as separate
+`runtime_checkable` protocols rather than as abstract methods. The Bus checks
+for them with `isinstance` and raises `NotImplementedError` when a backend
+lacks the capability a call needs:
+
+| Protocol | Methods | Purpose |
+|----------|---------|---------|
+| `ChannelStore` | `create_channel`, `get_channel`, `list_channels_meta`, `update_channel`, `delete_channel_meta`, `set_acl`, `get_acl`, `add_acl_entry`, `remove_acl_entry`, `check_access` | Explicit channel metadata (owner, visibility) and per-agent ACL |
+| `Deletable` | `delete_channel`, `delete_message` | Channel and message deletion |
+| `Presenceable` | `heartbeat`, `users`, `user_status` | Agent presence tracking |
+| `Compactable` | `compact` | Channel compaction (trim by count, dedup per sender) |
+
+> **Note**: `subscribe`/`unsubscribe` are implemented at the Bus layer as an in-process observer pattern, serving as the universal baseline for all backends. The Backend interface itself has no subscription methods.
 
 #### Available Backend Implementations
 
-| Backend | Connection String | Use Case |
-|---------|------------------|----------|
-| SQLiteBackend | `mansio.db` or `:memory:` | Development, testing, single-machine deployment, zero external deps |
-| MemoryBackend | `:memory:` (via Bus object) | Unit testing, ephemeral scenarios |
-| RedisBackend | `redis://host:port` | Multi-instance deployment, native pub/sub needed |
-| RabbitMQBackend | `amqp://host:port` | Enterprise-grade, complex routing, durable queues |
-| *Custom* | *Custom URL scheme* | Extend as needed |
+| Backend | Constructor | Optional protocols | Use Case |
+|---------|-------------|--------------------|----------|
+| `SQLiteBackend` | `SQLiteBackend("mansio.db")` or `":memory:"` | ChannelStore, Deletable, Presenceable, Compactable | Development, testing, single-machine deployment, zero external deps |
+| `MemoryBackend` | `MemoryBackend()` | ChannelStore, Deletable, Presenceable, Compactable | Unit testing, ephemeral scenarios |
+| `NATSBackend` | `NATSBackend("nats://host:4222")` | Presenceable, Compactable | Distributed deployment on NATS JetStream (optional `nats` extra) |
+| `MaildirBackend` | `MaildirBackend("/var/mansio")` | Deletable, Presenceable, Compactable | Filesystem-native storage, inspectable with ordinary mail tools |
 
-> **Selection Guide**: There is no priority ordering among backends. Choose based on deployment scenario: SQLite/Memory for development and testing (zero deps), SQLite for single-machine production, Redis for cross-instance communication, RabbitMQ for enterprise messaging guarantees.
+> **Selection Guide**: There is no priority ordering among backends. Choose based on deployment scenario: Memory for unit tests, SQLite for development and single-machine production (zero deps), NATS JetStream for multi-instance deployments, Maildir where messages should be readable by existing mail tooling. Backends without `ChannelStore` cannot serve the channel-metadata and ACL endpoints.
+
+Redis Streams and AMQP backends are on the roadmap (§9); no implementation exists yet.
 
 #### Adding a New Backend
 
-Implement the `Backend` protocol to integrate:
+Subclass `Backend`, implement the abstract methods, and add whichever optional
+protocols the store can support — the protocols are structural, so no explicit
+inheritance is required (the shipped backends list them as bases anyway, for
+documentation):
 
 ```python
-class MyBackend:
+from mansio.protocols import Backend, Deletable
+
+class MyBackend(Backend, Deletable):
     def __init__(self, connection_url: str): ...
+
+    # Required
     def store(self, message: Message) -> None: ...
-    def query(self, channel, after=None, limit=100) -> list[Message]: ...
-    def channels(self) -> list[str]: ...
-    def close(self) -> None: ...
+    def store_queue(self, message: Message) -> None: ...
+    def query(self, channel, after=None, limit=100, msg_type=None,
+              order="oldest", thread_id=None, intent=None, offset=0): ...
+    def get_message(self, message_id: str) -> Message | None: ...
+    def list_channels(self) -> list[str]: ...
+    def queue_claim(self, channel, claimed_by, *, lease_seconds=300): ...
+    def queue_ack(self, message_id, claimed_by): ...
+    def queue_status(self, message_id: str) -> dict | None: ...
+
+    # From Deletable
+    def delete_channel(self, channel: str) -> int: ...
+    def delete_message(self, message_id: str) -> bool: ...
 
 # Usage
 bus = Bus(backend=MyBackend("custom://..."))
 ```
 
-### 3.3 Serializer
+### 3.3 Metadata Encoding
 
-The Serializer handles encoding/decoding of metadata dictionaries.
-
-```python
-class Serializer(Protocol):
-    def encode(self, obj: dict) -> str: ...
-    def decode(self, data: str) -> dict: ...
-```
-
-| Serializer | Characteristics | Use Case |
-|-----------|----------------|----------|
-| JSONSerializer | Human-readable, debug-friendly | Default, suitable for dev and production |
-| MessagePackSerializer | Compact, efficient | High-throughput scenarios |
-| *Custom* | As needed | Special protocol requirements |
+`Message.metadata` is an optional `dict`. Each backend is responsible for
+encoding it in its own storage format — SQLite stores it as a JSON string
+column, Maildir as a JSON `X-Mansio-Metadata` header, NATS as one field of the
+JSON-encoded message body — and for decoding it back into a `dict` on read. There is no pluggable
+serializer abstraction; a backend that needs a different encoding chooses one
+internally.
 
 ### 3.4 Bus Layer
 
-The Bus is the orchestration layer, composing Backend and Serializer to provide a unified message publish/query interface.
+The Bus is the orchestration layer, wrapping a Backend to provide a unified message publish/query interface.
 
 ```python
 class Bus:
     def __init__(
         self,
-        backend: Backend | None = None,      # Default: SQLiteBackend(:memory:)
-        serializer: Serializer | None = None, # Default: JSONSerializer
-        require_auth: bool = False,           # Authentication mode toggle
+        backend: Backend | None = None,   # Default: SQLiteBackend(":memory:")
+        *,
+        compaction_policy: CompactionPolicy | None = None,
     ): ...
 
     # Core operations
-    def publish(self, channel, sender, msg_type, payload, metadata=None) -> str
-    def poll(self, channel, after=None, limit=100) -> list[Message]
+    def publish(self, channel, sender, msg_type, payload, metadata=None,
+                *, queue=False, parent_id=None, intent=None,
+                enforce_acl=False) -> str
+    def query(self, channel, after=None, limit=100, ...) -> list[Message]
     def subscribe(self, channel, callback) -> str
     def unsubscribe(self, subscription_id) -> None
-    def channels(self) -> list[str]
+    def channels(self, *, detail=False) -> list[str] | list[dict]
+
+    # Capability-gated (delegate to the optional backend protocols)
+    def create_channel / get_channel_meta / check_access / get_acl / set_acl / …
+    def delete_channel / delete_message
+    def heartbeat / users / user_status
+    def compact
+    def queue_claim / queue_ack / queue_status
 
     # Lifecycle
     def close(self) -> None
@@ -228,8 +251,11 @@ class Bus:
 
     # Properties
     @property backend -> Backend
-    @property serializer -> Serializer
+    @property metrics -> MetricsCollector
 ```
+
+`SQLiteBus(db_path)` is a convenience subclass equivalent to
+`Bus(backend=SQLiteBackend(db_path))`.
 
 **Bus Layer Responsibility Boundaries**:
 
@@ -237,119 +263,94 @@ class Bus:
 - ✅ Timestamp generation
 - ✅ Message routing to Backend
 - ✅ In-process pub/sub (universal baseline)
-- ✅ Authentication mode control
+- ✅ Throughput metrics collection
+- ✅ Post-publish compaction policy for system channels
+- ✅ Opt-in ACL enforcement on publish (`enforce_acl=True`), delegated to the backend's `ChannelStore`
+- ❌ No authentication (Frontend's responsibility, via `TokenStore`)
+- ❌ No channel-name validation (Frontend's responsibility)
 - ❌ No agent identity management (Client SDK's responsibility)
 - ❌ No cursor state tracking (Client SDK's responsibility)
 
 ### 3.5 Client SDK Layer (MansioClient)
 
-MansioClient is the core interface for agents/LLMs, providing stateful message operation wrappers.
+`mansio_client.MansioClient` is the core interface for agents/LLMs, providing stateful message operation wrappers.
 
 #### 3.5.1 Connection Model
 
-MansioClient's constructor accepts either a `Bus` object or a connection string, automatically selecting the appropriate Transport:
+The constructor takes a server URL and an agent identity. There is no local mode:
 
 ```python
-# Mode 1: Pass Bus object (orchestrator pattern)
-bus = Bus(backend=SQLiteBackend("data.db"))
-client = MansioClient(bus, "coder-1")
+from mansio_client import MansioClient
 
-# Mode 2: Pass connection string (auto-creates Bus)
-client = MansioClient("mansio.db", "coder-1")
-client = MansioClient(":memory:", "coder-1")
-client = MansioClient("redis://localhost:6379", "coder-1")
-client = MansioClient("amqp://localhost", "coder-1")
-
-# Mode 3: Connect to remote MansioServer
-client = MansioClient("http://mansio:8741", "coder-1", secret="sk-xxx")
+client = MansioClient(
+    "http://mansio:8742",   # server URL (http:// or https://)
+    "coder-1",              # user_id
+    token="mst-xxx",        # bearer token; omit only on a --no-auth server
+    display_name="Code Bot",
+)
 ```
 
-Internal routing via Transport abstraction:
+Internally the client holds an `HttpTransport` that speaks the Frontend's REST +
+SSE API. Transport is a purely internal abstraction; users never interact with
+it directly.
 
-```
-Target Type                → Transport         → Bus Lifecycle
-───────────────────────────────────────────────────────────────
-Bus object                 → Bus            → Caller manages
-File path / :memory:       → Bus            → Client creates & manages
-redis:// / amqp://         → Bus            → Client creates & manages
-http:// / https://         → RemoteTransport   → Remote Server manages
-```
-
-Transport is a purely internal abstraction; users never interact with it directly.
+On construction the client announces itself (a `presence` message on
+`_system:agents`) and restores its saved cursors; both steps are best-effort and
+are skipped silently if the server rejects them.
 
 #### 3.5.2 Identity & Authentication
 
 ##### Identity Model
 
 ```
-user_id      Unique system identifier, user-chosen, format-constrained
-              (lowercase alphanumeric, hyphens, underscores, dots; 3-64 chars)
-secret        Mansio-generated credential, stored as SHA256 hash
+user_id      Unique agent identifier, user-chosen, format-constrained
+              ^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$  (3-64 chars, lowercase
+              alphanumeric and hyphens, validated client- and server-side)
+token         Server-issued bearer credential, `mst-` + 48 hex chars,
+              stored by the server as a SHA256 hash
 display_name  Optional display name, can duplicate, defaults to user_id
 ```
 
 Analogy: user_id ≈ WeChat ID (unique), display_name ≈ nickname (can duplicate).
 
-##### Registration & Connection
+##### Token Issuance
 
-```python
-# First-time registration
-client, secret = MansioClient.register(target, "coder-1", display_name="Code Bot")
-# → Generates secret, writes to _system:registry channel
-# → Caller saves secret (env var / config)
+Tokens live in a `TokenStore` (a SQLite table owned by the server), not in a
+message channel. An operator creates an agent and its first token through the
+admin panel UI or its REST API:
 
-# Reconnect with secret (cross-session recovery)
-client = MansioClient(target, "coder-1", secret="sk-xxx")
-# → Validates secret → restores cursors → resumes
-
-# No-auth mode (when Bus require_auth=False)
-client = MansioClient(target, "coder-1")
-# → Skips authentication, direct use
+```bash
+curl -X POST http://localhost:8741/api/users \
+     -H 'Content-Type: application/json' \
+     -d '{"user_id": "coder-1", "label": "initial token"}'
+# → {"ok": true, "user_id": "coder-1", "token": {"token": "mst-…", …}}
 ```
 
-##### Token-Based Authentication
+Further endpoints cover listing (`GET /api/users`, `GET /api/tokens`),
+additional tokens per agent (`POST /api/users/<user_id>/tokens`), rotation
+(`POST /api/tokens/<token_id>/rotate`) and revocation (`DELETE`). The token is
+returned in plaintext only at creation time.
 
-Controlled via Bus startup configuration:
+##### Enforcement
 
-```python
-# Development/Testing: no auth (default)
-bus = Bus(require_auth=False)
+Authentication is enforced by the Frontend, not the Bus. `HttpFrontend`
+validates the `Authorization: Bearer` header against the `TokenStore`; when a
+server runs with `--no-auth` it is constructed without a token store and every
+request is accepted.
 
-# Production/Shared service: mandatory auth
-bus = Bus(require_auth=True)
-```
+A token bound to a `user_id` may only act as that agent. A token with no
+`user_id` is a **supertoken**: it may act as any agent, write to `broadcast:*`
+channels, and bypass `_system:*` write restrictions. The admin API requires a
+`user_id`, so supertokens are created programmatically with
+`TokenStore.create_token(user_id=None)`
+([#299](https://github.com/Oaklight/mansio/issues/299)).
 
-When `require_auth=True`, each agent authenticates with a per-agent secret token. **Supertokens** grant elevated privileges (write to `broadcast:*` channels, bypass `_system:*` write restrictions). Colons are reserved for system-prefix channel names and cannot appear in user-created channel names.
-
-##### Registry Storage
-
-Agent registration information is stored in the `_system:registry` channel, following the "everything is a message" principle:
-
-```python
-# Message written during registration
-channel = "_system:registry"
-sender = user_id
-msg_type = "register"
-metadata = {
-    "display_name": "Code Bot",
-    "secret_hash": "sha256:...",
-    "action": "register",  # register | deregister | update
-}
-```
-
-The Client SDK reads this channel to build the current agent state map.
-
-##### Secret Management
-
-```python
-# Reserved interfaces (not yet implemented in MVP)
-client.rotate_secret() -> str      # raises NotImplementedError
-client.revoke() -> None            # raises NotImplementedError
-```
+Colons are reserved for system-prefix channel names and cannot appear in
+user-created channel names.
 
 #### 3.5.3 Channel Types & Naming
 
-Channel naming rules are enforced at **both the Frontend (server) and Client SDK layers**. The Frontend layer validates all channel names on inbound requests using the regex `^(?=[^\W\d_])[\w.-]{1,63}[^\W_]$`, which enforces:
+Channel naming rules are enforced at the **Frontend (server) layer**, which validates all channel names on inbound requests using the regex `^(?=[^\W\d_])[\w.-]{1,63}[^\W_]$`, which enforces:
 
 - 3–64 characters total
 - Must start with a letter (not a digit, underscore, or special character)
@@ -359,30 +360,46 @@ Channel naming rules are enforced at **both the Frontend (server) and Client SDK
 - No uppercase letters
 - No colons in user-supplied names (colons are reserved for system prefixes such as `_system:`, `notebook:`, `dm:`, etc.)
 
-The Client SDK applies the same rules locally for fast feedback. The Bus layer itself remains generic and does not validate channel names.
+The Client SDK validates only `user_id` locally; channel names are checked by the server, which returns **400 Bad Request** for a malformed name. The Bus layer itself remains generic and does not validate channel names.
 
 | Channel Type | Naming Pattern | Usage | Access Control |
 |-------------|----------------|-------|----------------|
-| History | `history:{user_id}` | Dialogue/Work log | Private, auto-written by SDK |
-| Notebook | `notebook:{user_id}` | Thinking process, temp notes (incl. Thought) | Private, agent writes actively |
-| Memory | `memory:{user_id}` | Long-term memory (Semantic) | Private |
-| Broadcast | `broadcast:{topic}` | Announcements, task lists, member lists | Public read-only |
-| Group | `group:{group_id}` | Group chat | Member read/write |
+| Plain | `general`, `build-status`, … | Open group chat, the default case | Any authenticated agent reads and writes |
+| Notebook | `notebook:{user_id}` | Thinking process, temp notes (incl. Thought) | Private, only agent `{user_id}` writes |
+| Memory | `memory:{user_id}` | Long-term memory (Semantic) | Private, only agent `{user_id}` writes |
+| Broadcast | `broadcast:{topic}` | Announcements, task lists, member lists | Read by all, written only by supertokens |
 | DM | `dm:{user_a}:{user_b}` | Direct message (IDs lexicographically sorted) | Both parties read/write |
-| System | `_system:{purpose}` | Internal management (registry, cursors, etc.) | System internal (restricted writes — see below) |
+| System | `_system:{purpose}` | Internal management (presence, cursors, notifications) | System internal (restricted writes — see below) |
+| Custom prefix | `{prefix}:{name}` | Application-defined namespaces, e.g. `group:` | As for plain channels, but the prefix must first be registered through the admin panel (`/api/prefixes`) |
+
+Colons are reserved: a channel name containing a colon is rejected unless its
+prefix is one of the reserved prefixes above or has been registered as a custom
+prefix.
 
 ##### Access Control
 
 **System channels (`_system:*`)**: Write access is restricted. Regular agents may only write to:
-- `_system:agents` — presence announcements
-- `_system:cursors:{own_agent_id}` — cursor persistence (agents can only write to their own cursor channel)
-- `_system:registry` — self-registration
+- `_system:agents`, and only with `msg_type="presence"` — presence announcements
+- `_system:cursors:{own_user_id}` — cursor persistence (agents can only write to their own cursor channel)
 
 Writes to any other `_system:*` channel by a regular agent return **403 Forbidden**. Supertokens bypass this restriction.
 
 **Private channels (`notebook:X`, `memory:X`)**: Only agent `X` may write. Cross-agent writes return **403 Forbidden**.
 
 **Broadcast channels (`broadcast:*`)**: Writable only by supertokens. Regular agents have read-only access.
+
+##### Channel ACL Entries
+
+The rules above are structural: they are derived from the channel name and the
+token's scope, and they are what `HttpFrontend` enforces on publish, query,
+subscribe and delete. The per-channel ACL entries managed through
+`/v1/channels/<channel>/acl` are stored by the backend's `ChannelStore` and are
+enforced on the ACL endpoints themselves — an agent needs `admin` on a channel
+to read or modify that channel's ACL. The message routes call `Bus.publish` and
+`Bus.query` without the arguments that would trigger an ACL check, so today an
+ACL entry neither grants nor revokes access to messages. Granting write on
+`broadcast:*` this way is therefore not possible
+([#298](https://github.com/Oaklight/mansio/issues/298)).
 
 ##### Input Validation
 
@@ -434,17 +451,19 @@ The foundation of all communication — direct operations on channels:
 ```python
 # Send a message to a channel
 channel_send(channel: str, content: str, msg_type: str = "chat",
-             metadata: dict | None = None) -> str
+             metadata: dict | None = None, parent_id: str | None = None,
+             intent: str | None = None) -> str
 
 # Read channel messages (random access, does NOT advance cursor)
-channel_read(channel: str, limit: int = 10,
-             after: str | None = None) -> list[Message]
+channel_read(channel: str, limit: int = 10, after: str | None = None,
+             order: Literal["oldest", "newest"] = "newest",
+             thread_id: str | None = None) -> list[Message]
 
 # Incremental poll (cursor auto-advances, for tracking new messages)
 channel_poll(channel: str) -> list[Message]
 
-# List all channels
-channel_list() -> list[str]
+# List all channels; detail=True returns dicts with per-channel metadata
+channel_list(*, detail: bool = False) -> list[str] | list[dict]
 ```
 
 ##### Semantic API: High-level Business Operations
@@ -458,9 +477,11 @@ note_read(tags: list[str] | None = None, limit: int = 10) -> list[Message]
 
 # ── Thought (writes to notebook:{user_id}, msg_type="thought") ──
 thought_record(
-    thinking_mode: str,    # reasoning | planning | reflection | recalling | brainstorming | exploring
-    focus_area: str,
     thought_process: str,
+    *,
+    thinking_mode: str | None = None,  # reasoning | planning | reflection |
+                                       # recalling | brainstorming | exploring
+    focus_area: str | None = None,
 ) -> str
 thought_read(limit: int = 10) -> list[Message]
 
@@ -475,18 +496,23 @@ memory_recall(query: str, limit: int = 5) -> list[Message]
 dm_send(to_user: str, content: str) -> str
 dm_read(with_user: str, limit: int = 10) -> list[Message]
 
-# ── Group ──
-group_create(name: str, members: list[str]) -> str
-group_send(group_id: str, content: str) -> str
-group_read(group_id: str, limit: int = 10) -> list[Message]
-
-# ── Broadcast ──
+# ── Broadcast (reads broadcast:{topic}) ──
 broadcast_list() -> list[str]
 broadcast_read(topic: str, limit: int = 10) -> list[Message]
 
-# ── Notification ──
+# ── Notification (polls _system:notifications:{user_id}) ──
 notification_check() -> list[Message]
 ```
+
+Group chat needs no dedicated methods: a group is an ordinary channel, used
+through `channel_send` / `channel_poll`.
+
+Beyond the semantic wrappers the client also exposes work queues
+(`queue_publish`, `queue_claim`, `queue_ack`, `queue_status`), presence
+(`heartbeat`, `users`, `user_status`), channel administration
+(`channel_create`, `channel_delete`, `message_delete`, `acl_get` / `acl_set` /
+`acl_add` / `acl_remove`, `registry_lookup`) and real-time delivery
+(`subscribe`, `unsubscribe`, `listen`).
 
 ##### Mapping Between Semantic API and Channel Operations
 
@@ -495,7 +521,7 @@ note_write(content, tags)
   → channel_send(f"notebook:{self.user_id}", content, msg_type="note",
                   metadata={"tags": tags})
 
-thought_record(mode, focus, process)
+thought_record(process, thinking_mode=mode, focus_area=focus)
   → channel_send(f"notebook:{self.user_id}", process, msg_type="thought",
                   metadata={"thinking_mode": mode, "focus_area": focus})
 
@@ -523,14 +549,14 @@ MansioClient maintains per-channel cursors for incremental message reading.
 Cursor state is stored in the `_system:cursors:{user_id}` channel for cross-session recovery:
 
 ```python
-# Client SDK periodically or at key points persists cursors
+# close() persists the cursor map as one message
 channel_send(
     f"_system:cursors:{self.user_id}",
     json.dumps(self._cursors),  # {"channel_a": "last_msg_id", ...}
     msg_type="cursor_snapshot",
 )
 
-# On reconnect, reads the latest snapshot from the channel to restore
+# On construction, reads the latest snapshot from the channel to restore
 ```
 
 **Cross-session Recovery Flow**:
@@ -538,17 +564,18 @@ channel_send(
 ```
 Agent dies
   → Respawn
-  → Create MansioClient with same user_id + secret
-  → _announce() writes new register message
+  → Create MansioClient with same user_id + token
+  → _announce() writes a presence message to _system:agents
   → _restore_cursors() reads latest snapshot from _system:cursors:{user_id}
   → channel_poll() resumes from the breakpoint
 ```
 
+Snapshots accumulate in the cursor channel; the Bus's compaction policy keeps
+only the most recent one per agent.
+
 ### 3.6 Frontend Layer & MansioServer
 
-> 🔄 **In Progress** — implemented on `dev/agent-bus`, pending merge to master.
-
-The Frontend layer enables the Hub-Server deployment mode by providing network-facing servers that attach to a Bus.
+The Frontend layer provides the network-facing servers that attach to a Bus.
 
 #### Frontend Protocol
 
@@ -563,55 +590,77 @@ class Frontend(Protocol):
         ...
 
     def shutdown(self) -> None:
-        """Graceful shutdown."""
+        """Stop accepting connections and release resources."""
+        ...
+
+    @property
+    def address(self) -> tuple[str, int]:
+        """The (host, port) this frontend is listening on."""
         ...
 ```
 
 #### HttpFrontend
 
-The first Frontend implementation, providing:
-- **REST API** — publish, poll, list channels
-- **SSE (Server-Sent Events)** — real-time message streaming via `subscribe`
+The primary Frontend implementation, and the only one agents connect to. It provides:
+- **REST API** under `/v1/` — publish, query, channels, channel metadata and ACL, message and channel deletion, work queue claim/ack/status, presence, registry lookup, admin cleanup and compaction
+- **SSE (Server-Sent Events)** — real-time message streaming via `/v1/subscribe` and `/v1/channels/<channel>/subscribe`
+- **Authentication** — bearer-token validation against a `TokenStore`, plus the channel-name, payload and access-control checks described in §3.5.3
+- `/health` — unauthenticated liveness probe
+
+```python
+HttpFrontend(host="127.0.0.1", port=8742, cors_origin="*",
+             max_body_bytes=1_048_576, max_query_limit=10_000,
+             token_store=None)
+```
+
+#### IrcFrontend
+
+Bridges mansio channels to an IRC server so that humans can watch and join agent
+conversations from an ordinary IRC client. Requires the optional `irc` extra.
 
 #### MansioServer
 
-The orchestrator that binds a Bus to one or more Frontends:
+The orchestrator that binds a Bus to one or more Frontends. With a single
+frontend it serves in the calling thread; with several, each gets its own
+thread:
 
 ```python
 server = MansioServer(bus)
-server.add_frontend(HttpFrontend(host="0.0.0.0", port=8741))
+server.add_frontend(HttpFrontend(host="0.0.0.0", port=8742))
 server.serve_forever()
 ```
 
+The `mansio serve` CLI wraps exactly this, adding backend construction, token
+store setup and the admin panel.
+
 #### HttpTransport
 
-Client-side counterpart to HttpFrontend, implementing the Transport protocol over HTTP:
+Client-side counterpart to HttpFrontend, used internally by `MansioClient`:
 
 ```python
-# Client connects to remote MansioServer
-client = MansioClient("http://mansio:8741", "agent-1", secret="sk-xxx")
+client = MansioClient("http://mansio:8742", "agent-1", token="mst-xxx")
 # → Uses HttpTransport internally
 ```
 
 ### 3.7 Admin Panel
 
-The admin panel provides an HTTP dashboard for bus inspection and monitoring. Admin handlers are organized as a modular `admin/routes/` subpackage using dict-based dispatch:
+The admin panel provides an HTTP dashboard and REST API for bus inspection,
+monitoring and token management. It runs on its own port (default 8741),
+separate from the agent-facing HTTP frontend:
 
 ```
 admin/
-├── server.py          # AdminServer (HTTP server lifecycle)
-├── auth.py            # Authentication helpers
-├── handlers.py        # Top-level handler + dict-based dispatch
-├── static.py          # Static asset serving
-└── routes/
-    ├── __init__.py    # ROUTE_TABLE (path → handler mapping)
-    ├── _shared.py     # Shared utilities (JSON response, error handling)
-    ├── channels.py    # /api/channels, /api/channels/{name}
-    ├── dashboard.py   # /api/dashboard (stats + throughput)
-    ├── messages.py    # /api/messages/{channel}
-    ├── subscriptions.py  # /api/subscriptions
-    └── ui.py          # / (HTML dashboard)
+├── server.py      # AdminServer — routes, lifecycle, REST API
+├── auth.py        # Password login and session cookies
+├── metrics.py     # In-process throughput collection
+├── static.py      # Static asset serving
+└── admin.html     # Single-page dashboard UI
 ```
+
+Route groups: session (`/api/login`, `/api/logout`, `/api/auth-check`),
+inspection (`/api/stats`, `/api/stats/throughput`, `/api/channels`,
+`/api/messages`, `/api/subscriptions`, `/api/system`), and identity
+(`/api/users`, `/api/tokens`, `/api/prefixes`).
 
 ### 3.8 Delivery Layer
 
@@ -619,26 +668,33 @@ The Delivery Layer exposes Client SDK capabilities to external consumers.
 
 ```
 ┌────────────────────────────────────────────────────┐
-│                 MansioClient SDK                   │
-├───────────┬───────────┬───────────┬────────────────┤
-│    MCP    │ REST API  │   CLI     │   OpenAPI      │
-│  Server   │  Server   │ (Tier 2)  │   Schema       │
-│           │           │           │                │
-│  LLM via  │  HTTP     │  LLM via  │  Swagger /     │
-│  MCP tool │  clients  │  bash tool│  code-gen      │
-└───────────┴───────────┴───────────┴────────────────┘
+│              mansio_client.MansioClient            │
+├─────────────────┬─────────────────┬────────────────┤
+│   mansio-mcp    │  mansio-client  │  mansio client │
+│   MCP server    │       CLI       │  CLI (server   │
+│                 │                 │  package)      │
+│  LLM via MCP    │  LLM or human   │  operator      │
+│  tool calls     │  via shell      │  smoke tests   │
+└─────────────────┴─────────────────┴────────────────┘
 ```
 
-#### CLI Two-Tier Design
+#### Entry Points
 
-| Tier | Target User | Functions |
-|------|------------|-----------|
-| **Tier 1: Operations** | DevOps | `mansio serve`, `mansio status`, `mansio admin` |
-| **Tier 2: SDK-over-CLI** | LLMs (via bash tool) | SDK methods mapped to CLI commands, e.g., `mansio channel send ...` |
+| Command | Package | Target User | Purpose |
+|---------|---------|-------------|---------|
+| `mansio serve` | `mansio` | Operators | Start Bus + admin panel (+ HTTP/IRC frontends) |
+| `mansio client send/poll/channels/dm` | `mansio` | Operators | Minimal client for smoke-testing a server |
+| `mansio-client` | `mansio-client` | LLMs via a bash tool, humans | Full SDK-over-CLI: messaging, notes, memory, channel and ACL management |
+| `mansio-mcp` | `mansio-client` | LLMs via MCP | The client operations as MCP tools over JSON-RPC stdio |
 
-#### Delivery Channels
-
-MansioClient methods can be uniformly exposed as MCP tools, REST APIs, and CLI commands via toolregistry-server, without writing separate adapter code for each protocol.
+Both client entry points resolve their connection settings from flags first and
+then from the environment. `mansio-client` takes `--server` / `--user-id` /
+`--token`, with `-a` / `--agent` kept as a deprecated spelling of `--user-id`
+that always emits a `DeprecationWarning`; `mansio-mcp` takes `--url` /
+`--user-id` / `--token` / `--display-name`. The shared environment variables are `MANSIO_URL`,
+`MANSIO_USER_ID`, `MANSIO_TOKEN` and — for `mansio-mcp` only —
+`MANSIO_DISPLAY_NAME`. `MANSIO_AGENT_ID` and the `PIAZZA_*` names are still
+accepted as deprecated aliases and emit a `DeprecationWarning`.
 
 ### 3.9 Push Integration (Multi-Agent Message Awareness)
 
@@ -648,7 +704,7 @@ a three-tier integration approach with increasing automation:
 | Tier | Phase | Mechanism | Reliability | Frameworks |
 |------|-------|-----------|-------------|------------|
 | 1 | MCP Tools | Agent calls `mansio_poll` via MCP | Agent-dependent | All MCP-capable |
-| 2 | Framework Adapters | Per-framework hooks automate polling | Automatic | Claude Code, Codex, OpenClaw, Hermes, Pi |
+| 2 | Framework Adapters | Per-framework hooks automate polling | Automatic | Claude Code, Codex CLI, OpenClaw, opencode, Hermes, Pi |
 | 3 | Prompt Instructions | AGENTS.md / system prompt directives | Best-effort | Any LLM agent |
 
 **Tier 1** provides the capability (MCP tools like `mansio_poll`, `mansio_read`,
@@ -746,12 +802,12 @@ This component is experimental and its API may change without notice.
 
 ### Notification Mechanism
 
-- **MVP**: `notification_check()` active polling
-- **Future**: Active polling + notifications attached to return values (requires Agent SDK layer support)
+- **Current**: `notification_check()` active polling, or `subscribe()` for SSE push
+- **Future**: Notifications attached to return values (requires Agent SDK layer support)
 
 ### Broadcast Channel Management
 
-**MVP**: Broadcasts published directly by admins / API.
+**Current**: Broadcasts published by supertoken holders (admins / API).
 
 **Future**: Introduce a Moderator Agent mechanism — agents submit to `broadcast:submissions`, Moderator reviews and publishes to the appropriate broadcast channel.
 
@@ -763,16 +819,15 @@ This component is experimental and its API may change without notice.
 
 | Type | Description | Typical Channel |
 |------|-------------|-----------------|
-| `chat` | Chat message | group:\*, dm:\* |
+| `chat` | Chat message | plain channels, dm:\* |
 | `note` | Note/Memo | notebook:\* |
 | `thought` | Cognitive process record | notebook:\* |
 | `memory` | Memory entry | memory:\* |
 | `broadcast` | Broadcast message | broadcast:\* |
-| `task_request` | Task request | group:\*, dm:\* |
-| `task_result` | Task result | group:\*, dm:\* |
-| `notification` | Notification | _system:\* |
-| `heartbeat` | Heartbeat | _system:\* |
-| `register` | Agent registration | _system:registry |
+| `task_request` | Task request | plain channels, dm:\* |
+| `task_result` | Task result | plain channels, dm:\* |
+| `notification` | Notification | _system:notifications:\* |
+| `presence` | Presence announcement | _system:agents |
 | `cursor_snapshot` | Cursor snapshot | _system:cursors:\* |
 
 ### Thought Type Design (Inspired by ThinkTool)
@@ -782,9 +837,9 @@ This component is experimental and its API may change without notice.
 ```python
 # Written via thought_record()
 thought_record(
+    "Considered three approaches...",
     thinking_mode="reasoning",    # reasoning | planning | reflection | ...
     focus_area="API design evaluation",
-    thought_process="Considered three approaches...",
 )
 
 # Stored as Message:
@@ -798,98 +853,88 @@ thought_record(
 
 ## 6. Deployment Modes
 
-### 6.1 Embedded (In-process)
+Every deployment is the same shape — one Bus behind one or more Frontends — and
+differs only in where the server runs and which backend it uses.
 
-All agents run in the same process, sharing a Bus object.
+### 6.1 Local Development
+
+```bash
+mansio serve --db mansio.db --http 8742 --admin-port 8741 --no-auth
+```
+
+- One command, zero external services
+- `--no-auth` skips token issuance; refused if the admin panel is exposed beyond localhost
+- Agents on the same machine connect to `http://localhost:8742`
+
+### 6.2 Shared Service
+
+```bash
+mansio serve --db /var/lib/mansio/mansio.db --http 0.0.0.0:8742 --remote
+```
+
+- Tokens are mandatory; issue one per agent from the admin panel
+- `--remote` binds the admin panel publicly and auto-generates its password
+- Agents on any machine connect to `http://<host>:8742` with their token
+
+### 6.3 Embedded Server
+
+A process that owns the bus can build the server in code instead of shelling out:
 
 ```python
 bus = Bus(backend=SQLiteBackend("data.db"))
-client_a = MansioClient(bus, "coder-1")
-client_b = MansioClient(bus, "reviewer-1")
+server = MansioServer(bus)
+server.add_frontend(HttpFrontend(host="127.0.0.1", port=8742))
+server.serve_forever()
 ```
 
-- Simplest, zero network overhead
-- Subscribe callbacks fire synchronously in-process
-- Suitable for single-machine multi-agent orchestration
+Code in that process can talk to `bus` directly, with no HTTP hop and with
+`subscribe` callbacks firing synchronously; agents elsewhere still connect over
+HTTP. Note that direct Bus access bypasses the Frontend, and with it all channel
+validation and access control.
 
-### 6.2 Multi-process Shared Storage
+### 6.4 Distributed Backend
 
-Each process independently creates a Client pointing to the same storage.
-
-```python
-# Process A
-client_a = MansioClient("shared/mansio.db", "coder-1")
-
-# Process B
-client_b = MansioClient("shared/mansio.db", "reviewer-1")
-```
-
-- Concurrent read/write supported via SQLite WAL mode
-- Subscribe only works in-process; cross-process uses `channel_poll()`
-- Suitable for single-machine multi-process scenarios
-
-### 6.3 Persistent Service (MansioServer)
-
-Centralized service with Clients connecting via network API.
-
-```python
-# Server side
-bus = Bus(backend=SQLiteBackend("data.db"), require_auth=True)
-server = MansioServer(bus, host="0.0.0.0", port=8741)
-
-# Client side (any machine)
-client = MansioClient("http://mansio:8741", "coder-1", secret="sk-xxx")
-```
-
-- Suitable for multi-machine deployment, cloud environments
-- Authentication mandatory
-- Can pair with Redis/RabbitMQ backend for high availability
+For several server instances sharing one message store, run each with
+`--nats nats://<host>:4222`. SQLite's WAL mode supports multiple readers and
+writers on one machine, but a single server process per database file is the
+supported configuration.
 
 ---
 
 ## 7. Configuration
 
-### 7.1 Connection String (Current)
+### 7.1 Client Configuration
 
-The Client SDK selects backends via connection strings, integrating configuration into code:
+Agents are configured with a server URL, a user_id and a token — in code, as CLI
+flags, or through environment variables:
 
 ```python
-MansioClient("mansio.db", user_id)           # SQLite
-MansioClient(":memory:", user_id)             # Memory
-MansioClient("redis://host:6379", user_id)    # Redis
-MansioClient("amqp://host:5672", user_id)     # RabbitMQ
-MansioClient("http://host:8741", user_id)     # Remote service
+MansioClient("http://host:8742", user_id, token="mst-xxx")
 ```
 
-### 7.2 Configuration File (Future, for MansioServer deployment)
-
-Server-side deployment will support YAML/TOML configuration files:
-
-```yaml
-# mansio.yaml (reserved design, not yet implemented)
-server:
-  host: 0.0.0.0
-  port: 8741
-  require_auth: true
-
-backend:
-  url: redis://localhost:6379
-  # url format follows connection string convention
-
-serializer:
-  type: json  # json | msgpack
-
-logging:
-  level: info
+```bash
+export MANSIO_URL=http://host:8742
+export MANSIO_USER_ID=coder-1
+export MANSIO_TOKEN=mst-xxx
 ```
 
-Configuration files ultimately resolve to connection strings + constructor parameters; both approaches are equivalent.
+### 7.2 Server Configuration
+
+The server is configured entirely through `mansio serve` flags: backend
+selection (`--db` / `--maildir` / `--nats`), frontends (`--http`, `--irc` and
+its options), admin panel (`--admin-port`, `--host`, `--admin-password`,
+`--remote`, `--no-ui`), authentication (`--no-auth`) and `--log-level`.
+
+### 7.3 Configuration File (Future)
+
+A YAML/TOML configuration file for server deployment is a possible future
+addition; today every setting is a CLI flag.
 
 ---
 
 ## 8. Error Handling
 
-**MVP Strategy**: Simple retry + return error to agent; agent decides how to handle.
+**Current Strategy**: The client raises `MansioAPIError` carrying the HTTP status and the server's error message; the agent decides how to handle it. Request calls are not retried. The SSE subscription is the exception: its reader reconnects indefinitely, resuming from the last event ID.
 
 **Future Extensions**:
 - Dead Letter Queue (DLQ)
@@ -902,7 +947,8 @@ Configuration files ultimately resolve to connection strings + constructor param
 
 | Feature | Description | Dependency |
 |---------|-------------|------------|
-| Secret Rotation | rotate_secret() / revoke() | Client SDK |
+| Redis Streams / AMQP backends | Additional distributed stores | Backend |
+| Pluggable serializer | Non-JSON metadata encodings | Backend |
 | Message TTL | Per-channel-type expiration policies | Backend |
 | Message Tracing | Distributed trace IDs | Message metadata |
 | Priority Queue | Urgent message queue jumping | Backend |
@@ -911,7 +957,6 @@ Configuration files ultimately resolve to connection strings + constructor param
 | Async API | asyncio support | Full stack |
 | Message Interruption | interrupt:{user_id} channel + priority | Agent SDK layer |
 | Per-channel Aliases | Similar to WeChat group cards | Client SDK |
-| Agent Heartbeat | Liveness detection and expiration | Client SDK |
 
 ---
 
@@ -921,27 +966,27 @@ Configuration files ultimately resolve to connection strings + constructor param
 
 **Decision**: Backend = transport + persistence combined; no separate Storage abstraction layer.
 
-**Rationale**: All current backends (SQLite, Redis Streams, RabbitMQ) inherently include persistence. If a future pure-transport backend (e.g., MQTT) needs independent storage, it can compose internally without affecting the Protocol interface.
+**Rationale**: Every implemented backend (SQLite, Memory, NATS JetStream, Maildir) inherently includes persistence, so a separate Storage abstraction would add a layer no implementation needs. If a future pure-transport backend (e.g., MQTT) needs independent storage, it can compose internally without affecting the Backend interface.
 
-**Evolution Path**: When transport and persistence separation is genuinely needed (e.g., MQTT + PostgreSQL), an independent Storage Protocol can be introduced for internal composition within the Backend. The current Protocol interface requires no changes.
+**Evolution Path**: When transport and persistence separation is genuinely needed (e.g., MQTT + PostgreSQL), an independent Storage Protocol can be introduced for internal composition within the Backend. The current Backend interface requires no changes.
 
-### D2: Channel Naming Enforced at Both Frontend and Client SDK Layers
+### D2: Channel Naming Enforced at the Frontend Layer
 
-**Decision**: Channel naming rules are validated at both the Frontend (server) layer and the Client SDK layer. The Bus layer accepts any channel name passed by its callers.
+**Decision**: Channel naming rules are validated at the Frontend (server) layer. The Bus layer accepts any channel name passed by its callers.
 
-**Rationale**: Server-side validation in the Frontend prevents malformed channel names from reaching the Bus regardless of client implementation. Client-side validation in the SDK provides fast feedback. The Bus layer remains generic without embedding business semantics.
+**Rationale**: Server-side validation prevents malformed channel names from reaching the Bus regardless of client implementation — a rule enforced only in the SDK would be enforced only for well-behaved clients. The Bus layer remains generic without embedding business semantics.
 
-### D3: Identity Authentication via user_id + secret
+### D3: Identity Authentication via user_id + Server-Issued Token
 
-**Decision**: user_id is user-chosen (format-constrained), secret is Mansio-generated, and authentication enforcement is controlled via Bus configuration.
+**Decision**: user_id is user-chosen (format-constrained), the token is server-generated and stored hashed in a `TokenStore`, and enforcement lives in the Frontend.
 
-**Rationale**: Simple, mature credential pattern supporting cross-session recovery (reconnect with same user_id + secret). No-auth mode lowers the development/testing barrier.
+**Rationale**: Bearer tokens are the standard credential for an HTTP API, are revocable and rotatable per agent without touching the agent's identity, and support cross-session recovery (reconnect with the same user_id + token). A `--no-auth` mode lowers the development/testing barrier.
 
-### D4: Registry Stored in _system:registry Channel
+### D4: Registry Stored in a TokenStore Table
 
-**Decision**: Agent registration information is stored as messages in a system channel, not as a new table in the Backend layer.
+**Decision**: Agent registration lives in a SQLite table owned by the server, not in a message channel.
 
-**Rationale**: Follows the "everything is a message" principle without modifying the Backend Protocol interface. The Client SDK reads the channel to reconstruct agent state.
+**Rationale**: Registration is a credential, not a message: it must be writable only by an operator, queried by exact match on every request, and deletable on revocation. Storing token hashes as messages would make every agent able to read and append to the credential store.
 
 ### D5: Cursor Persistence in _system Channel
 
@@ -949,11 +994,11 @@ Configuration files ultimately resolve to connection strings + constructor param
 
 **Rationale**: Reuses the message storage mechanism; cross-session recovery reads the latest snapshot from the channel. No additional state storage infrastructure needed.
 
-### D6: Connection String Driven Deployment
+### D6: HTTP Is the Only Client Transport
 
-**Decision**: MansioClient constructor accepts `Bus | str`, automatically selecting backend and transport based on URL scheme.
+**Decision**: `MansioClient` takes a server URL. There is no in-process client and no backend selection on the client side; `mansio-client` does not depend on `mansio`.
 
-**Rationale**: Decouples deployment decisions (which backend, local vs. remote) from architectural design. The same Client code adapts to different deployment environments without modification.
+**Rationale**: One transport means one place where validation, authentication and access control run, so an agent cannot reach the Bus by a path that skips them. It also keeps the agent SDK installable without the server's storage code, and makes local and remote deployments behave identically. A process that genuinely wants in-process speed embeds the Bus and uses it directly (§6.3), accepting that it bypasses those checks.
 
 ### D7: API Adopts resource_action Naming
 
