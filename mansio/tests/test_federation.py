@@ -11,10 +11,14 @@ Verifies:
 - replicating property reports active channels
 - Invalid mode raises ValueError
 - Duplicate replication raises ValueError
+- Delivery gaps (#273): messages published while the target is
+  unreachable, or while no bridge is running at all, are replicated
+  once the bridge can reach both sides again
 """
 
 from __future__ import annotations
 
+import socket
 import threading
 import time
 
@@ -362,3 +366,143 @@ class TestProperties:
 
         client_a.close()
         client_b.close()
+
+
+# ── Delivery Gap Tests (#273) ─────────────────────────────────
+
+
+def _free_port() -> int:
+    """Reserve and release a high-numbered port, returning its number.
+
+    Tests that restart a server need a port they can rebind, so the
+    port is chosen explicitly rather than by binding to 0.
+    """
+    while True:
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        if port > 19000:
+            return port
+
+
+def _start_server_on(port: int, bus: Bus | None = None):
+    """Start a MansioServer on *port*, reusing *bus* if given."""
+    bus = bus if bus is not None else Bus(backend=MemoryBackend())
+    frontend = HttpFrontend(host="127.0.0.1", port=port)
+    server = MansioServer(bus)
+    server.add_frontend(frontend)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    time.sleep(0.3)
+    return server, bus
+
+
+def _wait_for_payload(client: MansioClient, channel: str, payload: str, timeout: float):
+    """Poll *channel* until *payload* shows up, or *timeout* elapses."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        msgs = client.channel_read(channel, limit=100)
+        found = [m for m in msgs if m.payload == payload]
+        if found:
+            return found
+        time.sleep(0.25)
+    return []
+
+
+def _fast_link(client_a: MansioClient, client_b: MansioClient) -> FederationLink:
+    """A link whose retry and poll delays are short enough for tests."""
+    return FederationLink(
+        client_a,
+        client_b,
+        local_instance="instance-a",
+        remote_instance="instance-b",
+        poll_interval=1.0,
+        retry_backoff=0.25,
+        max_retry_backoff=1.0,
+    )
+
+
+class TestDeliveryGaps:
+    """Messages must survive an unreachable target or an absent bridge."""
+
+    def test_message_published_while_target_down_is_delivered(self) -> None:
+        """Publishing during a target outage must not lose the message."""
+        port_a, port_b = _free_port(), _free_port()
+        server_a, _ = _start_server_on(port_a)
+        server_b, bus_b = _start_server_on(port_b)
+        client_a = MansioClient(f"http://127.0.0.1:{port_a}", "agent-a")
+        client_b = MansioClient(f"http://127.0.0.1:{port_b}", "agent-b")
+        link = _fast_link(client_a, client_b)
+        server_b_restarted = None
+        try:
+            link.replicate(["outage"], mode="push")
+            time.sleep(0.5)
+
+            server_b.shutdown()
+            time.sleep(0.5)
+
+            client_a.channel_send("outage", "sent during outage")
+            time.sleep(1.0)
+
+            server_b_restarted, _ = _start_server_on(port_b, bus=bus_b)
+
+            found = _wait_for_payload(client_b, "outage", "sent during outage", 20.0)
+            assert len(found) == 1
+            assert found[0].metadata["bridged"] is True
+            assert found[0].metadata["source_instance"] == "instance-a"
+        finally:
+            link.close()
+            client_a.close()
+            client_b.close()
+            server_a.shutdown()
+            (server_b_restarted or server_b).shutdown()
+
+    def test_message_published_before_bridge_starts_is_delivered(self) -> None:
+        """A bridge started after the fact must backfill what it missed."""
+        url_a, server_a = _start_server()
+        url_b, server_b = _start_server()
+        client_a = MansioClient(url_a, "agent-a")
+        client_b = MansioClient(url_b, "agent-b")
+        client_a.channel_send("backfill", "sent before the bridge existed")
+
+        link = _fast_link(client_a, client_b)
+        try:
+            link.replicate(["backfill"], mode="push")
+
+            found = _wait_for_payload(client_b, "backfill", "sent before the bridge existed", 20.0)
+            assert len(found) == 1
+            assert found[0].metadata["original_sender"] == "agent-a"
+        finally:
+            link.close()
+            client_a.close()
+            client_b.close()
+            server_a.shutdown()
+            server_b.shutdown()
+
+    def test_restarted_bridge_does_not_duplicate(self) -> None:
+        """A second bridge resumes from the cursor instead of re-sending."""
+        url_a, server_a = _start_server()
+        url_b, server_b = _start_server()
+        client_a = MansioClient(url_a, "agent-a")
+        client_b = MansioClient(url_b, "agent-b")
+        try:
+            first = _fast_link(client_a, client_b)
+            first.replicate(["resume"], mode="push")
+            client_a.channel_send("resume", "before restart")
+            assert _wait_for_payload(client_b, "resume", "before restart", 20.0)
+            first.close()
+
+            client_a.channel_send("resume", "after restart")
+
+            second = _fast_link(client_a, client_b)
+            second.replicate(["resume"], mode="push")
+            assert _wait_for_payload(client_b, "resume", "after restart", 20.0)
+            second.close()
+
+            msgs = client_b.channel_read("resume", limit=100)
+            assert [m.payload for m in msgs] == ["before restart", "after restart"]
+        finally:
+            client_a.close()
+            client_b.close()
+            server_a.shutdown()
+            server_b.shutdown()
