@@ -29,10 +29,12 @@ import json
 import logging
 import threading
 import urllib.parse
+import uuid
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from mansio.protocols import Backend, Compactable, Presenceable
+from mansio.protocols import Backend, Compactable, Presenceable, Watchable
 from mansio.types import ClaimResult, Message, UserPresence
 
 try:
@@ -64,7 +66,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_FETCH_CAP = 10_000
 
 
-class NATSBackend(Backend, Presenceable, Compactable):
+class NATSBackend(Backend, Presenceable, Compactable, Watchable):
     """NATS JetStream-backed message backend.
 
     Provides durable, distributed message persistence via NATS JetStream.
@@ -123,9 +125,16 @@ class NATSBackend(Backend, Presenceable, Compactable):
         # In-memory presence store (not persisted to NATS)
         self._presence: dict[str, dict] = {}
 
-        # In-memory message index for get_message() lookups.
-        # Only contains messages stored through this backend instance.
+        # In-memory message index for get_message() lookups, holding
+        # messages stored through this instance plus any seen on a watch.
+        # Membership also means "already delivered here", which watch()
+        # uses to suppress duplicate dispatch.
         self._messages_by_id: dict[str, Message] = {}
+
+        # Guards the live watch registry.
+        self._watch_lock = threading.Lock()
+        # Watch ID → NATS push subscription.
+        self._watchers: dict[str, Any] = {}
 
     # ── Subject encoding ──────────────────────────────────────
 
@@ -305,8 +314,11 @@ class NATSBackend(Backend, Presenceable, Compactable):
             assert self._js is not None
             await self._js.publish(subject, payload)
 
-        self._run_async(_pub())
+        # Index before publishing: a watch on this same subject can receive
+        # the message before publish() returns, and the watch dispatcher
+        # uses this index to recognize — and skip — our own publishes.
         self._messages_by_id[message.id] = message
+        self._run_async(_pub())
 
     def store_queue(self, message: Message) -> None:
         """Store a queue message to NATS JetStream with claim tracking.
@@ -333,8 +345,94 @@ class NATSBackend(Backend, Presenceable, Compactable):
             }
             await self._kv.create(message.id, json.dumps(state).encode())
 
-        self._run_async(_pub_queue())
+        # Indexed before publishing, for the reason given in store().
         self._messages_by_id[message.id] = message
+        self._run_async(_pub_queue())
+
+    # ── Live watches ──────────────────────────────────────────
+
+    def watch(self, channel: str, callback: Callable[[Message], None]) -> str:
+        """Deliver messages published to *channel* by any process on the cluster.
+
+        Creates an ephemeral, ordered JetStream push consumer on the
+        channel's subject:
+
+        * ordered — messages arrive in stream sequence order, the same
+          order every mansio server on the cluster sees, and the client
+          recovers automatically from gaps after a reconnect;
+        * ephemeral, ack-free — nothing is redelivered and no consumer
+          state outlives the process;
+        * ``DeliverPolicy.NEW`` — only messages published after this call
+          are delivered, so a new subscriber never replays history.
+
+        Messages already seen by this instance are skipped, which covers
+        both the echo of our own publishes — the Bus dispatched those to
+        its subscribers during ``publish()`` — and any repeat delivery
+        after the ordered consumer resets.
+
+        Args:
+            channel: Channel to watch.
+            callback: Called with each message from another process.
+                Runs on the backend's event loop thread.
+
+        Returns:
+            A watch ID for use with ``unwatch()``.
+
+        Raises:
+            Exception: On NATS connection or subscription failure.
+        """
+        self._ensure_connected()
+        subject = self._subject(channel)
+
+        async def _on_nats_msg(nats_msg: Any) -> None:
+            try:
+                message = self._nats_payload_to_msg(nats_msg.data)
+            except (UnicodeDecodeError, json.JSONDecodeError, KeyError):
+                # A malformed payload is not ours to fix and must not tear
+                # down the watch — log it and keep the stream flowing.
+                logger.warning(
+                    "Skipping undecodable message on subject %s", nats_msg.subject, exc_info=True
+                )
+                return
+            if message.id in self._messages_by_id:
+                return
+            self._messages_by_id[message.id] = message
+            try:
+                callback(message)
+            except Exception:
+                # A failing subscriber must not kill delivery for the
+                # others sharing this watch.
+                logger.exception("Watch callback failed for channel %s", channel)
+
+        async def _sub() -> Any:
+            assert self._js is not None
+            return await self._js.subscribe(
+                subject,
+                cb=_on_nats_msg,
+                ordered_consumer=True,
+                deliver_policy=DeliverPolicy.NEW,
+            )
+
+        subscription = self._run_async(_sub())
+        watch_id = uuid.uuid4().hex[:8]
+        with self._watch_lock:
+            self._watchers[watch_id] = subscription
+        return watch_id
+
+    def unwatch(self, watch_id: str) -> None:
+        """Cancel a watch and tear down its JetStream consumer.
+
+        Unknown IDs are ignored.
+        """
+        with self._watch_lock:
+            subscription = self._watchers.pop(watch_id, None)
+        if subscription is None:
+            return
+
+        async def _unsub() -> None:
+            await subscription.unsubscribe()
+
+        self._run_async(_unsub())
 
     # ── Fetch helpers ─────────────────────────────────────────
 
@@ -984,17 +1082,32 @@ class NATSBackend(Backend, Presenceable, Compactable):
     # ── Lifecycle ─────────────────────────────────────────────
 
     def close(self) -> None:
-        """Close NATS connection and stop background loop."""
+        """Cancel live watches, close the NATS connection, stop the loop."""
         with self._loop_lock:
             if self._nc is None or not self._connected:
                 return
+
+        with self._watch_lock:
+            watch_ids = list(self._watchers)
+        for watch_id in watch_ids:
+            try:
+                self.unwatch(watch_id)
+            except Exception:
+                # Closing the connection below drops the consumer anyway,
+                # so a failed cancellation is recoverable — record it and
+                # carry on shutting down.
+                logger.warning("Failed to cancel watch %s during close", watch_id, exc_info=True)
 
         async def _close() -> None:
             assert self._nc is not None
             await self._nc.close()
 
-        with contextlib.suppress(Exception):
+        try:
             self._run_async(_close())
+        except Exception:
+            # The loop is stopped unconditionally below, so a connection
+            # that refuses to close cleanly must not block shutdown.
+            logger.warning("Error closing NATS connection", exc_info=True)
         with self._loop_lock:
             self._connected = False
 

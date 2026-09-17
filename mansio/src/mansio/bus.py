@@ -13,7 +13,14 @@ from typing import Literal, overload
 
 from mansio.admin.metrics import MetricsCollector
 from mansio.backends import SQLiteBackend
-from mansio.protocols import Backend, ChannelStore, Compactable, Deletable, Presenceable
+from mansio.protocols import (
+    Backend,
+    ChannelStore,
+    Compactable,
+    Deletable,
+    Presenceable,
+    Watchable,
+)
 from mansio.system_policy import CompactionPolicy, system_channel_policy
 from mansio.types import ACLEntry, ChannelMeta, ClaimResult, Message, UserPresence
 
@@ -80,6 +87,9 @@ class Bus:
         self._backend = backend or SQLiteBackend()
         self._compaction_policy = compaction_policy or system_channel_policy
         self._subs: dict[str, dict[str, Callable[[Message], None]]] = defaultdict(dict)
+        # Channel → backend watch ID, for backends that deliver messages
+        # stored by other processes.  One watch per watched channel.
+        self._watches: dict[str, str] = {}
         self._ensured_channels: set[str] = set()
         self._metrics = MetricsCollector()
 
@@ -185,7 +195,9 @@ class Bus:
         self._metrics.record()
         self._compaction_policy(self._backend, channel)
 
-        # Notify in-process subscribers (snapshot to avoid mutation during iteration)
+        # Notify subscribers of this process's own publish (snapshot to avoid
+        # mutation during iteration). Publishes from other processes reach the
+        # same subscribers through the backend watch started in subscribe().
         for callback in list(self._subs.get(channel, {}).values()):
             callback(msg)
 
@@ -257,10 +269,18 @@ class Bus:
         *,
         user_id: str | None = None,
     ) -> str:
-        """Register an in-process callback for new messages on a channel.
+        """Register a callback for new messages on a channel.
 
-        The callback is invoked synchronously during publish() within the
-        same process. For cross-process notification, use query() instead.
+        For messages published through this process the callback runs
+        synchronously inside publish(), on the publishing thread.  If the
+        backend implements :class:`~mansio.protocols.Watchable` — as the
+        NATS backend does — the callback also receives messages published
+        through other processes sharing the same broker, delivered on a
+        backend thread.  Callbacks must therefore be thread-safe.
+
+        Backends without a shared transport (SQLite, Memory, Maildir)
+        deliver in-process messages only; use query() to see what other
+        processes wrote.
 
         Args:
             channel: Channel to watch.
@@ -278,6 +298,7 @@ class Bus:
             raise PermissionError(f"agent '{user_id}' lacks read permission on '{channel}'")
         sub_id = uuid.uuid4().hex[:8]
         self._subs[channel][sub_id] = callback
+        self._start_watch(channel)
         return sub_id
 
     def unsubscribe(self, subscription_id: str) -> None:
@@ -286,8 +307,26 @@ class Bus:
         Args:
             subscription_id: ID returned by subscribe().
         """
-        for channel_subs in self._subs.values():
-            channel_subs.pop(subscription_id, None)
+        for channel, channel_subs in self._subs.items():
+            if channel_subs.pop(subscription_id, None) is not None and not channel_subs:
+                self._stop_watch(channel)
+
+    def _start_watch(self, channel: str) -> None:
+        """Ensure a backend watch exists for *channel*, if the backend supports it."""
+        if channel in self._watches or not isinstance(self._backend, Watchable):
+            return
+
+        def _deliver(msg: Message) -> None:
+            for callback in list(self._subs.get(channel, {}).values()):
+                callback(msg)
+
+        self._watches[channel] = self._backend.watch(channel, _deliver)
+
+    def _stop_watch(self, channel: str) -> None:
+        """Release the backend watch for *channel*, if one is active."""
+        watch_id = self._watches.pop(channel, None)
+        if watch_id is not None and isinstance(self._backend, Watchable):
+            self._backend.unwatch(watch_id)
 
     @overload
     def channels(self) -> list[str]: ...
@@ -532,8 +571,9 @@ class Bus:
         if user_id is not None and not self.check_access(channel, user_id, "admin"):
             raise PermissionError(f"agent '{user_id}' lacks admin permission on '{channel}'")
         count = dl.delete_channel(channel)
-        # Clean up in-process subscriptions
+        # Clean up subscriptions
         self._subs.pop(channel, None)
+        self._stop_watch(channel)
         # Invalidate sugar-channel cache
         self._ensured_channels.discard(channel)
         # Clean up channel metadata if backend supports it
@@ -693,7 +733,9 @@ class Bus:
         )
 
     def close(self) -> None:
-        """Release resources held by the backend."""
+        """Release backend watches and resources held by the backend."""
+        for channel in list(self._watches):
+            self._stop_watch(channel)
         self._backend.close()
 
     def __enter__(self) -> Bus:

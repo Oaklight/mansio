@@ -574,3 +574,98 @@ class TestNATSBackendQueryRecentTimestamps:
         """Empty stream returns no timestamps."""
         timestamps = backend.recent_timestamps(seconds=60)
         assert timestamps == []
+
+
+class TestNATSCrossServerDelivery:
+    """Live delivery of messages published by another process on the cluster."""
+
+    @pytest.fixture
+    def peer(self, backend: NATSBackend):
+        """A second backend on the same stream, standing in for another server."""
+        b = _make_backend()
+        b.connect()
+        yield b
+        b.close()
+
+    @staticmethod
+    def _wait_for(received: list, count: int, timeout: float = 5.0) -> None:
+        """Block until *received* holds *count* items, or the timeout expires."""
+        deadline = time.monotonic() + timeout
+        while len(received) < count and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+    def test_bus_subscriber_sees_other_process_publish(
+        self, backend: NATSBackend, peer: NATSBackend
+    ):
+        """A subscriber on one bus receives messages published through another."""
+        from mansio.bus import Bus
+
+        bus_a = Bus(backend=backend)
+        bus_b = Bus(backend=peer)
+        received: list[Message] = []
+        bus_a.subscribe("cross-1", received.append)
+
+        bus_b.publish("cross-1", "agent-beta", "text", "from the other server")
+
+        self._wait_for(received, 1)
+        assert [(m.sender, m.payload) for m in received] == [
+            ("agent-beta", "from the other server")
+        ]
+
+    def test_local_publish_delivered_exactly_once(self, backend: NATSBackend, peer: NATSBackend):
+        """The publishing bus delivers its own message once, not twice."""
+        from mansio.bus import Bus
+
+        bus_a = Bus(backend=backend)
+        Bus(backend=peer)  # a peer watcher must not affect local dispatch
+        received: list[Message] = []
+        bus_a.subscribe("cross-2", received.append)
+
+        bus_a.publish("cross-2", "agent-alpha", "text", "local")
+
+        # Give any duplicate echo time to arrive before asserting.
+        time.sleep(1.5)
+        assert [m.payload for m in received] == ["local"]
+
+    def test_subscribe_does_not_replay_history(self, backend: NATSBackend, peer: NATSBackend):
+        """A new subscription starts at the live edge, not at stored history."""
+        from mansio.bus import Bus
+
+        bus_a = Bus(backend=backend)
+        bus_b = Bus(backend=peer)
+        bus_b.publish("cross-3", "agent-beta", "text", "before subscribe")
+        time.sleep(0.3)
+
+        received: list[Message] = []
+        bus_a.subscribe("cross-3", received.append)
+        bus_b.publish("cross-3", "agent-beta", "text", "after subscribe")
+
+        self._wait_for(received, 1)
+        time.sleep(0.5)
+        assert [m.payload for m in received] == ["after subscribe"]
+
+    def test_unsubscribe_stops_cross_server_delivery(self, backend: NATSBackend, peer: NATSBackend):
+        """unsubscribe() releases the backend watch."""
+        from mansio.bus import Bus
+
+        bus_a = Bus(backend=backend)
+        bus_b = Bus(backend=peer)
+        received: list[Message] = []
+        sub_id = bus_a.subscribe("cross-4", received.append)
+
+        bus_b.publish("cross-4", "agent-beta", "text", "first")
+        self._wait_for(received, 1)
+
+        bus_a.unsubscribe(sub_id)
+        assert backend._watchers == {}
+
+        bus_b.publish("cross-4", "agent-beta", "text", "second")
+        time.sleep(1.0)
+        assert [m.payload for m in received] == ["first"]
+
+    def test_close_releases_watches(self, backend: NATSBackend):
+        """close() cancels outstanding watches."""
+        watch_id = backend.watch("cross-5", lambda msg: None)
+        assert watch_id in backend._watchers
+        backend.close()
+        assert backend._watchers == {}
