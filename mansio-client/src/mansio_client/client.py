@@ -285,6 +285,27 @@ class MansioClient:
     def notification_check(self) -> list[Message]:
         return self.channel_poll(f"_system:notifications:{self._user_id}")
 
+    def check_unread(self) -> dict[str, int]:
+        """Return per-channel unread message counts without advancing cursors.
+
+        Queries each non-system channel for messages newer than the
+        last-polled cursor.  Cursors are **not** advanced, so a
+        subsequent :meth:`channel_poll` still returns the same messages.
+
+        Returns:
+            Dict mapping channel name to unread count (only channels
+            with at least one unread message are included).
+        """
+        channels = self.channel_list()
+        user_channels = [ch for ch in channels if not ch.startswith("_system:")]
+        unread: dict[str, int] = {}
+        for ch in user_channels:
+            cursor = self._cursors.get(ch)
+            msgs = self._transport.query(ch, after=cursor)
+            if msgs:
+                unread[ch] = len(msgs)
+        return unread
+
     # ── Queue ─────────────────────────────────────────────────────
 
     def queue_publish(
