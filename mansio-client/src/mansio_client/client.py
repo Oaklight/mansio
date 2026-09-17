@@ -6,8 +6,8 @@ Connects to a mansio server via HTTP/HTTPS. No server-side dependencies
 
 from __future__ import annotations
 
-import contextlib
 import json
+import logging
 import re
 from typing import TYPE_CHECKING, Literal, overload
 
@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from mansio_client.injectors import Injector
 
 _USER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
+
+_log = logging.getLogger(__name__)
 
 
 def _tags_match(msg_tags: list[str] | None, filter_tags: list[str]) -> bool:
@@ -57,6 +59,7 @@ class MansioClient:
         self._display_name = display_name or user_id
         self._transport = HttpTransport(url, user_id=user_id, token=token)
         self._cursors: dict[str, str] = {}
+        self._persisted: dict[str, str] = {}
 
         self._announce()
         self._restore_cursors()
@@ -80,7 +83,7 @@ class MansioClient:
         return self._display_name
 
     def close(self) -> None:
-        """Save cursors and release resources."""
+        """Release resources, retrying any cursor write that failed."""
         self._save_cursors()
         self._transport.close()
 
@@ -96,7 +99,12 @@ class MansioClient:
     # ── Announce + Cursors ────────────────────────────────────────
 
     def _announce(self) -> None:
-        with contextlib.suppress(Exception):
+        """Publish an online presence marker.
+
+        Presence is informational only — no message delivery depends on
+        it — so a failure here is logged and the client stays usable.
+        """
+        try:
             self._transport.publish(
                 "_system:agents",
                 self._user_id,
@@ -104,26 +112,101 @@ class MansioClient:
                 json.dumps({"status": "online"}),
                 metadata={"display_name": self._display_name},
             )
+        except Exception:
+            _log.warning(
+                "presence announcement failed for %s", self._user_id, exc_info=True
+            )
+
+    @property
+    def _cursor_channel(self) -> str:
+        return f"_system:cursors:{self._user_id}"
+
+    @staticmethod
+    def _parse_snapshot(payload: str) -> dict[str, str]:
+        """Decode a stored snapshot, ignoring entries of the wrong shape."""
+        data = json.loads(payload)
+        if not isinstance(data, dict):
+            raise TypeError(f"cursor snapshot is {type(data).__name__}, not a mapping")
+        return {
+            k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)
+        }
+
+    def _fetch_cursors(self) -> dict[str, str]:
+        """Read the cursor snapshot currently stored on the server.
+
+        The server keeps only the newest snapshot for a user, so a
+        single newest-first message is all there is to read.
+        """
+        msgs = self._transport.query(self._cursor_channel, limit=1, order="newest")
+        for msg in msgs:
+            if msg.msg_type != "cursor_snapshot":
+                continue
+            try:
+                return self._parse_snapshot(msg.payload)
+            except (json.JSONDecodeError, TypeError) as exc:
+                # An unreadable snapshot is not recoverable, but refusing to
+                # run is worse than restarting from an empty position, so
+                # report it and carry on with no stored cursors.
+                _log.warning(
+                    "ignoring unreadable cursor snapshot for %s: %s",
+                    self._user_id,
+                    exc,
+                )
+        return {}
 
     def _restore_cursors(self) -> None:
-        cursor_channel = f"_system:cursors:{self._user_id}"
-        with contextlib.suppress(Exception):
-            msgs = self._transport.query(cursor_channel, limit=1000)
-            for msg in reversed(msgs):
-                if msg.msg_type == "cursor_snapshot":
-                    with contextlib.suppress(json.JSONDecodeError, TypeError):
-                        self._cursors = json.loads(msg.payload)
-                    return
+        """Load stored cursors at startup.
+
+        Transport failures propagate: a client that starts with no
+        position silently replays every message it has already seen,
+        which is worse than failing to start.
+        """
+        self._cursors = self._fetch_cursors()
+        self._persisted = dict(self._cursors)
+
+    @staticmethod
+    def _merge_cursors(a: dict[str, str], b: dict[str, str]) -> dict[str, str]:
+        """Combine two cursor maps, keeping the later position per channel.
+
+        Message IDs are time-ordered (UUIDv7), so the larger string is
+        the more recent message.
+        """
+        merged = dict(a)
+        for channel, cursor in b.items():
+            current = merged.get(channel)
+            if current is None or cursor > current:
+                merged[channel] = cursor
+        return merged
 
     def _save_cursors(self) -> None:
-        if not self._cursors:
+        """Write advanced cursors to the server, if any have advanced.
+
+        Reads the stored snapshot and merges rather than overwriting it,
+        so a session that polls one channel cannot roll back the
+        position another session recorded for a different channel.
+        """
+        if self._cursors == self._persisted:
             return
-        with contextlib.suppress(Exception):
-            self._transport.publish(
-                f"_system:cursors:{self._user_id}",
-                self._user_id,
-                "cursor_snapshot",
-                json.dumps(self._cursors),
+        try:
+            remote = self._fetch_cursors()
+            merged = self._merge_cursors(remote, self._cursors)
+            if merged != remote:
+                self._transport.publish(
+                    self._cursor_channel,
+                    self._user_id,
+                    "cursor_snapshot",
+                    json.dumps(merged),
+                )
+            # Adopt the merged view: another session sharing this user ID
+            # may have advanced further than we have, and the user ID is
+            # one logical reader.
+            self._cursors = merged
+            self._persisted = dict(merged)
+        except Exception:
+            # Leave _persisted untouched so the unsaved advance is
+            # retried by the next poll or by close().
+            _log.warning(
+                "failed to save poll cursors for %s", self._user_id, exc_info=True
             )
 
     # ── Core API ──────────────────────────────────────────────────
@@ -164,10 +247,16 @@ class MansioClient:
         )
 
     def channel_poll(self, channel: str) -> list[Message]:
+        """Return messages on *channel* since this user's last poll.
+
+        The new position is written to the server before returning, so
+        it survives a client that never gets to call :meth:`close`.
+        """
         cursor = self._cursors.get(channel)
         msgs = self._transport.query(channel, after=cursor)
         if msgs:
             self._cursors[channel] = msgs[-1].id
+            self._save_cursors()
         return msgs
 
     @overload
