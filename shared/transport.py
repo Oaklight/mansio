@@ -7,16 +7,29 @@ Uses vendored zerodep modules:
 
 from __future__ import annotations
 
-import contextlib
 import json
+import logging
+import socket
 import threading
 import urllib.parse
 from collections.abc import Callable
-from typing import Literal, overload
+from typing import Literal, NamedTuple, overload
 
 from __PKG__._vendor.httpclient import Client as HttpClient
 from __PKG__._vendor.sse import SSEClient
 from __PKG__.types import ACLEntry, ClaimResult, Message, UserPresence
+
+logger = logging.getLogger(__name__)
+
+#: Seconds to wait for the SSE thread to notice a stop request.
+SSE_JOIN_TIMEOUT = 3.0
+
+
+class _Subscription(NamedTuple):
+    """One ``subscribe()`` registration: the callback and its error hook."""
+
+    callback: Callable[[Message], None]
+    on_error: Callable[[Message, Exception], None] | None
 
 
 class MansioAPIError(Exception):
@@ -67,7 +80,7 @@ class HttpTransport:
         self._sse_client: SSEClient | None = None
         self._sse_thread: threading.Thread | None = None
         self._sse_channels: set[str] = set()
-        self._sse_callbacks: dict[str, dict[str, Callable]] = {}
+        self._sse_callbacks: dict[str, dict[str, _Subscription]] = {}
         self._sse_lock = threading.Lock()
         self._sse_stop = threading.Event()
         self._sub_counter = 0
@@ -273,12 +286,12 @@ class HttpTransport:
         )
 
     def close(self) -> None:
-        """Stop SSE thread and release resources."""
-        self._sse_stop.set()
-        if self._sse_client:
-            self._sse_client.close()
-        if self._sse_thread and self._sse_thread.is_alive():
-            self._sse_thread.join(timeout=3)
+        """Stop SSE thread and release resources.
+
+        Returns promptly even while a subscription is open: the SSE
+        stream's blocking read is aborted rather than left to finish.
+        """
+        self._stop_sse()
         self._http.close()
 
     # ── Channel Management ────────────────────────────────────────
@@ -405,6 +418,7 @@ class HttpTransport:
         self,
         channel: str,
         callback: Callable[[Message], None],
+        on_error: Callable[[Message, Exception], None] | None = None,
     ) -> str:
         """Subscribe to real-time notifications via SSE.
 
@@ -414,6 +428,9 @@ class HttpTransport:
         Args:
             channel: Channel to subscribe to.
             callback: Function called with each new Message.
+            on_error: Called with ``(message, exception)`` when *callback*
+                raises, so the subscriber can retry or record the failure.
+                When omitted, the exception is logged with its traceback.
 
         Returns:
             Subscription ID for unsubscribe().
@@ -424,7 +441,7 @@ class HttpTransport:
 
             if channel not in self._sse_callbacks:
                 self._sse_callbacks[channel] = {}
-            self._sse_callbacks[channel][sub_id] = callback
+            self._sse_callbacks[channel][sub_id] = _Subscription(callback, on_error)
 
             needs_restart = channel not in self._sse_channels
             self._sse_channels.add(channel)
@@ -437,9 +454,14 @@ class HttpTransport:
     def unsubscribe(self, subscription_id: str) -> None:
         """Remove a subscription.
 
+        When this was the last subscription for its channel, the SSE
+        stream is reopened without that channel, or stopped entirely if
+        no subscriptions remain.
+
         Args:
             subscription_id: ID returned by subscribe().
         """
+        channels_changed = False
         with self._sse_lock:
             for channel, subs in list(self._sse_callbacks.items()):
                 if subscription_id in subs:
@@ -447,23 +469,79 @@ class HttpTransport:
                     if not subs:
                         del self._sse_callbacks[channel]
                         self._sse_channels.discard(channel)
+                        channels_changed = True
                     break
+            remaining = bool(self._sse_channels)
+
+        if not channels_changed:
+            return
+        if remaining:
+            self._restart_sse()
+        else:
+            self._stop_sse()
 
     # ── SSE Background Thread ─────────────────────────────────────
 
     def _restart_sse(self) -> None:
         """(Re)start the SSE background thread with current channels."""
-        self._sse_stop.set()
-        if self._sse_client:
-            self._sse_client.close()
-        if self._sse_thread and self._sse_thread.is_alive():
-            self._sse_thread.join(timeout=3)
+        self._stop_sse()
 
         self._sse_stop = threading.Event()
         self._sse_thread = threading.Thread(
             target=self._sse_loop, daemon=True, name="mansio-sse"
         )
         self._sse_thread.start()
+
+    def _stop_sse(self) -> None:
+        """Stop the SSE thread, aborting any read it is blocked on."""
+        self._sse_stop.set()
+        # Abort first: the server may not write for another keepalive
+        # interval, and closing the response would block behind the read.
+        self._abort_sse_read()
+        client = self._sse_client
+        if client is not None:
+            client.close()
+
+        thread = self._sse_thread
+        if (
+            thread is not None
+            and thread.is_alive()
+            and thread is not threading.current_thread()
+        ):
+            thread.join(timeout=SSE_JOIN_TIMEOUT)
+            if thread.is_alive():
+                logger.warning("SSE thread did not stop within the join timeout")
+        self._sse_thread = None
+
+    def _abort_sse_read(self) -> None:
+        """Shut down the SSE socket so a blocked read returns at once.
+
+        The server only writes on a message or on its idle keepalive, so a
+        graceful close would wait out the keepalive interval — and would
+        itself block behind the read holding the response buffer's lock.
+        Shutting the socket down makes that read return immediately.
+
+        This reaches into the vendored SSE client and HTTP client for the
+        live response and its connection; the regression test asserting
+        close() returns quickly is what catches a rename upstream.
+        """
+        client = self._sse_client
+        if client is None:
+            return
+        resp = client._response
+        if resp is None:
+            return
+
+        conn = resp._sync_conn
+        sock = conn.sock if conn is not None else None
+        if sock is None:
+            return
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError as exc:
+            # The socket is already closed or was never connected, so no
+            # read can still be in flight on it — nothing left to abort.
+            logger.debug("SSE socket shutdown failed: %s", exc)
 
     def _sse_loop(self) -> None:
         """Background loop: connect to SSE endpoint via zerodep SSEClient."""
@@ -491,8 +569,14 @@ class HttpTransport:
                 if event.id:
                     self._last_event_id = event.id
                 self._dispatch_sse_event(event.data)
-        except Exception:
-            pass  # SSEClient handles reconnection internally
+        except Exception as exc:
+            # SSEClient reconnects internally, so reaching here means the
+            # stream is finished: either a deliberate stop or a failure
+            # the client gave up on.
+            if self._sse_stop.is_set():
+                logger.debug("SSE stream ended during shutdown: %s", exc)
+            else:
+                logger.error("SSE stream failed for %s", url, exc_info=exc)
         finally:
             if self._sse_client:
                 self._sse_client.close()
@@ -520,11 +604,42 @@ class HttpTransport:
         msg = self._dict_to_msg(msg_data)
 
         with self._sse_lock:
-            cbs = list((self._sse_callbacks.get(channel) or {}).values())
+            subs = list((self._sse_callbacks.get(channel) or {}).values())
 
-        for cb in cbs:
-            with contextlib.suppress(Exception):
-                cb(msg)
+        for sub in subs:
+            try:
+                sub.callback(msg)
+            except Exception as exc:
+                self._report_callback_error(sub, msg, exc)
+
+    def _report_callback_error(
+        self, sub: _Subscription, msg: Message, exc: Exception
+    ) -> None:
+        """Surface an exception raised by a subscriber callback.
+
+        Runs in the SSE thread, where re-raising would kill the stream for
+        every other subscriber, so the failure is handed to the
+        subscription's error hook, or logged when it has none.
+        """
+        if sub.on_error is None:
+            logger.error(
+                "subscriber callback failed for message %s on %s",
+                msg.id,
+                msg.channel,
+                exc_info=exc,
+            )
+            return
+
+        try:
+            sub.on_error(msg, exc)
+        except Exception as hook_exc:
+            logger.error(
+                "on_error hook failed for message %s on %s (original error: %r)",
+                msg.id,
+                msg.channel,
+                exc,
+                exc_info=hook_exc,
+            )
 
     # ── Helpers ────────────────────────────────────────────────────
 
@@ -534,7 +649,10 @@ class HttpTransport:
         if resp.status_code >= 400:
             try:
                 error = resp.json() if resp.content else {}
-            except Exception:
+            except Exception as exc:
+                # A body that isn't JSON carries no message to relay, so
+                # fall back to the generic text below.
+                logger.debug("non-JSON error body from server: %s", exc)
                 error = {}
             raise MansioAPIError(
                 resp.status_code,
