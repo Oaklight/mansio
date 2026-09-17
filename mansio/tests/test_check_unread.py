@@ -18,7 +18,7 @@ from mansio.frontends import HttpFrontend
 def server_url():
     """Start a MansioServer with HttpFrontend, yield URL."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0)
+    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
     server.add_frontend(frontend)
 

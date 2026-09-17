@@ -29,7 +29,7 @@ PROMPT_SECONDS = 1.0
 def server_with_bus():
     """Start a server on an OS-assigned port, yield its URL and Bus."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0)
+    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
     server.add_frontend(frontend)
 
