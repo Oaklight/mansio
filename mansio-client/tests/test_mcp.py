@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
 from io import StringIO
 from typing import Any
@@ -15,6 +16,7 @@ from mansio_client.mcp import (
     _call_tool,
     _handle_request,
     _msg_to_dict,
+    main,
     serve,
 )
 
@@ -531,6 +533,89 @@ class TestServeLoop(unittest.TestCase):
         output = stdout.getvalue().strip()
         resp = json.loads(output)
         assert resp["error"]["code"] == -32700
+
+
+class TestMain(unittest.TestCase):
+    """The mansio-mcp entry point resolves settings from flags and env."""
+
+    @patch("mansio_client.mcp.serve")
+    def test_flags(self, mock_serve: MagicMock) -> None:
+        argv = [
+            "mansio-mcp",
+            "--url",
+            "http://localhost:8742",
+            "--user-id",
+            "flag-agent",
+            "--token",
+            "mst-flag",
+        ]
+        with patch("sys.argv", argv), patch.dict(os.environ, {}, clear=True):
+            main()
+
+        mock_serve.assert_called_once_with(
+            "http://localhost:8742",
+            "flag-agent",
+            token="mst-flag",
+            display_name=None,
+        )
+
+    @patch("mansio_client.mcp.serve")
+    def test_env_fallback(self, mock_serve: MagicMock) -> None:
+        env = {
+            "MANSIO_URL": "http://localhost:8742",
+            "MANSIO_USER_ID": "env-agent",
+            "MANSIO_TOKEN": "mst-env",
+            "MANSIO_DISPLAY_NAME": "Env Agent",
+        }
+        with patch("sys.argv", ["mansio-mcp"]), patch.dict(os.environ, env, clear=True):
+            main()
+
+        mock_serve.assert_called_once_with(
+            "http://localhost:8742",
+            "env-agent",
+            token="mst-env",
+            display_name="Env Agent",
+        )
+
+    @patch("mansio_client.mcp.serve")
+    def test_flags_override_env(self, mock_serve: MagicMock) -> None:
+        env = {"MANSIO_URL": "http://env:8742", "MANSIO_USER_ID": "env-agent"}
+        argv = ["mansio-mcp", "--user-id", "flag-agent"]
+        with patch("sys.argv", argv), patch.dict(os.environ, env, clear=True):
+            main()
+
+        mock_serve.assert_called_once_with(
+            "http://env:8742", "flag-agent", token=None, display_name=None
+        )
+
+    @patch("mansio_client.mcp.serve")
+    def test_legacy_agent_id_env(self, mock_serve: MagicMock) -> None:
+        env = {
+            "MANSIO_URL": "http://localhost:8742",
+            "MANSIO_AGENT_ID": "legacy-agent",
+        }
+        with (
+            patch("sys.argv", ["mansio-mcp"]),
+            patch.dict(os.environ, env, clear=True),
+            self.assertWarns(DeprecationWarning),
+        ):
+            main()
+
+        mock_serve.assert_called_once_with(
+            "http://localhost:8742", "legacy-agent", token=None, display_name=None
+        )
+
+    @patch("mansio_client.mcp.serve")
+    def test_missing_required_settings_exits(self, mock_serve: MagicMock) -> None:
+        with (
+            patch("sys.argv", ["mansio-mcp"]),
+            patch.dict(os.environ, {}, clear=True),
+            self.assertRaises(SystemExit) as ctx,
+        ):
+            main()
+
+        assert ctx.exception.code == 2
+        mock_serve.assert_not_called()
 
 
 if __name__ == "__main__":
