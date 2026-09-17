@@ -101,21 +101,46 @@ def _is_private_channel(channel: str) -> bool:
     return any(channel.startswith(p) for p in _PRIVATE_CHANNEL_PREFIXES)
 
 
+def _is_channel_member(user_id: str, channel: str) -> bool:
+    """Check if *user_id* is an owner/participant of a private channel.
+
+    Ownership is determined by structural parsing, **not** substring
+    matching, to prevent false positives (e.g., user "notebook" must
+    not match channel ``notebook:alice``).
+
+    Channel formats:
+    - ``notebook:<owner>`` → owner is the part after the first ``:``
+    - ``memory:<owner>``  → same as above
+    - ``dm:<A>:<B>``      → participants are exactly *A* and *B*
+    """
+    if channel.startswith("dm:"):
+        parts = channel.split(":", 2)
+        # dm:A:B → parts = ["dm", "A", "B"]
+        return len(parts) == 3 and user_id in (parts[1], parts[2])
+
+    # notebook:<owner> or memory:<owner>
+    for prefix in _PRIVATE_CHANNEL_PREFIXES:
+        if channel.startswith(prefix):
+            owner = channel[len(prefix) :]
+            return user_id == owner
+
+    return False
+
+
 def _user_involved(user_id: str, channel: str, sender: str) -> bool:
     """Check if an agent is involved in a message (sender or channel member).
 
     For **public** channels every authenticated agent is considered
     involved, so all messages are visible.
 
-    For **private** channels (DMs, notebook, memory) uses exact segment
-    matching on ``:``-delimited channel names to avoid substring false
-    positives (e.g., "bob" must not match "bobby").
+    For **private** channels (DMs, notebook, memory) the user must be
+    the sender or a structural member of the channel.
     """
     if not _is_private_channel(channel):
         return True
     if sender == user_id:
         return True
-    return user_id in channel.split(":")
+    return _is_channel_member(user_id, channel)
 
 
 def _validate_channel_name(
@@ -829,6 +854,14 @@ class HttpFrontend:
             channel, after, limit = qp["channel"], qp["after"], qp["limit"]
             offset = qp.get("offset", 0)
 
+            # Early access check: scoped tokens cannot query private
+            # channels they don't belong to.  This also prevents leaking
+            # the total message count (issue #251).
+            auth_result = request.state.auth_result
+            access_err = _check_channel_read_access(auth_result, channel)
+            if access_err is not None:
+                return access_err
+
             msgs = await asyncio.to_thread(
                 bus.query,
                 channel,
@@ -841,9 +874,7 @@ class HttpFrontend:
                 offset=offset,
             )
 
-            auth_result = request.state.auth_result
-            if isinstance(auth_result, str):
-                msgs = [m for m in msgs if _user_involved(auth_result, m.channel, m.sender)]
+            msgs = _filter_visible_messages(auth_result, msgs)
 
             total = await asyncio.to_thread(bus.message_count, channel)
             has_more = len(msgs) == limit
@@ -866,21 +897,12 @@ class HttpFrontend:
             if want_detail:
                 all_detail = await asyncio.to_thread(bus.channels_detail)
                 if isinstance(auth_result, str):
-                    all_detail = [
-                        ch
-                        for ch in all_detail
-                        if not _is_private_channel(ch["name"])
-                        or auth_result in ch["name"].split(":")
-                    ]
+                    all_detail = _filter_visible_channels_detail(auth_result, all_detail)
                 return {"channels": all_detail}
 
             all_channels = cast(list[str], await asyncio.to_thread(bus.channels, detail=False))
             if isinstance(auth_result, str):
-                all_channels = [
-                    ch
-                    for ch in all_channels
-                    if not _is_private_channel(ch) or auth_result in ch.split(":")
-                ]
+                all_channels = _filter_visible_channels(auth_result, all_channels)
             return {"channels": all_channels}
 
         @self._app.get("/v1/auth/check")
@@ -942,7 +964,7 @@ class HttpFrontend:
             # Scoped tokens: can only delete their own private channels
             if isinstance(auth_result, str):
                 if _is_private_channel(channel_name):
-                    if auth_result not in channel_name.split(":"):
+                    if not _is_channel_member(auth_result, channel_name):
                         return {
                             "error": "Forbidden",
                             "message": f"Token for '{auth_result}' cannot delete "
@@ -1649,6 +1671,51 @@ async def _require_acl_admin(auth_result: Any, bus: Bus, channel: str) -> tuple[
     return None
 
 
+def _filter_visible_messages(auth_result: Any, msgs: list[Message]) -> list[Message]:
+    """Filter messages to only those visible to the authenticated agent.
+
+    Supertokens and no-auth mode see all messages.  Scoped tokens
+    only see messages where ``_user_involved`` returns True.
+    """
+    if not isinstance(auth_result, str):
+        return msgs
+    return [m for m in msgs if _user_involved(auth_result, m.channel, m.sender)]
+
+
+def _filter_visible_channels(user_id: str, channels: list[str]) -> list[str]:
+    """Return only channels visible to *user_id* (public + own private)."""
+    return [ch for ch in channels if not _is_private_channel(ch) or _is_channel_member(user_id, ch)]
+
+
+def _filter_visible_channels_detail(user_id: str, channels: list[dict]) -> list[dict]:
+    """Return only channel detail dicts visible to *user_id*."""
+    return [
+        ch
+        for ch in channels
+        if not _is_private_channel(ch["name"]) or _is_channel_member(user_id, ch["name"])
+    ]
+
+
+def _check_channel_read_access(auth_result: Any, channel: str | None) -> tuple[dict, int] | None:
+    """Block scoped tokens from querying private channels they don't belong to.
+
+    Returns an error tuple (dict, 403) if the access is denied, or
+    ``None`` if the request should proceed.  Supertokens and no-auth
+    mode always pass.
+    """
+    if (
+        isinstance(auth_result, str)
+        and channel
+        and _is_private_channel(channel)
+        and not _is_channel_member(auth_result, channel)
+    ):
+        return {
+            "error": "Forbidden",
+            "message": f"Token for '{auth_result}' cannot query channel '{channel}'",
+        }, 403
+    return None
+
+
 def _check_subscribe_access(auth_result: Any, ch_list: list[str]) -> tuple[dict, int] | None:
     """Validate channel access for scoped tokens. Returns error tuple or None.
 
@@ -1659,7 +1726,7 @@ def _check_subscribe_access(auth_result: Any, ch_list: list[str]) -> tuple[dict,
     if not isinstance(auth_result, str):
         return None
     forbidden = [
-        ch for ch in ch_list if _is_private_channel(ch) and auth_result not in ch.split(":")
+        ch for ch in ch_list if _is_private_channel(ch) and not _is_channel_member(auth_result, ch)
     ]
     if forbidden:
         return {

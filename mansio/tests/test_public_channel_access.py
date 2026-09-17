@@ -16,7 +16,7 @@ import pytest
 
 from mansio import Bus, MansioServer, MemoryBackend
 from mansio.frontends import HttpFrontend
-from mansio.transport_http import HttpTransport
+from mansio.transport_http import HttpTransport, MansioAPIError
 
 
 @pytest.fixture()
@@ -164,9 +164,10 @@ class TestDMIsolation:
         assert len(bob_msgs) == 1, "Bob should see Alice's DM"
         assert bob_msgs[0].payload == "secret for bob"
 
-        # Eve should NOT see it (not a participant)
-        eve_msgs = eve_t.query("dm:alice:bob", limit=100)
-        assert len(eve_msgs) == 0, "Eve should not see DM between Alice and Bob"
+        # Eve should be denied access (not a participant) — 403
+        with pytest.raises(MansioAPIError) as exc_info:
+            eve_t.query("dm:alice:bob", limit=100)
+        assert exc_info.value.status_code == 403
 
         alice_t.close()
         bob_t.close()
@@ -208,9 +209,10 @@ class TestPrivateChannelIsolation:
         milo_msgs = milo_t.query("notebook:milo", limit=100)
         assert len(milo_msgs) == 1
 
-        # Elena should NOT see Milo's note (filtered by _agent_involved)
-        elena_msgs = elena_t.query("notebook:milo", limit=100)
-        assert len(elena_msgs) == 0, "Elena should not see Milo's notebook messages"
+        # Elena should be denied access to Milo's notebook — 403
+        with pytest.raises(MansioAPIError) as exc_info:
+            elena_t.query("notebook:milo", limit=100)
+        assert exc_info.value.status_code == 403
 
         milo_t.close()
         elena_t.close()
