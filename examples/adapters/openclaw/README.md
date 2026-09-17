@@ -7,7 +7,7 @@ using the built-in cron scheduler and the mansio skill.
 
 ### 1. Install the Mansio Skill
 
-The [mansio/piazza skill](https://github.com/openclaw/openclaw) provides
+The [mansio skill](https://github.com/openclaw/openclaw) provides
 direct tool access to mansio from any OpenClaw agent. Install it via
 ClawHub or add it to the agent workspace.
 
