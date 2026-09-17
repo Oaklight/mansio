@@ -38,7 +38,7 @@ def env_or(name: str, default: str | None = None) -> str | None:
         return val
     for legacy in _LEGACY_ENV_ALIASES.get(name, ()):
         legacy_val = os.environ.get(legacy)
-        if legacy_val:
+        if legacy_val is not None:
             warnings.warn(
                 f"{legacy} is deprecated, use {name} instead",
                 DeprecationWarning,
