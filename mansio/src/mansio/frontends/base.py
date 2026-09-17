@@ -26,7 +26,7 @@ class Frontend(Protocol):
         3. shutdown() — stop accepting, clean up
 
     Example:
-        >>> frontend = HttpFrontend(host="0.0.0.0", port=8741)
+        >>> frontend = HttpFrontend(host="0.0.0.0", port=8741, token_store=tokens)
         >>> frontend.attach(bus)
         >>> frontend.serve_forever()  # blocks
     """

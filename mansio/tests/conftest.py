@@ -39,7 +39,7 @@ def mansio_server(tmp_path):
 def server_url(tmp_path):
     """Start a mansio server without token auth, yield URL."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0)
+    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
     server.add_frontend(frontend)
 

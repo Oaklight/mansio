@@ -7,10 +7,12 @@ Example:
     >>> from mansio import Bus, SQLiteBackend
     >>> from mansio.frontends import HttpFrontend
     >>> from mansio.server import MansioServer
+    >>> from mansio.token_store import TokenStore
     >>>
     >>> bus = Bus(backend=SQLiteBackend("mansio.db"))
+    >>> tokens = TokenStore("mansio.db")
     >>> server = MansioServer(bus)
-    >>> server.add_frontend(HttpFrontend(port=8741))
+    >>> server.add_frontend(HttpFrontend(port=8741, token_store=tokens))
     >>> server.serve_forever()  # blocks
 """
 

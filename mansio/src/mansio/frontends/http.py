@@ -20,11 +20,15 @@ API Endpoints:
     GET  /health             — health check
 
 Authentication:
-    When a TokenStore is configured, all /v1/* endpoints (except
-    /health and /v1/auth/check) require ``Authorization: Bearer mst-...``.
-    The token is validated server-side, and the sender field in publish
-    requests must match the token's user_id. Supertokens (user_id=NULL)
-    bypass sender checks.
+    All /v1/* endpoints (except /health and /v1/auth/check) require
+    ``Authorization: Bearer mst-...``. The token is validated server-side,
+    and the sender field in publish requests must match the token's user_id.
+    Supertokens (user_id=NULL) bypass sender checks.
+
+    A frontend with no TokenStore cannot validate anything, so it refuses
+    every authenticated endpoint. Serving an open API is possible but never
+    implicit: it requires ``allow_unauthenticated=True``, which logs a
+    warning at startup.
 """
 
 from __future__ import annotations
@@ -39,6 +43,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 from mansio._vendor.httpserver import App, JSONResponse, Response, StreamingResponse
+from mansio._vendor.structlog import get_logger
 
 if TYPE_CHECKING:
     from mansio._vendor.httpserver import Request
@@ -46,8 +51,22 @@ if TYPE_CHECKING:
     from mansio.token_store import TokenStore
     from mansio.types import Message
 
+logger = get_logger(__name__)
+
 # Paths that skip token auth
 _PUBLIC_PATHS = frozenset({"/health", "/v1/auth/check"})
+
+# Returned for every authenticated endpoint when the frontend has no way to
+# authenticate anyone. Both causes are the same failure from a caller's side —
+# no token can be presented that would work — so they answer alike.
+_NO_TOKEN_STORE_MESSAGE = (
+    "This server has no token store, so it cannot authenticate anyone and "
+    "refuses all authenticated endpoints. Configure a TokenStore, or pass "
+    "allow_unauthenticated=True to HttpFrontend to serve an open API on purpose."
+)
+_NO_TOKENS_MESSAGE = (
+    "No API tokens configured. Create a token via the admin panel before connecting."
+)
 
 
 @dataclass
@@ -641,7 +660,15 @@ class HttpFrontend:
         cors_origin: Access-Control-Allow-Origin value. Default "*".
         max_body_bytes: Maximum request body size in bytes. Default 1MB.
         max_query_limit: Maximum query limit parameter. Default 10000.
-        token_store: Optional TokenStore for API authentication. None disables auth.
+        token_store: TokenStore used to authenticate API requests. Without
+            one the frontend rejects every authenticated endpoint.
+        allow_unauthenticated: Serve the API with no authentication at all,
+            treating every caller as a supertoken that may act as any sender.
+            For local development and tests only. Warns on startup. Cannot be
+            combined with token_store.
+
+    Raises:
+        ValueError: If allow_unauthenticated is set alongside a token_store.
     """
 
     def __init__(
@@ -652,12 +679,19 @@ class HttpFrontend:
         max_body_bytes: int = 1_048_576,
         max_query_limit: int = 10_000,
         token_store: TokenStore | None = None,
+        allow_unauthenticated: bool = False,
     ) -> None:
+        if allow_unauthenticated and token_store is not None:
+            raise ValueError(
+                "allow_unauthenticated cannot be combined with a token_store — "
+                "pass one or the other so the intended auth posture is unambiguous"
+            )
         self._host = host
         self._port = port
         self._cors_origin = cors_origin
         self._max_query_limit = max_query_limit
         self._token_store = token_store
+        self._allow_unauthenticated = allow_unauthenticated
         self._bus: Bus | None = None
         self._app = App(max_body_size=max_body_bytes)
 
@@ -690,6 +724,13 @@ class HttpFrontend:
         """
         if self._bus is None:
             raise RuntimeError("Must call attach(bus) before serve_forever()")
+        if self._allow_unauthenticated:
+            logger.warning(
+                "Serving an unauthenticated API — every caller may act as any sender",
+                host=self._host,
+                port=self._port,
+                override="allow_unauthenticated=True",
+            )
         self._app.run(self._host, self._port)
 
     def shutdown(self) -> None:
@@ -706,7 +747,12 @@ class HttpFrontend:
     def __repr__(self) -> str:
         addr = f"{self._host}:{self._port}"
         status = "attached" if self._bus else "detached"
-        auth = "auth" if self._token_store else "no-auth"
+        if self._token_store:
+            auth = "auth"
+        elif self._allow_unauthenticated:
+            auth = "no-auth"
+        else:
+            auth = "auth-unavailable"
         return f"HttpFrontend({addr}, {status}, {auth})"
 
     # ── Middleware ─────────────────────────────────────────────────
@@ -715,6 +761,7 @@ class HttpFrontend:
         """Register auth and CORS middleware."""
         cors = self._cors_origin
         token_store = self._token_store
+        allow_unauthenticated = self._allow_unauthenticated
 
         @self._app.before_request
         async def cors_and_auth(request: Request) -> Response | None:
@@ -738,16 +785,17 @@ class HttpFrontend:
                 return None
 
             if token_store is None:
-                request.state.auth_result = True
-                return None
+                if allow_unauthenticated:
+                    request.state.auth_result = True
+                    return None
+                return JSONResponse(
+                    {"error": "Forbidden", "message": _NO_TOKEN_STORE_MESSAGE},
+                    status_code=403,
+                )
 
             if not await asyncio.to_thread(token_store.has_tokens):
                 return JSONResponse(
-                    {
-                        "error": "Service Unavailable",
-                        "message": "No API tokens configured. "
-                        "Create a token via the admin panel before connecting.",
-                    },
+                    {"error": "Forbidden", "message": _NO_TOKENS_MESSAGE},
                     status_code=403,
                 )
 
@@ -914,8 +962,11 @@ class HttpFrontend:
         async def auth_check(request: Request) -> dict:
             ts = self._token_store
             has_tokens = bool(ts and await asyncio.to_thread(ts.has_tokens))
+            # Only the explicit opt-out disables auth. A frontend that merely
+            # lacks a token store still requires a token it can never accept,
+            # which is what the authenticated endpoints report too.
             return {
-                "auth_mode": "required" if ts is not None else "disabled",
+                "auth_mode": "disabled" if self._allow_unauthenticated else "required",
                 "has_tokens": has_tokens,
             }
 

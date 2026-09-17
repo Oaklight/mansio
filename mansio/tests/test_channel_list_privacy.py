@@ -178,7 +178,7 @@ class TestChannelListPrivacy:
         from mansio._vendor.httpclient import Client as HttpClient
 
         bus = Bus(backend=MemoryBackend())
-        frontend = HttpFrontend(host="127.0.0.1", port=0)
+        frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
         server = MansioServer(bus)
         server.add_frontend(frontend)
 

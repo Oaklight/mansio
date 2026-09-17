@@ -665,7 +665,7 @@ class TestHttpChannelACL:
         """Start an HTTP server with MemoryBackend, yield (base_url, bus)."""
         backend = MemoryBackend()
         bus = Bus(backend=backend)
-        frontend = HttpFrontend(port=0)
+        frontend = HttpFrontend(port=0, allow_unauthenticated=True)
         frontend.attach(bus)
 
         server_thread = threading.Thread(target=frontend.serve_forever, daemon=True)

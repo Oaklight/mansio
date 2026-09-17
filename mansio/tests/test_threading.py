@@ -32,7 +32,7 @@ def sqlite_bus(tmp_path):
 @pytest.fixture()
 def server_url(bus):
     """Start a MansioServer on a random port and return its URL."""
-    frontend = HttpFrontend(host="127.0.0.1", port=0)
+    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
     server.add_frontend(frontend)
     t = threading.Thread(target=server.serve_forever, daemon=True)

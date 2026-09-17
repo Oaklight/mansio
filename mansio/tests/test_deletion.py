@@ -195,7 +195,7 @@ class TestHttpDeletion:
 
         backend = MemoryBackend()
         bus = Bus(backend=backend)
-        frontend = HttpFrontend(port=0)
+        frontend = HttpFrontend(port=0, allow_unauthenticated=True)
         frontend.attach(bus)
 
         # Start server in background
