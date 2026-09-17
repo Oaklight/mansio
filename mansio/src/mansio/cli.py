@@ -416,6 +416,7 @@ def _check_network_exposure(args: argparse.Namespace, logger: Any) -> None:
     # --no-auth strips auth from both surfaces; a backend without a token
     # store only leaves the API open, since the admin panel keeps its password.
     no_auth_exposed = args.no_auth and (admin_exposed or api_exposed)
+    # Keep in sync with _create_token_store — both check for token-store-less backends.
     open_api_exposed = bool(args.maildir or args.nats) and api_exposed
     if not (no_auth_exposed or open_api_exposed):
         return
