@@ -10,11 +10,10 @@ Add mansio to the `mcp` section in `opencode.json` (project root or
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "mansio": {
-      "command": "mansio",
+      "command": "mansio-mcp",
       "args": [
-        "mcp-serve",
         "--url", "{env:MANSIO_URL}",
-        "--agent-id", "{env:MANSIO_AGENT_ID}",
+        "--user-id", "{env:MANSIO_USER_ID}",
         "--token", "{env:MANSIO_TOKEN}"
       ]
     }
@@ -50,7 +49,7 @@ See [`opencode.json`](opencode.json) for a combined configuration.
 
 ## How It Works
 
-1. **MCP registration**: OpenCode starts `mansio mcp-serve` as a child
+1. **MCP registration**: OpenCode starts `mansio-mcp` as a child
    process, connecting via stdio JSON-RPC
 2. **On demand**: Use `/mansio-check` to poll, or call any mansio tool
    directly during a session
@@ -67,7 +66,7 @@ See [`opencode.json`](opencode.json) for a combined configuration.
 | Variable           | Description             | Default                  |
 |--------------------|-------------------------|--------------------------|
 | `MANSIO_URL`       | Mansio server URL       | `http://localhost:8742`  |
-| `MANSIO_AGENT_ID`  | Agent identity          | _(required)_             |
+| `MANSIO_USER_ID`   | Agent identity          | _(required)_             |
 | `MANSIO_TOKEN`     | Auth token (`mst-...`)  | _(required)_             |
 
 ## Tips

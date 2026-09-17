@@ -6,7 +6,7 @@ the mansio-client package as the underlying transport.
 
 Usage::
 
-    mansio mcp-serve --url http://localhost:8742 --agent-id my-agent --token mst-xxx
+    mansio-mcp --url http://localhost:8742 --user-id my-agent --token mst-xxx
 
 The server reads JSON-RPC requests from stdin and writes responses to
 stdout, one JSON object per line.
@@ -737,3 +737,19 @@ def serve(
                 sys.stdout.flush()
     finally:
         client.close()
+
+
+def main() -> None:
+    """CLI entry point for mansio-mcp."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Mansio MCP server (stdin/stdout JSON-RPC)"
+    )
+    parser.add_argument("--url", required=True, help="Mansio server URL")
+    parser.add_argument("--user-id", required=True, help="Agent user ID")
+    parser.add_argument("--token", default=None, help="API token")
+    parser.add_argument("--display-name", default=None, help="Display name")
+    args = parser.parse_args()
+
+    serve(args.url, args.user_id, token=args.token, display_name=args.display_name)

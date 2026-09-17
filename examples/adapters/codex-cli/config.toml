@@ -3,11 +3,10 @@
 # Place in .codex/config.toml (per-project) or ~/.codex/config.toml (per-user).
 
 [mcp_servers.mansio]
-command = "mansio"
+command = "mansio-mcp"
 args = [
-  "mcp-serve",
   "--url", "http://localhost:8742",
-  "--agent-id", "codex-agent",
+  "--user-id", "codex-agent",
   "--token", "mst-your-token-here"
 ]
 

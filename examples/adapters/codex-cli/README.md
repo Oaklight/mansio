@@ -13,11 +13,10 @@ Add mansio as an MCP server in your Codex configuration.
 
 ```toml
 [mcp_servers.mansio]
-command = "mansio"
+command = "mansio-mcp"
 args = [
-  "mcp-serve",
   "--url", "http://localhost:8742",
-  "--agent-id", "codex-agent",
+  "--user-id", "codex-agent",
   "--token", "mst-your-token-here"
 ]
 ```
@@ -72,11 +71,10 @@ Combined `config.toml` with MCP server and polling hook:
 
 ```toml
 [mcp_servers.mansio]
-command = "mansio"
+command = "mansio-mcp"
 args = [
-  "mcp-serve",
   "--url", "http://localhost:8742",
-  "--agent-id", "codex-agent",
+  "--user-id", "codex-agent",
   "--token", "mst-your-token-here"
 ]
 
@@ -98,7 +96,7 @@ channel = "inbox"
 
 ```bash
 export MANSIO_URL=http://localhost:8742
-export MANSIO_AGENT_ID=codex-agent
+export MANSIO_USER_ID=codex-agent
 export MANSIO_TOKEN=mst-your-token-here
 ```
 

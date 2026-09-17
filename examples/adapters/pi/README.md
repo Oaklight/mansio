@@ -5,9 +5,9 @@
 Register the mansio MCP server with Pi:
 
 ```bash
-pi mcp add mansio -- mansio mcp-serve \
+pi mcp add mansio -- mansio-mcp \
   --url "$MANSIO_URL" \
-  --agent-id "$MANSIO_AGENT_ID" \
+  --user-id "$MANSIO_USER_ID" \
   --token "$MANSIO_TOKEN"
 ```
 
@@ -27,7 +27,7 @@ watcher that polls every 5 minutes:
 
 ## How It Works
 
-1. **MCP registration**: `pi mcp add` starts `mansio mcp-serve` as a
+1. **MCP registration**: `pi mcp add` starts `mansio-mcp` as a
    child process, connecting via stdio JSON-RPC
 2. **Routine**: The pulse trigger fires every 300 seconds, injecting
    the prompt into the agent's context. The agent calls `mansio_poll`
@@ -40,7 +40,7 @@ watcher that polls every 5 minutes:
 | Variable           | Description             | Default                  |
 |--------------------|-------------------------|--------------------------|
 | `MANSIO_URL`       | Mansio server URL       | `http://localhost:8742`  |
-| `MANSIO_AGENT_ID`  | Agent identity          | _(required)_             |
+| `MANSIO_USER_ID`   | Agent identity          | _(required)_             |
 | `MANSIO_TOKEN`     | Auth token (`mst-...`)  | _(required)_             |
 
 ## Tips
