@@ -1,6 +1,6 @@
 """mansio - Agent messaging hub for multi-agent collaboration."""
 
-__version__ = "0.2.3"
+__version__ = "0.3.0.dev1"
 
 from mansio.backends import MemoryBackend, SQLiteBackend
 from mansio.backends.sqlite import SCHEMA_VERSION, SchemaVersionError, backup_database

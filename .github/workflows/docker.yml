@@ -94,7 +94,7 @@ jobs:
         run: |
           VERSION="${{ steps.meta.outputs.version }}"
           IMAGE="oaklight/mansio"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ inputs.testpypi }}" = "true" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "tags=${IMAGE}:${VERSION}" >> "$GITHUB_OUTPUT"
           else
             echo "tags=${IMAGE}:${VERSION},${IMAGE}:latest" >> "$GITHUB_OUTPUT"
