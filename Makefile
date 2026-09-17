@@ -88,6 +88,11 @@ push-client:
 	twine upload $(CLIENT_DIST_DIR)/*
 	@echo "Client package pushed to PyPI."
 
+clean-client:
+	@echo "Cleaning up client build files..."
+	rm -rf $(CLIENT_DIST_DIR) $(CLIENT_DIR)/src/*.egg-info
+	@echo "Client cleanup complete."
+
 # ──────────────────────────────────────────────
 # Docker
 # ──────────────────────────────────────────────
@@ -152,6 +157,7 @@ help:
 	@echo "Client (mansio-client):"
 	@echo "  build-client   - Build the client package"
 	@echo "  push-client    - Push the client package to PyPI"
+	@echo "  clean-client   - Clean up client build files"
 	@echo ""
 	@echo "Docker:"
 	@echo "  build-docker   - Build Docker image (local x64)"
@@ -182,4 +188,4 @@ help:
 	@echo ""
 	@echo "Detected version: $(VERSION)"
 
-.PHONY: all format lint test build-package push-package clean-package build push clean build-client push-client build-docker push-docker clean-docker help
+.PHONY: all format lint test build-package push-package clean-package build push clean build-client push-client clean-client build-docker push-docker clean-docker help
