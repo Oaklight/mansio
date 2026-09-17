@@ -2,15 +2,25 @@
 
 import argparse
 import json
+import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 
 import pytest
 
 from mansio import Bus, MansioServer, MemoryBackend
-from mansio.cli import _parse_host_port, _redact_token, parse_args
+from mansio.cli import (
+    _check_network_exposure,
+    _create_token_store,
+    _parse_host_port,
+    _redact_token,
+    _resolve_admin_auth,
+    parse_args,
+)
 from mansio.frontends import HttpFrontend
 
 # ── Parse Args ────────────────────────────────────────────────────
@@ -501,3 +511,226 @@ class TestClientIntegration:
         assert result.returncode == 0
         msg_id = result.stdout.strip()
         assert msg_id
+
+
+# ── Serve Startup and Network Exposure Guard ──────────────────────
+
+
+class _RecordingLogger:
+    """Structlog-shaped logger that records calls instead of emitting them.
+
+    Only accepts ``(event, **kwargs)``, matching the vendored ``BoundLogger``
+    signature, so a printf-style call raises here exactly as it does at runtime.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict]] = []
+
+    def _record(self, level: str, event: str, **kwargs) -> None:
+        self.calls.append((level, event, kwargs))
+
+    def debug(self, event: str, **kwargs) -> None:
+        self._record("debug", event, **kwargs)
+
+    def info(self, event: str, **kwargs) -> None:
+        self._record("info", event, **kwargs)
+
+    def warning(self, event: str, **kwargs) -> None:
+        self._record("warning", event, **kwargs)
+
+    def error(self, event: str, **kwargs) -> None:
+        self._record("error", event, **kwargs)
+
+
+def _free_port() -> int:
+    """Reserve and release a port, returning its number."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+class TestCreateTokenStore:
+    """Token store creation must not crash on backends that lack one."""
+
+    @pytest.mark.parametrize(
+        ("flag", "value", "backend"),
+        [("--maildir", "md", "maildir"), ("--nats", "nats://localhost:4222", "nats")],
+    )
+    def test_non_sqlite_backend_warns_without_crashing(self, tmp_path, flag, value, backend):
+        if flag == "--maildir":
+            value = str(tmp_path / value)
+        args = parse_args(["serve", flag, value])
+        logger = _RecordingLogger()
+
+        assert _create_token_store(args, logger) is None
+
+        level, event, kwargs = logger.calls[-1]
+        assert level == "warning"
+        assert "%s" not in event
+        assert kwargs["backend"] == backend
+
+    def test_no_auth_returns_none(self, tmp_path):
+        args = parse_args(["serve", "--db", str(tmp_path / "m.db"), "--no-auth"])
+        assert _create_token_store(args, _RecordingLogger()) is None
+
+    def test_sqlite_backend_builds_store(self, tmp_path):
+        args = parse_args(["serve", "--db", str(tmp_path / "m.db")])
+        assert _create_token_store(args, _RecordingLogger()) is not None
+
+
+class TestResolveAdminAuth:
+    """Admin auth resolution must not crash when auto-generating a password."""
+
+    def test_remote_without_password_autogenerates(self):
+        args = parse_args(["serve", "--remote"])
+        logger = _RecordingLogger()
+
+        admin_host, admin_password = _resolve_admin_auth(args, logger)
+
+        assert admin_host == "0.0.0.0"
+        assert admin_password
+        level, event, kwargs = logger.calls[-1]
+        assert level == "warning"
+        assert "%s" not in event
+        assert kwargs["admin_host"] == "0.0.0.0"
+
+    def test_explicit_password_is_kept(self):
+        args = parse_args(["serve", "--remote", "--admin-password", "hunter2"])
+        admin_host, admin_password = _resolve_admin_auth(args, _RecordingLogger())
+        assert (admin_host, admin_password) == ("0.0.0.0", "hunter2")
+
+    def test_localhost_default_has_no_password(self):
+        admin_host, admin_password = _resolve_admin_auth(parse_args(["serve"]), _RecordingLogger())
+        assert (admin_host, admin_password) == ("127.0.0.1", None)
+
+
+class TestCheckNetworkExposure:
+    """The startup guard weighs the API bind host, not just the admin host."""
+
+    @staticmethod
+    def _check(argv: list[str]) -> _RecordingLogger:
+        logger = _RecordingLogger()
+        _check_network_exposure(parse_args(["serve", *argv]), logger)
+        return logger
+
+    def _expect_refusal(self, argv: list[str]) -> dict:
+        logger = _RecordingLogger()
+        with pytest.raises(SystemExit) as exc:
+            _check_network_exposure(parse_args(["serve", *argv]), logger)
+        assert exc.value.code == 1
+        level, _event, kwargs = logger.calls[-1]
+        assert level == "error"
+        return kwargs
+
+    def test_no_auth_with_off_host_api_refuses(self):
+        kwargs = self._expect_refusal(["--http", "0.0.0.0:8742", "--no-auth"])
+        assert kwargs["api_host"] == "0.0.0.0"
+
+    def test_no_auth_with_routable_api_host_refuses(self):
+        self._expect_refusal(["--http", "100.115.203.108:8782", "--no-auth"])
+
+    def test_no_auth_with_remote_admin_refuses(self):
+        self._expect_refusal(["--remote", "--no-auth"])
+
+    def test_no_auth_on_localhost_is_allowed(self):
+        assert self._check(["--http", "127.0.0.1:8742", "--no-auth"]).calls == []
+
+    def test_no_auth_with_bare_port_is_allowed(self):
+        """A bare --http port defaults to loopback, so it is not exposed."""
+        assert self._check(["--http", "8742", "--no-auth"]).calls == []
+
+    @pytest.mark.parametrize(
+        "backend", [["--maildir", "/tmp/mansio-guard-md"], ["--nats", "nats://localhost:4222"]]
+    )
+    def test_token_storeless_backend_with_off_host_api_refuses(self, backend):
+        kwargs = self._expect_refusal([*backend, "--http", "0.0.0.0:8742"])
+        assert kwargs["api_host"] == "0.0.0.0"
+
+    def test_token_storeless_backend_on_localhost_is_allowed(self, tmp_path):
+        argv = ["--maildir", str(tmp_path / "md"), "--http", "127.0.0.1:8742"]
+        assert self._check(argv).calls == []
+
+    def test_token_storeless_backend_with_remote_admin_only_is_allowed(self, tmp_path):
+        """The admin panel keeps its own password, so no API is left open."""
+        assert self._check(["--maildir", str(tmp_path / "md"), "--remote"]).calls == []
+
+    def test_sqlite_backend_off_host_api_is_allowed(self, tmp_path):
+        argv = ["--db", str(tmp_path / "m.db"), "--http", "0.0.0.0:8742"]
+        assert self._check(argv).calls == []
+
+    def test_override_flag_warns_instead_of_refusing(self):
+        argv = [
+            "--http",
+            "0.0.0.0:8742",
+            "--no-auth",
+            "--insecure-allow-unauthenticated-network-api",
+        ]
+        level, _event, kwargs = self._check(argv).calls[-1]
+        assert level == "warning"
+        assert kwargs["api_host"] == "0.0.0.0"
+
+    def test_override_flag_defaults_off(self):
+        assert parse_args(["serve"]).insecure_allow_unauthenticated_network_api is False
+
+
+class TestServeStartsUp:
+    """End-to-end: ``mansio serve`` reaches a serving state and stays there."""
+
+    @staticmethod
+    def _serve_until_healthy(argv: list[str], port: int) -> None:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "mansio.cli", "serve", *argv],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                if proc.poll() is not None:
+                    output = proc.stdout.read() if proc.stdout else ""
+                    pytest.fail(f"serve exited with {proc.returncode}:\n{output}")
+                try:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as r:
+                        assert r.status == 200
+                        return
+                except (urllib.error.URLError, OSError):
+                    time.sleep(0.2)
+            pytest.fail("serve never became healthy")
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=10)
+
+    def test_maildir_backend_serves(self, tmp_path):
+        port = _free_port()
+        self._serve_until_healthy(
+            [
+                "--maildir",
+                str(tmp_path / "md"),
+                "--http",
+                f"127.0.0.1:{port}",
+                "--admin-port",
+                str(_free_port()),
+            ],
+            port,
+        )
+
+    def test_remote_without_admin_password_serves(self, tmp_path):
+        """The Docker image's default command shape: --remote, no --admin-password."""
+        port = _free_port()
+        self._serve_until_healthy(
+            [
+                "--db",
+                str(tmp_path / "m.db"),
+                "--http",
+                f"127.0.0.1:{port}",
+                "--remote",
+                "--admin-port",
+                str(_free_port()),
+            ],
+            port,
+        )

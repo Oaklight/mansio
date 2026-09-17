@@ -22,6 +22,13 @@ from mansio import SQLiteBus, __version__
 _LEGACY_DB = "piazza.db"
 _DEFAULT_DB = "mansio.db"
 
+# Bind addresses that keep a listener on this machine only.
+_LOCALHOST_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+# Opt-in flag for binding an API that enforces no authentication to a
+# network-reachable address. Named here so the startup error can point at it.
+_UNAUTH_OVERRIDE_FLAG = "--insecure-allow-unauthenticated-network-api"
+
 
 def _redact_token(token: str, head: int = 8, tail: int = 4) -> str:
     """Redact a token for safe logging, showing only head and tail.
@@ -169,6 +176,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-auth",
         action="store_true",
         help="Disable all auth — API token auth and admin auth (dev only)",
+    )
+    serve.add_argument(
+        _UNAUTH_OVERRIDE_FLAG,
+        action="store_true",
+        help=(
+            "Allow binding an API that enforces no authentication to a "
+            "network-reachable address. Without this, such a combination is "
+            "refused at startup"
+        ),
     )
     serve.add_argument(
         "--no-ui",
@@ -335,11 +351,115 @@ def _create_bus(args: argparse.Namespace, logger: Any) -> Any:
     return bus
 
 
+def _is_off_host(host: str) -> bool:
+    """Report whether binding to ``host`` makes a listener reachable off-machine.
+
+    Anything that is not an explicit loopback name or address counts as
+    off-host, including wildcard binds such as ``0.0.0.0`` and ``::``.
+
+    Args:
+        host: Bind address as written on the command line.
+
+    Returns:
+        True when the address is reachable from outside this machine.
+    """
+    return host not in _LOCALHOST_HOSTS
+
+
+def _admin_bind_host(args: argparse.Namespace) -> str:
+    """Resolve the admin panel bind host: explicit --host > --remote > loopback.
+
+    Args:
+        args: Parsed arguments namespace.
+
+    Returns:
+        The address the admin panel will bind to.
+    """
+    return args.host if args.host else ("0.0.0.0" if args.remote else "127.0.0.1")
+
+
+def _api_bind_host(args: argparse.Namespace) -> str | None:
+    """Resolve the HTTP API bind host from --http.
+
+    Args:
+        args: Parsed arguments namespace.
+
+    Returns:
+        The address the API will bind to, or None when --http is not set.
+    """
+    if not args.http:
+        return None
+    return _parse_host_port(args.http)[0]
+
+
+def _check_network_exposure(args: argparse.Namespace, logger: Any) -> None:
+    """Refuse to start when a network-reachable surface enforces no auth.
+
+    Exposure is decided from the addresses actually bound — the API host from
+    --http as well as the admin host — because those determine who
+    can reach the server. Auth is unenforced in two cases: --no-auth, and
+    backends with no token store. TokenStore requires SQLite, so --maildir and
+    --nats have no API credentials at all and every request is treated as
+    fully authorized.
+
+    Args:
+        args: Parsed arguments namespace.
+        logger: Structured logger.
+
+    Returns:
+        None. Calls sys.exit(1) on an unsafe combination.
+    """
+    admin_host = _admin_bind_host(args)
+    api_host = _api_bind_host(args)
+    admin_exposed = _is_off_host(admin_host)
+    api_exposed = api_host is not None and _is_off_host(api_host)
+    # --no-auth strips auth from both surfaces; a backend without a token
+    # store only leaves the API open, since the admin panel keeps its password.
+    no_auth_exposed = args.no_auth and (admin_exposed or api_exposed)
+    open_api_exposed = bool(args.maildir or args.nats) and api_exposed
+    if not (no_auth_exposed or open_api_exposed):
+        return
+
+    if args.insecure_allow_unauthenticated_network_api:
+        logger.warning(
+            "Serving an unauthenticated API on a network-reachable address",
+            admin_host=admin_host,
+            api_host=api_host,
+            override=_UNAUTH_OVERRIDE_FLAG,
+        )
+        return
+
+    if args.no_auth:
+        logger.error(
+            "--no-auth cannot be used with a network-reachable bind address "
+            "(would expose an unauthenticated API to the network)",
+            admin_host=admin_host,
+            api_host=api_host,
+            hint=(
+                "Bind to 127.0.0.1, or drop --no-auth, or pass "
+                f"{_UNAUTH_OVERRIDE_FLAG} to accept the risk"
+            ),
+        )
+        sys.exit(1)
+
+    backend_name = "maildir" if args.maildir else "nats"
+    logger.error(
+        "Backend has no token store, so the API would accept unauthenticated "
+        "requests from the network",
+        backend=backend_name,
+        api_host=api_host,
+        hint=(
+            "Use the SQLite backend (--db) for token auth, bind --http to "
+            f"127.0.0.1, or pass {_UNAUTH_OVERRIDE_FLAG} to accept the risk"
+        ),
+    )
+    sys.exit(1)
+
+
 def _resolve_admin_auth(args: argparse.Namespace, logger: Any) -> tuple[str, str | None]:
     """Resolve admin host and password from CLI flags.
 
-    Handles --host, --remote, --admin-password, --token (deprecated),
-    and --no-auth safety checks.
+    Handles --host, --remote, --admin-password and --token (deprecated).
 
     Args:
         args: Parsed arguments namespace.
@@ -365,27 +485,16 @@ def _resolve_admin_auth(args: argparse.Namespace, logger: Any) -> tuple[str, str
         )
         admin_password = args.token
 
-    # Resolve admin bind host: explicit --host > --remote > default
-    admin_host = args.host if args.host else ("0.0.0.0" if args.remote else "127.0.0.1")
-
-    _LOCALHOST = {"127.0.0.1", "::1", "localhost"}
-
-    # --no-auth + remote-accessible is dangerous — refuse to start
-    if args.no_auth and (args.remote or (args.host and args.host not in _LOCALHOST)):
-        logger.error(
-            "--no-auth cannot be used with remote access "
-            "(would expose unauthenticated API to the network)"
-        )
-        sys.exit(1)
+    admin_host = _admin_bind_host(args)
 
     # Auto-generate password when exposed without explicit auth
-    if admin_host not in _LOCALHOST and not admin_password and not args.no_auth:
+    if _is_off_host(admin_host) and not admin_password and not args.no_auth:
         import secrets
 
         admin_password = secrets.token_urlsafe(16)
         logger.warning(
-            "Admin panel exposed on %s without --admin-password, auto-generated one",
-            admin_host,
+            "Admin panel exposed without --admin-password, auto-generated one",
+            admin_host=admin_host,
         )
 
     return admin_host, admin_password
@@ -408,7 +517,10 @@ def _create_token_store(args: argparse.Namespace, logger: Any) -> Any:
         return None
     if args.maildir or args.nats:
         backend_name = "maildir" if args.maildir else "nats"
-        logger.info("Token auth not available with %s backend", backend_name)
+        logger.warning(
+            "Token auth not available — every API request is fully authorized",
+            backend=backend_name,
+        )
         return None
 
     from mansio.token_store import TokenStore
@@ -521,6 +633,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     configure(logger_factory=lambda *a: logging.getLogger(a[0] if a else "mansio"))
     logger = get_logger("mansio")
 
+    _check_network_exposure(args, logger)
     admin_host, admin_password = _resolve_admin_auth(args, logger)
     bus = _create_bus(args, logger)
     token_store = _create_token_store(args, logger)
