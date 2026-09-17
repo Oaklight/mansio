@@ -2,11 +2,10 @@
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "mansio": {
-      "command": "mansio",
+      "command": "mansio-mcp",
       "args": [
-        "mcp-serve",
         "--url", "{env:MANSIO_URL}",
-        "--agent-id", "{env:MANSIO_AGENT_ID}",
+        "--user-id", "{env:MANSIO_USER_ID}",
         "--token", "{env:MANSIO_TOKEN}"
       ]
     }

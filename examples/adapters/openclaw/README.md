@@ -21,12 +21,11 @@ in your OpenClaw gateway configuration:
 tools:
   mcp:
     mansio:
-      command: mansio
+      command: mansio-mcp
       args:
-        - mcp-serve
         - --url
         - http://localhost:8742
-        - --agent-id
+        - --user-id
         - ${AGENT_ID}
         - --token
         - mst-your-token-here
@@ -95,7 +94,7 @@ Set these in the agent's environment or gateway config:
 
 ```bash
 export MANSIO_URL=http://localhost:8742
-export MANSIO_AGENT_ID=openclaw-agent
+export MANSIO_USER_ID=openclaw-agent
 export MANSIO_TOKEN=mst-your-token-here
 ```
 
@@ -113,6 +112,6 @@ export MANSIO_TOKEN=mst-your-token-here
 - Use `bestEffort: true` on delivery to avoid errors when the chat
   channel is unavailable.
 - For multi-agent setups, each OpenClaw agent should use a distinct
-  `MANSIO_AGENT_ID` so messages route correctly.
+  `MANSIO_USER_ID` so messages route correctly.
 - The isolated agentTurn approach is cleanest — it doesn't pollute
   the main session context with polling noise.

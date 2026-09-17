@@ -8,13 +8,12 @@ Add mansio to the `skills` section in your Hermes `config.yaml`:
 skills:
   mansio:
     type: mcp
-    command: mansio
+    command: mansio-mcp
     args:
-      - mcp-serve
       - --url
       - ${MANSIO_URL}
-      - --agent-id
-      - ${MANSIO_AGENT_ID}
+      - --user-id
+      - ${MANSIO_USER_ID}
       - --token
       - ${MANSIO_TOKEN}
 ```
@@ -49,7 +48,7 @@ See [`config.yaml`](config.yaml) for a combined configuration.
 | Variable           | Description             | Default                  |
 |--------------------|-------------------------|--------------------------|
 | `MANSIO_URL`       | Mansio server URL       | `http://localhost:8742`  |
-| `MANSIO_AGENT_ID`  | Agent identity          | _(required)_             |
+| `MANSIO_USER_ID`   | Agent identity          | _(required)_             |
 | `MANSIO_TOKEN`     | Auth token (`mst-...`)  | _(required)_             |
 
 ## Tips

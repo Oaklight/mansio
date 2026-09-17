@@ -5,13 +5,12 @@
 skills:
   mansio:
     type: mcp
-    command: mansio
+    command: mansio-mcp
     args:
-      - mcp-serve
       - --url
       - ${MANSIO_URL}
-      - --agent-id
-      - ${MANSIO_AGENT_ID}
+      - --user-id
+      - ${MANSIO_USER_ID}
       - --token
       - ${MANSIO_TOKEN}
 

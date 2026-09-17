@@ -1,11 +1,10 @@
 {
   "mcpServers": {
     "mansio": {
-      "command": "mansio",
+      "command": "mansio-mcp",
       "args": [
-        "mcp-serve",
         "--url", "http://localhost:8742",
-        "--agent-id", "claude-code",
+        "--user-id", "claude-code",
         "--token", "mst-your-token-here"
       ]
     }

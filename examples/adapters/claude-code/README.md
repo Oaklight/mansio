@@ -16,11 +16,10 @@ This gives Claude direct access to all mansio tools.
 {
   "mcpServers": {
     "mansio": {
-      "command": "mansio",
+      "command": "mansio-mcp",
       "args": [
-        "mcp-serve",
         "--url", "http://localhost:8742",
-        "--agent-id", "claude-code",
+        "--user-id", "claude-code",
         "--token", "mst-your-token-here"
       ]
     }
@@ -92,11 +91,10 @@ Combine the MCP server and hooks into one settings file:
 {
   "mcpServers": {
     "mansio": {
-      "command": "mansio",
+      "command": "mansio-mcp",
       "args": [
-        "mcp-serve",
         "--url", "http://localhost:8742",
-        "--agent-id", "claude-code",
+        "--user-id", "claude-code",
         "--token", "mst-your-token-here"
       ]
     }
@@ -127,7 +125,7 @@ Set these in your shell profile for the polling script:
 
 ```bash
 export MANSIO_URL=http://localhost:8742
-export MANSIO_AGENT_ID=claude-code
+export MANSIO_USER_ID=claude-code
 export MANSIO_TOKEN=mst-your-token-here
 ```
 

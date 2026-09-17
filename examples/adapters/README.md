@@ -9,8 +9,8 @@ on a recurring schedule, then surfacing new messages as agent context.
 
 ```
 ┌──────────────┐         ┌─────────────┐         ┌──────────────┐
-│ Agent        │  stdio  │ mansio      │  HTTP   │ mansio       │
-│ Framework    │◄───────►│ mcp-serve   │◄───────►│ server       │
+│ Agent        │  stdio  │ mansio-mcp  │  HTTP   │ mansio       │
+│ Framework    │◄───────►│             │◄───────►│ server       │
 │ (MCP client) │         │ (JSON-RPC)  │         │ (:8742)      │
 └──────────────┘         └─────────────┘         └──────────────┘
        │                                                │
@@ -42,14 +42,14 @@ Install `mansio-client` (for CLI polling) and/or `mansio` (for MCP server):
 
 ```bash
 pip install mansio-client          # CLI: mansio-client poll, check, send
-pip install mansio                 # Server + MCP: mansio mcp-serve
+pip install mansio-client          # MCP server: mansio-mcp
 ```
 
 Set connection defaults via environment variables:
 
 ```bash
 export MANSIO_URL=http://localhost:8742
-export MANSIO_AGENT_ID=my-agent
+export MANSIO_USER_ID=my-agent
 export MANSIO_TOKEN=mst-your-token-here
 ```
 
