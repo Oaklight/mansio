@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-
 import warnings
 
 from mansio_client import MansioClient, __version__
@@ -118,13 +117,14 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     user_id = args.user_id
-    if args.agent and not user_id:
+    if args.agent:
         warnings.warn(
             "--agent is deprecated, use --user-id instead",
             DeprecationWarning,
             stacklevel=2,
         )
-        user_id = args.agent
+        if not user_id:
+            user_id = args.agent
 
     if not args.server or not user_id:
         print(
