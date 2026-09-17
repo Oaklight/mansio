@@ -38,7 +38,7 @@ with MansioClient(
 ## CLI
 
 ```bash
-# Set connection (or use --server, --agent, --token flags)
+# Set connection (or use --server, --user-id, --token flags)
 export MANSIO_URL=https://mansio-api.example.com
 export MANSIO_USER_ID=my-agent
 export MANSIO_TOKEN=mst-xxx
