@@ -1,0 +1,92 @@
+name: Strip AI Co-authorship
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  strip-ai-coauthor:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Strip AI co-author trailers
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # Pattern matches Co-authored-by lines from AI agents (case-insensitive)
+          AI_PATTERN='[Cc]o-[Aa]uthored-[Bb]y:.*\b([Cc]laude|[Cc]ursor|[Cc]odex|[Cc]opilot|[Dd]evin|[Aa]ider|[Cc]line|[Ww]indsurf|[Gg]emini|[Oo]pen[Cc]ode)\b'
+
+          commits=$(git log --format="%H" "${BASE_SHA}..HEAD")
+          if [ -z "$commits" ]; then
+            echo "No commits in PR range"
+            exit 0
+          fi
+
+          dirty=false
+          for sha in $commits; do
+            msg=$(git log -1 --format="%B" "$sha")
+            if echo "$msg" | grep -qE "$AI_PATTERN"; then
+              dirty=true
+              echo "::warning::Commit $sha has AI co-author trailer"
+            fi
+          done
+
+          if [ "$dirty" = "false" ]; then
+            echo "No AI co-author trailers found ✅"
+            exit 0
+          fi
+
+          echo "Rewriting commits to strip AI co-author trailers..."
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f \
+            --msg-filter "sed -E '/${AI_PATTERN}/d' | sed -e :a -e '/^\n*$/{$d;N;ba;}'" \
+            "${BASE_SHA}..HEAD"
+
+          git push --force-with-lease origin "HEAD:${HEAD_REF}"
+          echo "Pushed cleaned commits ✅"
+
+    # Fork PRs: can't push, just flag
+  check-fork-pr:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for AI co-author trailers
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          AI_PATTERN='[Cc]o-[Aa]uthored-[Bb]y:.*\b([Cc]laude|[Cc]ursor|[Cc]odex|[Cc]opilot|[Dd]evin|[Aa]ider|[Cc]line|[Ww]indsurf|[Gg]emini|[Oo]pen[Cc]ode)\b'
+
+          found=false
+          for sha in $(git log --format="%H" "${BASE_SHA}..HEAD"); do
+            msg=$(git log -1 --format="%B" "$sha")
+            if echo "$msg" | grep -qE "$AI_PATTERN"; then
+              found=true
+              echo "::error::Commit $sha contains AI co-author trailer — please remove it before merging"
+              echo "$msg" | grep -E "$AI_PATTERN"
+            fi
+          done
+
+          if [ "$found" = "true" ]; then
+            echo ""
+            echo "To fix: git rebase -i ${BASE_SHA} and edit the commit messages"
+            exit 1
+          fi
+
+          echo "No AI co-author trailers found ✅"
