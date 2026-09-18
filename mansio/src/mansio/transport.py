@@ -82,12 +82,16 @@ class Transport(Protocol):
         self,
         channel: str,
         callback: Callable[[Message], None],
+        on_error: Callable[[Message, Exception], None] | None = None,
     ) -> str:
         """Subscribe to real-time notifications on a channel.
 
         Args:
             channel: Channel to subscribe to.
             callback: Called with each new Message.
+            on_error: Called with ``(message, exception)`` when *callback*
+                raises, so the subscriber can retry or record the failure.
+                When omitted, the exception is logged with its traceback.
 
         Returns:
             Subscription ID for unsubscribe().
