@@ -1,7 +1,7 @@
 """Tests for system channel compaction.
 
-Verifies that _system:registry and _system:cursors:* channels are
-automatically compacted to prevent unbounded growth.
+Verifies that _system:cursors:* channels are automatically compacted
+to prevent unbounded growth.
 
 Closes #46.
 """
@@ -32,43 +32,8 @@ def backend_and_bus(request, tmp_path):
     b.close()
 
 
-class TestRegistryCompaction:
-    """_system:registry keeps only the latest message per sender."""
-
-    def test_single_agent_multiple_registrations(self, bus):
-        """Repeated registrations from same agent collapse to one."""
-        for i in range(10):
-            bus.publish(
-                "_system:registry",
-                "agent-a",
-                "register",
-                f'{{"user_id": "agent-a", "round": {i}}}',
-                metadata={"secret_hash": f"hash-{i}", "action": "register"},
-            )
-
-        msgs = bus.query("_system:registry", limit=1000)
-        assert len(msgs) == 1
-        assert msgs[0].sender == "agent-a"
-        # Should be the latest registration.
-        assert '"round": 9' in msgs[0].payload
-
-    def test_multiple_agents_each_kept(self, bus):
-        """Each agent keeps exactly one entry after compaction."""
-        for agent in ("alice", "bob", "carol"):
-            for i in range(5):
-                bus.publish(
-                    "_system:registry",
-                    agent,
-                    "register",
-                    f'{{"user_id": "{agent}", "round": {i}}}',
-                    metadata={"secret_hash": f"hash-{agent}-{i}"},
-                )
-
-        msgs = bus.query("_system:registry", limit=1000)
-        senders = [m.sender for m in msgs]
-        assert sorted(senders) == ["alice", "bob", "carol"]
-        for m in msgs:
-            assert '"round": 4' in m.payload
+class TestRegularChannelsUnaffected:
+    """system_channel_policy only acts on recognized system channel prefixes."""
 
     def test_non_system_channels_not_compacted(self, bus):
         """Regular channels are unaffected by compaction logic."""

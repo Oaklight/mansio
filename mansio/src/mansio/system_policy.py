@@ -17,7 +17,6 @@ def system_channel_policy(backend: Backend, channel: str) -> None:
     Called on every publish as an intentional hook point — the default
     policy early-returns for non-system channels with no overhead.
 
-    - ``_system:registry`` — one registration per agent is sufficient.
     - ``_system:cursors:*`` — only the latest snapshot matters.
 
     Args:
@@ -28,7 +27,5 @@ def system_channel_policy(backend: Backend, channel: str) -> None:
 
     if not isinstance(backend, Compactable):
         return
-    if channel == "_system:registry":
-        backend.compact(channel, keep_latest_per_sender=True)
-    elif channel.startswith("_system:cursors:"):
+    if channel.startswith("_system:cursors:"):
         backend.compact(channel, max_messages=1)
