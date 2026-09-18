@@ -48,10 +48,12 @@ Requires Python 3.10+.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
+import logging
 import os
 import sys
-import time
+import threading
 from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Iterator
 from typing import Any
 
@@ -117,6 +119,8 @@ class _Unset:
 
 
 _UNSET = _Unset()
+
+logger = logging.getLogger(__name__)
 
 # ── Constants ──
 
@@ -428,7 +432,18 @@ class SSEClient(_SSEClientMixin):
         self._verify = verify
         self._last_event_id = last_event_id
         self._response: Any = None
-        self._closed = False
+        # An Event (not a bare bool) so the retry backoff below can be
+        # woken by close() instead of sleeping out the full interval,
+        # and so it also doubles as the flag a concurrent close() and
+        # this thread's own reconnect handling both check.
+        self._closed = threading.Event()
+        # Guards the read-swap-then-close in _close_response(): once the
+        # socket abort interrupts a blocked read, both this thread (via
+        # its own except/finally) and an external close() can reach
+        # _close_response() at the same moment. Without this, both can
+        # see self._response as non-None and both call .close() on the
+        # same underlying connection concurrently.
+        self._response_lock = threading.Lock()
 
     def __enter__(self) -> SSEClient:
         return self
@@ -440,13 +455,13 @@ class SSEClient(_SSEClientMixin):
         retries = 0
         last_error: Exception | None = None
 
-        while not self._closed:
+        while not self._closed.is_set():
             try:
                 self._response = self._connect()
                 parser = self._init_parser()
 
                 for line in self._response.iter_lines():
-                    if self._closed:
+                    if self._closed.is_set():
                         return
                     event = parser.feed_line(line)
                     if event is not None:
@@ -455,7 +470,7 @@ class SSEClient(_SSEClientMixin):
                         yield event
 
                 # Stream ended normally — attempt reconnect
-                if self._closed:
+                if self._closed.is_set():
                     return
 
             except self._reconnect_errors as exc:
@@ -465,7 +480,10 @@ class SSEClient(_SSEClientMixin):
 
             retries += 1
             self._check_reconnect(retries, last_error)
-            time.sleep(self._retry_interval / 1000)
+            # Interruptible wait: if close() runs during the backoff,
+            # this returns immediately instead of sleeping out the full
+            # interval, and the loop condition above then exits.
+            self._closed.wait(timeout=self._retry_interval / 1000)
 
     def _connect(self) -> Any:
         """Open a streaming GET request."""
@@ -487,7 +505,7 @@ class SSEClient(_SSEClientMixin):
 
         if resp.status_code == 204:
             resp.close()
-            self._closed = True
+            self._closed.set()
             return resp
 
         if not resp.ok:
@@ -498,17 +516,59 @@ class SSEClient(_SSEClientMixin):
         return resp
 
     def _close_response(self) -> None:
-        if self._response is not None:
-            # Tier 3: best-effort silent — reconnect cleanup
-            try:
-                self._response.close()
-            except Exception:
-                pass
+        """Close and clear the current response, exactly once.
+
+        The check-then-act is done under ``_response_lock`` so that when
+        the reader loop's own ``finally`` and a concurrent ``close()``
+        both reach here after the socket abort interrupts a blocked
+        read, only one of them gets a non-``None`` response to close —
+        the other sees ``None`` and returns immediately. That is what
+        prevents the two from closing the same connection at once.
+        """
+        with self._response_lock:
+            resp = self._response
             self._response = None
+        if resp is None:
+            return
+        try:
+            resp.close()
+        except Exception as exc:
+            # The response is being discarded either way; a failure
+            # here has no correctness impact, but it's still worth
+            # knowing about if it ever isn't the expected close-time
+            # connection error.
+            logger.debug("SSE response close failed: %s: %s", type(exc).__name__, exc)
+
+    def stop(self) -> None:
+        """Signal the iterator to stop, without touching the live response.
+
+        Use this instead of ``close()`` when signalling from a thread
+        other than the one driving ``__iter__`` while a read may still
+        be in flight on the current response — e.g. after externally
+        interrupting a blocked read (such as shutting down its socket)
+        to make ``__iter__`` return promptly instead of reconnecting.
+
+        ``close()`` also calls ``_close_response()``, which reaches into
+        the same ``http.client.HTTPResponse`` the reader thread may be
+        mid-``readline()`` on. The stdlib response object has no locking
+        of its own: its EOF/error handling nulls out internal state
+        without checking whether another thread already did the same,
+        so a concurrent ``close()`` can crash the reader's own cleanup.
+        ``stop()`` only sets the flag ``__iter__`` checks; the reader
+        thread's own ``finally`` closes the connection once its read
+        unblocks, entirely on that one thread.
+        """
+        self._closed.set()
 
     def close(self) -> None:
-        """Close the SSE connection."""
-        self._closed = True
+        """Close the SSE connection.
+
+        Only safe to call from the thread driving iteration, or once
+        that thread is confirmed stopped (e.g. after joining it). To
+        signal a stop from another thread while iteration may still be
+        in progress, use ``stop()`` instead.
+        """
+        self._closed.set()
         self._close_response()
 
 
@@ -577,7 +637,10 @@ class AsyncSSEClient(_SSEClientMixin):
         self._verify = verify
         self._last_event_id = last_event_id
         self._response: Any = None
-        self._closed = False
+        # See SSEClient for why this is an Event rather than a bare bool:
+        # it lets the retry backoff below be woken by close() instead of
+        # sleeping out the full interval.
+        self._closed = asyncio.Event()
 
     async def __aenter__(self) -> AsyncSSEClient:
         return self
@@ -589,13 +652,13 @@ class AsyncSSEClient(_SSEClientMixin):
         retries = 0
         last_error: Exception | None = None
 
-        while not self._closed:
+        while not self._closed.is_set():
             try:
                 self._response = await self._connect()
                 parser = self._init_parser()
 
                 async for line in self._response.aiter_lines():
-                    if self._closed:
+                    if self._closed.is_set():
                         return
                     event = parser.feed_line(line)
                     if event is not None:
@@ -603,7 +666,7 @@ class AsyncSSEClient(_SSEClientMixin):
                         retries = 0
                         yield event
 
-                if self._closed:
+                if self._closed.is_set():
                     return
 
             except self._reconnect_errors as exc:
@@ -613,7 +676,15 @@ class AsyncSSEClient(_SSEClientMixin):
 
             retries += 1
             self._check_reconnect(retries, last_error)
-            await asyncio.sleep(self._retry_interval / 1000)
+            # Interruptible wait: if close() runs during the backoff,
+            # this returns as soon as the event is set instead of
+            # sleeping out the full interval. Timing out just means
+            # close() hasn't happened yet, which the loop condition
+            # above handles on its own.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(
+                    self._closed.wait(), timeout=self._retry_interval / 1000
+                )
 
     async def _connect(self) -> Any:
         """Open a streaming async GET request."""
@@ -635,7 +706,7 @@ class AsyncSSEClient(_SSEClientMixin):
 
         if resp.status_code == 204:
             await resp.aclose()
-            self._closed = True
+            self._closed.set()
             return resp
 
         if not resp.ok:
@@ -646,17 +717,44 @@ class AsyncSSEClient(_SSEClientMixin):
         return resp
 
     async def _close_response(self) -> None:
-        if self._response is not None:
-            # Tier 3: best-effort silent — reconnect cleanup
-            try:
-                await self._response.aclose()
-            except Exception:
-                pass
-            self._response = None
+        """Close and clear the current response, exactly once.
+
+        The swap to ``None`` happens with no ``await`` between reading
+        and clearing ``self._response``, so it is atomic with respect to
+        other coroutines on this event loop: if the reader loop's own
+        ``finally`` and a concurrent ``close()`` both reach here, only
+        one of them gets a non-``None`` response to close.
+        """
+        resp = self._response
+        self._response = None
+        if resp is None:
+            return
+        try:
+            await resp.aclose()
+        except Exception as exc:
+            # The response is being discarded either way; a failure
+            # here has no correctness impact, but it's still worth
+            # knowing about if it ever isn't the expected close-time
+            # connection error.
+            logger.debug("SSE response close failed: %s: %s", type(exc).__name__, exc)
+
+    def stop(self) -> None:
+        """Signal the iterator to stop, without touching the live response.
+
+        See ``SSEClient.stop()`` for why this is separate from
+        ``close()``: it only sets the flag ``__aiter__`` checks, so it
+        is safe to call from another task while a read may still be in
+        flight on the current response in the iterating task.
+        """
+        self._closed.set()
 
     async def close(self) -> None:
-        """Close the SSE connection."""
-        self._closed = True
+        """Close the SSE connection.
+
+        To signal a stop from another task while iteration may still
+        be in progress, use ``stop()`` instead.
+        """
+        self._closed.set()
         await self._close_response()
 
 
