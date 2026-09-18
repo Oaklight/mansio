@@ -70,6 +70,9 @@ class HttpTransport:
         self._timeout = timeout
         self._token = token
 
+        # Cache for require_auth, populated lazily on first property access.
+        self._require_auth: bool | None = None
+
         # Shared HTTP client (thread-safe, connection pooling)
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if token:
