@@ -14,11 +14,13 @@ import pytest
 
 from mansio import Bus, MansioServer, MemoryBackend
 from mansio.cli import (
+    _MAILDIR_TOKEN_DB_NAME,
     _check_network_exposure,
     _create_token_store,
     _parse_host_port,
     _redact_token,
     _resolve_admin_auth,
+    _resolve_token_db_path,
     parse_args,
 )
 from mansio.frontends import HttpFrontend
@@ -550,32 +552,98 @@ def _free_port() -> int:
 
 
 class TestCreateTokenStore:
-    """Token store creation must not crash on backends that lack one."""
+    """A token store can be built for every message backend unless --no-auth is set."""
 
-    @pytest.mark.parametrize(
-        ("flag", "value", "backend"),
-        [("--maildir", "md", "maildir"), ("--nats", "nats://localhost:4222", "nats")],
-    )
-    def test_non_sqlite_backend_warns_without_crashing(self, tmp_path, flag, value, backend):
-        if flag == "--maildir":
-            value = str(tmp_path / value)
-        args = parse_args(["serve", flag, value])
+    def test_maildir_backend_builds_store_with_default_path(self, tmp_path):
+        """The maildir directory need not exist yet — _create_token_store
+        makes it, independent of whether the bus has already been built."""
+        maildir = tmp_path / "md"
+        args = parse_args(["serve", "--maildir", str(maildir)])
         logger = _RecordingLogger()
 
-        assert _create_token_store(args, logger) is None
+        store = _create_token_store(args, logger)
 
+        assert store is not None
         level, event, kwargs = logger.calls[-1]
-        assert level == "warning"
+        assert level == "info"
         assert "%s" not in event
-        assert kwargs["backend"] == backend
+        assert kwargs["token_db"] == str(maildir / _MAILDIR_TOKEN_DB_NAME)
+
+    def test_nats_backend_builds_store_with_explicit_token_db(self, tmp_path):
+        token_db = str(tmp_path / "tokens.db")
+        args = parse_args(["serve", "--nats", "nats://localhost:4222", "--token-db", token_db])
+        logger = _RecordingLogger()
+
+        store = _create_token_store(args, logger)
+
+        assert store is not None
+        level, _event, kwargs = logger.calls[-1]
+        assert level == "info"
+        assert kwargs["token_db"] == token_db
+
+    def test_nats_backend_without_token_db_refuses(self):
+        args = parse_args(["serve", "--nats", "nats://localhost:4222"])
+        logger = _RecordingLogger()
+
+        with pytest.raises(SystemExit) as exc:
+            _create_token_store(args, logger)
+
+        assert exc.value.code == 1
+        level, event, _kwargs = logger.calls[-1]
+        assert level == "error"
+        assert "%s" not in event
 
     def test_no_auth_returns_none(self, tmp_path):
         args = parse_args(["serve", "--db", str(tmp_path / "m.db"), "--no-auth"])
         assert _create_token_store(args, _RecordingLogger()) is None
 
+    def test_no_auth_skips_the_nats_token_db_requirement(self):
+        """--no-auth returns before --token-db would even be checked."""
+        args = parse_args(["serve", "--nats", "nats://localhost:4222", "--no-auth"])
+        assert _create_token_store(args, _RecordingLogger()) is None
+
     def test_sqlite_backend_builds_store(self, tmp_path):
         args = parse_args(["serve", "--db", str(tmp_path / "m.db")])
         assert _create_token_store(args, _RecordingLogger()) is not None
+
+
+class TestResolveTokenDbPath:
+    """The token store's file is independent of the message backend.
+
+    Every default is a path that belongs to the deployment (the message
+    database, or the operator-named --maildir directory) rather than to the
+    shell's cwd, so starting the same server from a different directory
+    can't silently open a different, empty token store.
+    """
+
+    def test_sqlite_backend_defaults_to_message_db(self, tmp_path):
+        db_path = str(tmp_path / "m.db")
+        args = parse_args(["serve", "--db", db_path])
+        assert _resolve_token_db_path(args) == db_path
+
+    def test_maildir_backend_defaults_inside_its_own_directory(self, tmp_path):
+        maildir = str(tmp_path / "md")
+        args = parse_args(["serve", "--maildir", maildir])
+        assert _resolve_token_db_path(args) == str(tmp_path / "md" / _MAILDIR_TOKEN_DB_NAME)
+
+    def test_nats_backend_has_no_default(self):
+        args = parse_args(["serve", "--nats", "nats://localhost:4222"])
+        assert _resolve_token_db_path(args) is None
+
+    def test_explicit_token_db_wins_for_sqlite_backend(self, tmp_path):
+        token_db = str(tmp_path / "tokens.db")
+        args = parse_args(["serve", "--db", str(tmp_path / "m.db"), "--token-db", token_db])
+        assert _resolve_token_db_path(args) == token_db
+
+    def test_explicit_token_db_wins_for_maildir_backend(self, tmp_path):
+        token_db = str(tmp_path / "tokens.db")
+        args = parse_args(["serve", "--maildir", str(tmp_path / "md"), "--token-db", token_db])
+        assert _resolve_token_db_path(args) == token_db
+
+    def test_explicit_token_db_satisfies_nats_backend(self, tmp_path):
+        token_db = str(tmp_path / "tokens.db")
+        args = parse_args(["serve", "--nats", "nats://localhost:4222", "--token-db", token_db])
+        assert _resolve_token_db_path(args) == token_db
 
 
 class TestResolveAdminAuth:
@@ -642,16 +710,18 @@ class TestCheckNetworkExposure:
     @pytest.mark.parametrize(
         "backend", [["--maildir", "/tmp/mansio-guard-md"], ["--nats", "nats://localhost:4222"]]
     )
-    def test_token_storeless_backend_with_off_host_api_refuses(self, backend):
-        kwargs = self._expect_refusal([*backend, "--http", "0.0.0.0:8742"])
-        assert kwargs["api_host"] == "0.0.0.0"
+    def test_maildir_or_nats_off_host_api_is_allowed(self, backend):
+        """Every backend gets its own token store now, so this is no different
+        from the SQLite backend — auth is enforced, not skipped."""
+        argv = [*backend, "--http", "0.0.0.0:8742"]
+        assert self._check(argv).calls == []
 
-    def test_token_storeless_backend_on_localhost_is_allowed(self, tmp_path):
+    def test_maildir_backend_on_localhost_is_allowed(self, tmp_path):
         argv = ["--maildir", str(tmp_path / "md"), "--http", "127.0.0.1:8742"]
         assert self._check(argv).calls == []
 
-    def test_token_storeless_backend_with_remote_admin_only_is_allowed(self, tmp_path):
-        """The admin panel keeps its own password, so no API is left open."""
+    def test_maildir_backend_with_remote_admin_only_is_allowed(self, tmp_path):
+        """No --http means no API is bound at all."""
         assert self._check(["--maildir", str(tmp_path / "md"), "--remote"]).calls == []
 
     def test_sqlite_backend_off_host_api_is_allowed(self, tmp_path):
@@ -711,6 +781,10 @@ class TestServeStartsUp:
             [
                 "--maildir",
                 str(tmp_path / "md"),
+                # Keep the token store inside tmp_path — with no --token-db,
+                # a maildir server defaults to a file relative to its cwd.
+                "--token-db",
+                str(tmp_path / "tokens.db"),
                 "--http",
                 f"127.0.0.1:{port}",
                 "--admin-port",
