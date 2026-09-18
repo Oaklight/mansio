@@ -495,12 +495,23 @@ class HttpTransport:
     def _stop_sse(self) -> None:
         """Stop the SSE thread, aborting any read it is blocked on."""
         self._sse_stop.set()
-        # Abort first: the server may not write for another keepalive
-        # interval, and closing the response would block behind the read.
-        self._abort_sse_read()
         client = self._sse_client
         if client is not None:
-            client.close()
+            # stop() before abort: it only sets the flag the reader
+            # loop checks, so by the time the abort below interrupts
+            # the blocked read, the reader already knows to exit rather
+            # than reconnect. Calling client.close() here instead would
+            # race the reader thread's own cleanup of the same response
+            # once that read unblocks — close() reaches into the same
+            # http.client connection the reader may be mid-readline()
+            # on, and the stdlib object isn't safe for that. The reader
+            # thread closes it itself, from its own finally, once its
+            # read returns.
+            client.stop()
+        # Abort second: the server may not write for another keepalive
+        # interval, so without this the reader would stay blocked until
+        # then despite already having been told to stop.
+        self._abort_sse_read()
 
         thread = self._sse_thread
         if (
