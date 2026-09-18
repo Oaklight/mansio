@@ -22,6 +22,12 @@ from mansio import SQLiteBus, __version__
 _LEGACY_DB = "piazza.db"
 _DEFAULT_DB = "mansio.db"
 
+# Default token store filename for backends with an operator-named local
+# directory to put it in (currently just --maildir). Not a bare cwd-relative
+# default: a server started from a different working directory must not
+# silently open a different, empty token store.
+_MAILDIR_TOKEN_DB_NAME = "tokens.db"
+
 # Bind addresses that keep a listener on this machine only.
 _LOCALHOST_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -136,6 +142,18 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="URL",
         default=None,
         help="Use NATS backend at URL (e.g. nats://localhost:4222)",
+    )
+    serve.add_argument(
+        "--token-db",
+        metavar="PATH",
+        default=None,
+        help=(
+            "SQLite file for the token store, independent of the message "
+            "backend. Defaults to the message database with --db, or "
+            f"{_MAILDIR_TOKEN_DB_NAME!r} inside the --maildir directory. "
+            "Required with --nats, which names no local directory to "
+            "default into"
+        ),
     )
     serve.add_argument(
         "--http",
@@ -396,11 +414,10 @@ def _check_network_exposure(args: argparse.Namespace, logger: Any) -> None:
     """Refuse to start when a network-reachable surface enforces no auth.
 
     Exposure is decided from the addresses actually bound — the API host from
-    --http as well as the admin host — because those determine who
-    can reach the server. Auth is unenforced in two cases: --no-auth, and
-    backends with no token store. TokenStore requires SQLite, so --maildir and
-    --nats have no API credentials at all and every request is treated as
-    fully authorized.
+    --http as well as the admin host — because those determine who can reach
+    the server. Every backend can have a token store now (see
+    _create_token_store), so the only way left to run an unauthenticated API
+    is the explicit --no-auth opt-out, and that is what this guard checks.
 
     Args:
         args: Parsed arguments namespace.
@@ -413,12 +430,9 @@ def _check_network_exposure(args: argparse.Namespace, logger: Any) -> None:
     api_host = _api_bind_host(args)
     admin_exposed = _is_off_host(admin_host)
     api_exposed = api_host is not None and _is_off_host(api_host)
-    # --no-auth strips auth from both surfaces; a backend without a token
-    # store only leaves the API open, since the admin panel keeps its password.
+    # --no-auth strips auth from both surfaces.
     no_auth_exposed = args.no_auth and (admin_exposed or api_exposed)
-    # Keep in sync with _create_token_store — both check for token-store-less backends.
-    open_api_exposed = bool(args.maildir or args.nats) and api_exposed
-    if not (no_auth_exposed or open_api_exposed):
+    if not no_auth_exposed:
         return
 
     if args.insecure_allow_unauthenticated_network_api:
@@ -430,28 +444,14 @@ def _check_network_exposure(args: argparse.Namespace, logger: Any) -> None:
         )
         return
 
-    if args.no_auth:
-        logger.error(
-            "--no-auth cannot be used with a network-reachable bind address "
-            "(would expose an unauthenticated API to the network)",
-            admin_host=admin_host,
-            api_host=api_host,
-            hint=(
-                "Bind to 127.0.0.1, or drop --no-auth, or pass "
-                f"{_UNAUTH_OVERRIDE_FLAG} to accept the risk"
-            ),
-        )
-        sys.exit(1)
-
-    backend_name = "maildir" if args.maildir else "nats"
     logger.error(
-        "Backend has no token store, so the API would accept unauthenticated "
-        "requests from the network",
-        backend=backend_name,
+        "--no-auth cannot be used with a network-reachable bind address "
+        "(would expose an unauthenticated API to the network)",
+        admin_host=admin_host,
         api_host=api_host,
         hint=(
-            "Use the SQLite backend (--db) for token auth, bind --http to "
-            f"127.0.0.1, or pass {_UNAUTH_OVERRIDE_FLAG} to accept the risk"
+            "Bind to 127.0.0.1, or drop --no-auth, or pass "
+            f"{_UNAUTH_OVERRIDE_FLAG} to accept the risk"
         ),
     )
     sys.exit(1)
@@ -501,39 +501,82 @@ def _resolve_admin_auth(args: argparse.Namespace, logger: Any) -> tuple[str, str
     return admin_host, admin_password
 
 
-def _create_token_store(args: argparse.Namespace, logger: Any) -> Any:
-    """Create token store if applicable.
+def _resolve_token_db_path(args: argparse.Namespace) -> str | None:
+    """Resolve the SQLite file backing the token store.
 
-    TokenStore requires SQLite; returns None for non-SQLite backends
-    or when --no-auth is set.
+    Independent of the message backend: an explicit --token-db always wins.
+    Beyond that, only defaults that belong to the deployment rather than to
+    the shell's cwd are trustworthy — a cwd-relative default means starting
+    the same server from a different directory silently opens a different,
+    empty token store, which looks like every token (and the ability to
+    authenticate at all) just vanished. Concretely:
+
+    - --db (SQLite backend): the token store reuses the message database
+      file, so a single-file deployment stays single-file.
+    - --maildir: the operator already named a directory that belongs to
+      this deployment, so the token store's file lives inside it.
+    - --nats: names a remote connection string, not a local directory —
+      there is no honest default, so this returns None and the caller
+      requires an explicit --token-db.
+
+    Args:
+        args: Parsed arguments namespace.
+
+    Returns:
+        Filesystem path to the token store's SQLite file, or None when
+        the backend has no directory to default into (--nats without
+        --token-db).
+    """
+    if args.token_db:
+        return args.token_db
+    if args.maildir:
+        return os.path.join(args.maildir, _MAILDIR_TOKEN_DB_NAME)
+    if args.nats:
+        return None
+    return args.db or _DEFAULT_DB
+
+
+def _create_token_store(args: argparse.Namespace, logger: Any) -> Any:
+    """Create the token store used to authenticate API requests.
+
+    The token store's file is resolved independently of the message
+    backend (see _resolve_token_db_path), so every backend can have working
+    auth. The only way to run without a token store is the explicit
+    --no-auth opt-out; --nats additionally requires an explicit --token-db,
+    since it has no directory to default one into.
 
     Args:
         args: Parsed arguments namespace.
         logger: Structured logger.
 
     Returns:
-        TokenStore instance or None.
+        TokenStore instance, or None when --no-auth is set.
     """
     if args.no_auth:
         return None
-    if args.maildir or args.nats:
-        backend_name = "maildir" if args.maildir else "nats"
-        logger.warning(
-            "Token auth not available — every API request is fully authorized",
-            backend=backend_name,
+
+    token_db_path = _resolve_token_db_path(args)
+    if token_db_path is None:
+        logger.error(
+            "--nats names no local directory to default a token store into",
+            hint="Pass --token-db PATH to choose where tokens are stored, or --no-auth to run without auth",
         )
-        return None
+        sys.exit(1)
 
     from mansio.token_store import TokenStore
 
-    db_path = args.db or _DEFAULT_DB
-    token_store = TokenStore(db_path)
+    # Independent of whatever directory-creation the message backend does —
+    # a --maildir path or an explicit --token-db may name a directory that
+    # doesn't exist yet.
+    os.makedirs(os.path.dirname(token_db_path) or ".", exist_ok=True)
+    token_store = TokenStore(token_db_path)
     token_count = len(token_store.list_tokens())
     if token_count > 0:
-        logger.info("Token auth enabled", token_count=token_count)
+        logger.info("Token auth enabled", token_db=token_db_path, token_count=token_count)
     else:
         logger.info(
-            "Token auth ready (no tokens yet — API will reject requests until a token is created)"
+            "Token auth ready (no tokens yet — API will reject requests until a token is created)",
+            token_db=token_db_path,
         )
     return token_store
 
