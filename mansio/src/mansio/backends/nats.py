@@ -66,6 +66,23 @@ logger = logging.getLogger(__name__)
 _DEFAULT_FETCH_CAP = 10_000
 
 
+def _subject_count(state: Any) -> int:
+    """Return the subject count from a JetStream ``StreamState``.
+
+    The ``num_subjects`` attribute is only populated by ``nats-py``/
+    ``nats-server`` versions that support per-subject filtering; older
+    combinations omit it entirely, so callers must not access it
+    directly.
+
+    Args:
+        state: The ``state`` field of a JetStream ``StreamInfo``.
+
+    Returns:
+        The subject count, or 0 if the field is unavailable.
+    """
+    return state.num_subjects if hasattr(state, "num_subjects") else 0
+
+
 class NATSBackend(Backend, Presenceable, Compactable, Watchable):
     """NATS JetStream-backed message backend.
 
@@ -706,7 +723,7 @@ class NATSBackend(Backend, Presenceable, Compactable, Watchable):
             stream_info = await self._js.stream_info(self._stream_name)
             state = stream_info.state
             total_messages = state.messages
-            total_channels = state.num_subjects if hasattr(state, "num_subjects") else 0
+            total_channels = _subject_count(state)
 
             # Scan messages for per-sender/per-type breakdowns
             # NOTE: capped at _DEFAULT_FETCH_CAP messages
@@ -823,7 +840,7 @@ class NATSBackend(Backend, Presenceable, Compactable, Watchable):
             state = stream_info.state
             info_dict["total_messages"] = state.messages
             info_dict["total_bytes"] = state.bytes
-            info_dict["total_channels"] = state.num_subjects
+            info_dict["total_channels"] = _subject_count(state)
             info_dict["first_seq"] = state.first_seq
             info_dict["last_seq"] = state.last_seq
             return info_dict
