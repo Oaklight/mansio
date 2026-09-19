@@ -22,6 +22,7 @@ from mansio.cli import (
     parse_args,
 )
 from mansio.frontends import HttpFrontend
+from mansio.frontends.http import _NO_TOKENS_MESSAGE
 
 # ── Parse Args ────────────────────────────────────────────────────
 
@@ -674,10 +675,33 @@ class TestCheckNetworkExposure:
 
 
 class TestServeStartsUp:
-    """End-to-end: ``mansio serve`` reaches a serving state and stays there."""
+    """End-to-end: ``mansio serve`` reaches a serving state and stays there.
+
+    ``/health`` is in ``_PUBLIC_PATHS`` and bypasses the auth middleware
+    entirely, so a passing health check alone does not prove the server is
+    reachable for real traffic — it stayed green even when a missing
+    ``allow_unauthenticated`` wiring made every ``/v1/*`` endpoint return 403.
+    Each test below also probes a real ``/v1/*`` endpoint and asserts the
+    response that matches its own backend/auth configuration.
+    """
 
     @staticmethod
-    def _serve_until_healthy(argv: list[str], port: int) -> None:
+    def _get(url: str) -> tuple[int, dict]:
+        """GET ``url`` and return (status_code, parsed_json_body) either way."""
+        try:
+            with urllib.request.urlopen(url, timeout=5) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    @classmethod
+    def _serve_until_healthy(cls, argv: list[str], port: int, probe) -> None:
+        """Start ``mansio serve``, wait for /health, then run ``probe(port)``.
+
+        ``probe`` runs while the server is still up, before it is torn down,
+        so it can assert on a real ``/v1/*`` endpoint rather than just the
+        auth-exempt health check.
+        """
         proc = subprocess.Popen(
             [sys.executable, "-m", "mansio.cli", "serve", *argv],
             stdout=subprocess.PIPE,
@@ -693,10 +717,12 @@ class TestServeStartsUp:
                 try:
                     with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as r:
                         assert r.status == 200
-                        return
+                        break
                 except (urllib.error.URLError, OSError):
                     time.sleep(0.2)
-            pytest.fail("serve never became healthy")
+            else:
+                pytest.fail("serve never became healthy")
+            probe(port)
         finally:
             proc.terminate()
             try:
@@ -706,6 +732,14 @@ class TestServeStartsUp:
                 proc.wait(timeout=10)
 
     def test_maildir_backend_serves(self, tmp_path):
+        """No token store exists for maildir, so the frontend must fall back
+        to an open API — /v1/channels should serve, not 403."""
+
+        def probe(port: int) -> None:
+            status, body = self._get(f"http://127.0.0.1:{port}/v1/channels")
+            assert status == 200, body
+            assert "channels" in body
+
         port = _free_port()
         self._serve_until_healthy(
             [
@@ -717,10 +751,24 @@ class TestServeStartsUp:
                 str(_free_port()),
             ],
             port,
+            probe,
         )
 
     def test_remote_without_admin_password_serves(self, tmp_path):
-        """The Docker image's default command shape: --remote, no --admin-password."""
+        """The Docker image's default command shape: --remote, no --admin-password.
+
+        This backend (sqlite) does get a token store, so auth is enforced.
+        No tokens have been created yet, so /v1/channels must still 403 — but
+        specifically with the "no tokens configured" message, proving the
+        token store is wired up rather than silently missing (which would
+        produce the "no token store" message instead).
+        """
+
+        def probe(port: int) -> None:
+            status, body = self._get(f"http://127.0.0.1:{port}/v1/channels")
+            assert status == 403, body
+            assert body.get("message") == _NO_TOKENS_MESSAGE, body
+
         port = _free_port()
         self._serve_until_healthy(
             [
@@ -733,4 +781,5 @@ class TestServeStartsUp:
                 str(_free_port()),
             ],
             port,
+            probe,
         )
