@@ -293,6 +293,43 @@ class TestSsePush:
         transport.close()
 
 
+class TestRequireAuth:
+    """Test HttpTransport.require_auth (issue #303)."""
+
+    def test_first_access_does_not_raise(self, server_url: str) -> None:
+        """__init__ never set self._require_auth, so the first property
+        access raised AttributeError instead of returning a value."""
+        transport = HttpTransport(server_url, user_id="test-agent")
+
+        result = transport.require_auth
+
+        assert isinstance(result, bool)
+        transport.close()
+
+    def test_value_is_cached_after_first_access(self, server_url: str) -> None:
+        """Second access should reuse the cached value instead of
+        issuing another request to the server."""
+        transport = HttpTransport(server_url, user_id="test-agent")
+
+        call_count = 0
+        real_get = transport._http.get
+
+        def counting_get(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return real_get(*args, **kwargs)
+
+        transport._http.get = counting_get
+
+        first = transport.require_auth
+        second = transport.require_auth
+
+        assert first == second
+        assert call_count == 1
+
+        transport.close()
+
+
 # ── Server Lifecycle Tests ────────────────────────────────────────
 
 
