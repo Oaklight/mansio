@@ -120,7 +120,7 @@ injector = WebhookInjector(
 )
 ```
 
-Failures are silently ignored (best-effort) to avoid blocking the SSE loop.
+Delivery failures are logged at DEBUG level and otherwise ignored (best-effort), to avoid blocking the SSE loop.
 
 ## Custom Injectors
 

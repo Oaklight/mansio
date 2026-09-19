@@ -1,174 +1,70 @@
-# Mansio
+# mansio
 
 [![CI](https://github.com/Oaklight/mansio/actions/workflows/ci.yml/badge.svg)](https://github.com/Oaklight/mansio/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/mansio?color=%23800020&label=PyPI)](https://pypi.org/project/mansio/)
-[![Release](https://img.shields.io/github/v/release/Oaklight/mansio?color=%23800020&label=Release)](https://github.com/Oaklight/mansio/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
-English Version | [中文版](README_zh.md)
+Server side of [mansio](https://github.com/Oaklight/mansio) — a lightweight message bus for multi-agent AI collaboration.
 
-A lightweight message bus for multi-agent AI collaboration — the relay station (驿站) where agents meet.
+**Zero runtime dependencies.** Pure Python stdlib + a vendored HTTP server.
 
-## Overview
+This package contains the storage backends, the Bus, the network frontends, the admin panel and the `mansio` CLI. Agents connect to it with the separate [`mansio-client`](https://pypi.org/project/mansio-client/) SDK.
 
-Mansio provides structured, persistent communication channels for AI agents. Instead of point-to-point RPC or shared memory, agents interact through named channels with pub/sub semantics, cursor-based polling, and built-in identity management.
-
-```
-Backend (storage)  →  Bus (routing)  →  Client SDK (agent API)
-   SQLite / Memory       pub/sub           identity, cursors,
-                         channels           DMs, notes, memory
-```
-
-## Features
-
-- **Channel-based messaging** — named channels with pub/sub, cursor-tracked polling, and message ordering via monotonic UUIDs
-- **Server-side validation** — channel names, message payloads, and query parameters are validated at the Frontend layer; malformed input is rejected before reaching the Bus
-- **Access control** — system channels (`_system:*`), private channels (`notebook:X`, `memory:X`), and broadcast channels enforce per-agent write restrictions; supertokens grant elevated access
-- **Pluggable storage** — `SQLiteBackend` (persistent, WAL mode) and `MemoryBackend` (ephemeral, testing); protocol-based, easy to extend
-- **Client SDK** — `MansioClient` with agent identity, cursor persistence across sessions, and token-based authentication (per-agent secrets and supertokens)
-- **Semantic APIs** — DMs, broadcast channels, notes (with tags), thoughts (chain-of-thought logging), memory (store/recall), notifications
-- **Admin panel** — built-in HTTP dashboard with REST API for stats, channel browsing, message inspection, and throughput monitoring; modular `admin/routes/` subpackage with dict-based dispatch
-- **Flexible connection** — connect via Bus object, file path (SQLite), or `:memory:` string; URL schemes (`http://`, `redis://`) reserved for future transports
-- **Zero runtime dependencies** — pure Python, stdlib only
-
-## Quick Start
-
-```python
-from mansio import MansioClient
-
-# In-memory bus (for testing)
-with MansioClient(":memory:", "agent-alpha") as alice:
-    alice.channel_send("general", "hello everyone!")
-    alice.note_write("remember to check logs", tags=["ops"])
-    alice.thought_record("planning", "next steps", "need to coordinate with bob")
-
-# SQLite-backed (persistent)
-with MansioClient("/tmp/mansio.db", "agent-alpha") as alice:
-    alice.dm_send("agent-beta", "ready to sync?")
-
-# Multi-agent collaboration
-from mansio import Bus, MemoryBackend
-
-bus = Bus(backend=MemoryBackend())
-
-alice = MansioClient(bus, "agent-alice")
-bob = MansioClient(bus, "agent-bob")
-
-alice.dm_send("agent-bob", "PR is ready for review")
-messages = bob.dm_read("agent-alice")  # ["PR is ready for review"]
-
-alice.close()
-bob.close()
-bus.close()
-```
-
-## Architecture
-
-Mansio follows a layered architecture inspired by messaging middleware, adapted for AI agent workflows:
-
-| Layer | Component | Role |
-|-------|-----------|------|
-| **Storage** | `Backend` protocol | Persistent or ephemeral message storage (`SQLiteBackend`, `MemoryBackend`) |
-| **Routing** | `Bus` | Channel management, pub/sub dispatch, UUID generation |
-| **Transport** | `Transport` protocol | Abstraction for local vs. remote bus access (Bus directly satisfies Transport) |
-| **Agent API** | `MansioClient` | Identity, cursors, auth, semantic messaging APIs |
-| **Frontend** | `Frontend` protocol | Network-facing servers (REST + SSE) binding to Bus (`HttpFrontend`, `MansioServer`) |
-| **Admin** | `AdminServer` | HTTP dashboard + REST API for monitoring |
-
-For detailed design rationale, see [DESIGN_EN.md](docs/DESIGN_EN.md).
-
-## Installation
-
-Requires **Python >= 3.10**.
+## Install
 
 ```bash
-pip install mansio
+pip install mansio            # SQLite / Memory / Maildir backends
+pip install "mansio[nats]"    # + NATS JetStream backend
+pip install "mansio[irc]"     # + IRC frontend
 ```
 
-Or from source:
+## Run a Server
 
 ```bash
-git clone https://github.com/Oaklight/mansio.git
-cd mansio
-pip install -e ".[dev]"
+mansio serve --db mansio.db --http 8742 --admin-port 8741
 ```
 
-## Client SDK API
+- `--http [HOST:]PORT` enables the HTTP frontend (REST + SSE). Agents cannot connect without it.
+- `--admin-port PORT` serves the admin dashboard and its REST API (default: 8741).
+- `--maildir PATH` / `--nats URL` select a different backend.
+- `--no-auth` disables API and admin authentication — development only.
 
-### Core Operations
+Without `--no-auth` the HTTP API requires a bearer token; issue one from the admin panel or its API:
 
-| Method | Description |
-|--------|-------------|
-| `channel_send(channel, content)` | Send message to a channel |
-| `channel_read(channel)` | Read messages (no cursor advance) |
-| `channel_poll(channel)` | Poll new messages (advances cursor) |
-| `channel_list()` | List all channels |
+```bash
+curl -X POST http://localhost:8741/api/users \
+     -H 'Content-Type: application/json' \
+     -d '{"user_id": "agent-alice", "label": "initial token"}'
+```
 
-### Semantic APIs
-
-| Method | Description |
-|--------|-------------|
-| `dm_send(target, content)` | Send direct message |
-| `dm_read(peer)` | Read DM conversation |
-| `note_write(content, tags=)` | Write a note with optional tags |
-| `note_read(tags=)` | Read notes, optionally filtered by tags |
-| `thought_record(mode, focus, content)` | Record chain-of-thought |
-| `thought_read()` | Read thought history |
-| `memory_store(content)` | Store a memory |
-| `memory_recall(query)` | Recall memories by keyword |
-| `broadcast_list()` / `broadcast_read(topic)` | Browse broadcast channels |
-| `notification_check()` | Poll notifications |
-
-### Authentication
+## Embedding
 
 ```python
-# Register new agent (returns client + secret)
-client, secret = MansioClient.register(bus, "agent-id")
+from mansio import Bus, SQLiteBackend, MansioServer
+from mansio.frontends import HttpFrontend
 
-# Reconnect with secret
-client = MansioClient(bus, "agent-id", secret=saved_secret)
+bus = Bus(backend=SQLiteBackend("mansio.db"))
+server = MansioServer(bus)
+server.add_frontend(HttpFrontend(host="127.0.0.1", port=8742))
+server.serve_forever()  # blocks
 ```
 
-### Admin Panel
+## Components
 
-```python
-from mansio import SQLiteBus
+| Layer | Component |
+|-------|-----------|
+| Storage | `SQLiteBackend`, `MemoryBackend`, `NATSBackend`, `MaildirBackend` (`Backend` ABC, plus the optional `ChannelStore`, `Deletable`, `Presenceable`, `Compactable` protocols) |
+| Routing | `Bus`, `SQLiteBus` |
+| Frontend | `HttpFrontend` (REST + SSE), `IrcFrontend` |
+| Orchestration | `MansioServer` |
+| Admin | `AdminServer`, `TokenStore` |
 
-bus = SQLiteBus("mansio.db")
-info = bus.start_admin(port=8741)
-print(f"Dashboard: {info.url}")
-# Visit http://localhost:8741 for the web UI
-```
+## Documentation
 
-## Roadmap
-
-### Shipped
-
-- [x] **RemoteTransport** — `HttpFrontend`, `MansioServer`, `HttpTransport`
-- [x] **IRC Frontend** — optional `irc` extra
-- [x] **Channel ACL** — system, private, and broadcast channel write restrictions enforced server-side
-- [x] **Message threading** — `parent_id` / `thread_id` with nested reply support
-- [x] **Message deletion** — per-message and per-channel deletion with admin bulk cleanup
-- [x] **Pagination** — offset-based pagination with `total`, `has_more`, `offset` metadata
-- [x] **MCP server** — Model Context Protocol integration (`mansio[mcp]`)
-- [x] **Presence & heartbeat** — agent online/offline status and real-time subscriptions
-- [x] **NATS backend** — JetStream-backed persistent storage
-- [x] **Maildir backend** — filesystem-based storage
-- [x] **Compaction** — registry and cursor compaction for long-running instances
-- [x] **Remote transport reliability** — SSE reconnect with Last-Event-ID, WAL retry logging, slow-consumer drop notification
-
-### Planned
-
-- [ ] **Message TTL** — automatic expiry and cleanup
-- [ ] **Async API** — native async/await support
-- [ ] **Semantic memory recall** — vector embedding search
-- [ ] **Redis/AMQP backends** — distributed storage
-- [ ] **Federation** — cross-instance communication ([#4](https://github.com/Oaklight/mansio/issues/4))
-
-## Academic Context
-
-Mansio is the reference implementation for Chapter 9 of a dissertation on enabling agentic AI at scale through decoupled abstractions. The design emphasizes protocol-based interfaces, pluggable components, and a clear separation between transport, storage, and agent-level semantics.
+Full documentation, the client API reference and the design document live in the
+[repository README](https://github.com/Oaklight/mansio#readme) and
+[docs/DESIGN_EN.md](https://github.com/Oaklight/mansio/blob/master/docs/DESIGN_EN.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT
