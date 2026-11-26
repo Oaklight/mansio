@@ -6,6 +6,8 @@ import warnings
 
 import pytest
 
+from mansio_client import MansioAPIError
+from mansio_client._vendor.httpclient import HttpConnectionError
 from mansio_client.cli import _build_parser, _msg_dict, main
 from mansio_client.types import Message
 
@@ -116,3 +118,58 @@ class TestMsgDict:
         assert "parent_id" not in d
         assert "thread_id" not in d
         assert "intent" not in d
+
+
+class _FailingClient:
+    """Client stand-in whose first operation raises *error*."""
+
+    def __init__(self, error):
+        self.error = error
+        self.closed = False
+
+    def channel_list(self):
+        raise self.error
+
+    def close(self):
+        self.closed = True
+
+
+class TestErrorReporting:
+    """API and transport failures become one clean error line, not a traceback."""
+
+    def _run(self, monkeypatch, capsys, error):
+        import mansio_client.cli as cli
+
+        fake = _FailingClient(error)
+        monkeypatch.setattr(cli, "MansioClient", lambda *a, **k: fake)
+        with pytest.raises(SystemExit) as exc:
+            main(
+                [
+                    "-s",
+                    "http://example.invalid",
+                    "--user-id",
+                    "test-agent",
+                    "channels",
+                ]
+            )
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "Traceback" not in err
+        assert fake.closed is True
+        return err
+
+    def test_api_error(self, monkeypatch, capsys):
+        err = self._run(monkeypatch, capsys, MansioAPIError(401, "bad token"))
+        assert "error: HTTP 401: bad token" in err
+
+    def test_connection_error(self, monkeypatch, capsys):
+        err = self._run(monkeypatch, capsys, HttpConnectionError("Connection refused"))
+        assert "error: cannot reach http://example.invalid: Connection refused" in err
+
+    def test_invalid_user_id(self, monkeypatch, capsys):
+        # The real client rejects the ID before any network call.
+        monkeypatch.delenv("MANSIO_URL", raising=False)
+        with pytest.raises(SystemExit) as exc:
+            main(["-s", "http://127.0.0.1:1", "--user-id", "INVALID", "channels"])
+        assert exc.value.code == 1
+        assert "error: Invalid user_id" in capsys.readouterr().err

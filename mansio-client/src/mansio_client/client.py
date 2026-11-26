@@ -112,10 +112,10 @@ class MansioClient:
                 json.dumps({"status": "online"}),
                 metadata={"display_name": self._display_name},
             )
-        except Exception:
-            _log.warning(
-                "presence announcement failed for %s", self._user_id, exc_info=True
-            )
+        except Exception as exc:
+            # A stack trace here would bury the CLI's one-line error when
+            # the server is simply unreachable; the message is enough.
+            _log.warning("presence announcement failed for %s: %s", self._user_id, exc)
 
     @property
     def _cursor_channel(self) -> str:
