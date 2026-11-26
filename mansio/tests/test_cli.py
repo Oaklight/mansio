@@ -25,6 +25,7 @@ from mansio.cli import (
 )
 from mansio.frontends import HttpFrontend
 from mansio.frontends.http import _NO_TOKENS_MESSAGE
+from mansio.token_store import TokenStore
 
 # ── Parse Args ────────────────────────────────────────────────────
 
@@ -756,10 +757,11 @@ class TestServeStartsUp:
     """
 
     @staticmethod
-    def _get(url: str) -> tuple[int, dict]:
+    def _get(url: str, headers: dict[str, str] | None = None) -> tuple[int, dict]:
         """GET ``url`` and return (status_code, parsed_json_body) either way."""
+        request = urllib.request.Request(url, headers=headers or {})
         try:
-            with urllib.request.urlopen(url, timeout=5) as r:
+            with urllib.request.urlopen(request, timeout=5) as r:
                 return r.status, json.loads(r.read())
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read())
@@ -802,11 +804,20 @@ class TestServeStartsUp:
                 proc.wait(timeout=10)
 
     def test_maildir_backend_serves(self, tmp_path):
-        """No token store exists for maildir, so the frontend must fall back
-        to an open API — /v1/channels should serve, not 403."""
+        """A maildir server gets a token store like every other backend.
+
+        A token is created in the --token-db file before startup, so the
+        probe proves auth is wired end to end: an unauthenticated request
+        is rejected, and the token created in that file is accepted.
+        """
+        token_db = tmp_path / "tokens.db"
+        token = TokenStore(str(token_db)).create_token(user_id="agent-a")["token"]
 
         def probe(port: int) -> None:
-            status, body = self._get(f"http://127.0.0.1:{port}/v1/channels")
+            url = f"http://127.0.0.1:{port}/v1/channels"
+            status, body = self._get(url)
+            assert status == 401, body
+            status, body = self._get(url, headers={"Authorization": f"Bearer {token}"})
             assert status == 200, body
             assert "channels" in body
 
@@ -818,7 +829,7 @@ class TestServeStartsUp:
                 # Keep the token store inside tmp_path — with no --token-db,
                 # a maildir server defaults to a file relative to its cwd.
                 "--token-db",
-                str(tmp_path / "tokens.db"),
+                str(token_db),
                 "--http",
                 f"127.0.0.1:{port}",
                 "--admin-port",
