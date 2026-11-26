@@ -217,6 +217,30 @@ class TestLoopGuard:
 
         assert fired == []
 
+    def test_self_thread_does_not_fire(self, clock) -> None:
+        """Replying under your own messages is not a two-agent loop."""
+        transport = _FakeTransport()
+        fired: list[LoopSuspected] = []
+        client = _client(transport, fired.append)
+        own = [_msg(f"own-{i}", "agent-x") for i in range(8)]
+        transport.messages = own
+        client.channel_read("general", limit=20)
+
+        for index in range(8):
+            _reply(client, own[index % 2].id)
+
+        assert fired == []
+
+    def test_dm_with_self_only_does_not_fire(self, clock) -> None:
+        transport = _FakeTransport()
+        fired: list[LoopSuspected] = []
+        client = _client(transport, fired.append)
+
+        for _ in range(8):
+            client.channel_send("dm:agent-x:agent-x", "ping")
+
+        assert fired == []
+
 
 class TestSendPathUnaffected:
     def test_sends_are_unchanged_in_count_and_order(self, clock) -> None:
@@ -249,6 +273,21 @@ class TestSendPathUnaffected:
         assert len(seen) == 1
         assert len(ids) == 8
         assert ids[-1] == "msg-8"
+
+    def test_parented_burst_does_not_fire(self, clock) -> None:
+        """One intentional burst of 8 is not a loop; separate sends still are."""
+        transport = _FakeTransport()
+        fired: list[LoopSuspected] = []
+        client = _client(transport, fired.append)
+        peers = _seed_peer_messages(transport)
+        client.channel_read("general", limit=20)
+
+        client.send_burst("general", ["m"] * 8, parent_id=peers[0].id)
+        assert fired == []
+
+        for index in range(8):
+            _reply(client, peers[index % 2].id)
+        assert len(fired) == 1
 
     def test_detection_is_off_without_the_callback(self, clock) -> None:
         transport = _FakeTransport()
