@@ -22,11 +22,15 @@ jobs:
 
       - name: Verify version matches package
         run: |
-          PKG_VER=$(python -c "import re; m=re.search(r'__version__\s*=\s*\"(.+?)\"', open('mansio/src/mansio/__init__.py').read()); print(m.group(1))")
+          PKG_VER=$(python -c "import re; m=re.search(r'__version__\s*=\s*\"(.+?)\"', open('packages/mansio-web/src/mansio_web/__init__.py').read()); print(m.group(1))")
           echo "Package version: $PKG_VER"
           echo "Requested version: ${{ inputs.version }}"
           [ "$PKG_VER" = "${{ inputs.version }}" ] || \
             (echo "::error::Version mismatch: __init__.py has $PKG_VER but release requested ${{ inputs.version }}"; exit 1)
+          CORE_VER=$(python -c "import re; m=re.search(r'__version__\s*=\s*\"(.+?)\"', open('packages/mansio-core/src/mansio_core/__init__.py').read()); print(m.group(1))")
+          echo "Core version: $CORE_VER"
+          [ "$CORE_VER" = "${{ inputs.version }}" ] || \
+            (echo "::error::Core version mismatch: __init__.py has $CORE_VER but release requested ${{ inputs.version }}"; exit 1)
 
       - name: Create and push git tag
         run: |
@@ -52,18 +56,25 @@ jobs:
       - name: Build wheel + sdist
         run: |
           pip install --upgrade pip build
-          python -m build mansio/
+          python -m build packages/mansio-core/ && python -m build packages/mansio-web/
 
-      - name: Publish to PyPI
+      - name: Publish mansio-core to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: mansio/dist/
+          packages-dir: packages/mansio-core/dist/
+
+      - name: Publish mansio to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/mansio-web/dist/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: mansio/dist/*
+          path: |
+            packages/mansio-web/dist/*
+            packages/mansio-core/dist/*
           retention-days: 7
 
   docker:

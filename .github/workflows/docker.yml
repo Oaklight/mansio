@@ -58,7 +58,7 @@ jobs:
           echo "Building version: $VERSION"
 
       - name: Ensure build context has dist/
-        run: mkdir -p mansio/dist
+        run: mkdir -p packages/mansio-web/dist packages/mansio-core/dist
 
       - name: Wait for PyPI availability
         run: |

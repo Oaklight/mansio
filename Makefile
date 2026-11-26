@@ -1,13 +1,15 @@
-# Makefile for mansio package
+# Makefile for mansio packages
 
 # Variables
 PACKAGE_NAME := mansio
-PACKAGE_DIR := mansio
-CLIENT_DIR := mansio-client
+CORE_DIR := packages/mansio-core
+PACKAGE_DIR := packages/mansio-web
+CLIENT_DIR := packages/mansio-client
 DOCKER_IMAGE := oaklight/mansio
-DIST_DIR := mansio/dist
-CLIENT_DIST_DIR := mansio-client/dist
-VERSION := $(shell grep -oE '__version__[[:space:]]*=[[:space:]]*"[^"]+"' $(PACKAGE_DIR)/src/mansio/__init__.py | grep -oE '"[^"]+"' | tr -d '"' || echo "0.0.1")
+CORE_DIST_DIR := $(CORE_DIR)/dist
+DIST_DIR := $(PACKAGE_DIR)/dist
+CLIENT_DIST_DIR := $(CLIENT_DIR)/dist
+VERSION := $(shell grep -oE '__version__[[:space:]]*=[[:space:]]*"[^"]+"' $(PACKAGE_DIR)/src/mansio_web/__init__.py | grep -oE '"[^"]+"' | tr -d '"' || echo "0.0.1")
 
 # Optional variables
 V ?= $(VERSION)
@@ -23,9 +25,9 @@ all: format lint test
 
 format:
 	@echo "Running ruff check --fix..."
-	ruff check --fix $(PACKAGE_DIR)/src/ $(PACKAGE_DIR)/tests/ $(CLIENT_DIR)/src/ $(CLIENT_DIR)/tests/
+	ruff check --fix packages/
 	@echo "Running ruff format..."
-	ruff format $(PACKAGE_DIR)/src/ $(PACKAGE_DIR)/tests/ $(CLIENT_DIR)/src/ $(CLIENT_DIR)/tests/
+	ruff format packages/
 	@echo "Format complete."
 
 # ──────────────────────────────────────────────
@@ -34,11 +36,9 @@ format:
 
 lint:
 	@echo "Running ruff check..."
-	ruff check $(PACKAGE_DIR)/src/ $(CLIENT_DIR)/src/
-	@echo "Running ty check on $(PACKAGE_DIR)..."
-	ty check --project $(PACKAGE_DIR)
-	@echo "Running ty check on $(CLIENT_DIR)..."
-	ty check --project $(CLIENT_DIR)
+	ruff check packages/
+	@echo "Running ty check..."
+	ty check
 	@echo "Type check complete."
 
 # ──────────────────────────────────────────────
@@ -46,12 +46,35 @@ lint:
 # ──────────────────────────────────────────────
 
 test:
-	@echo "Running tests..."
-	pytest $(PACKAGE_DIR)/tests/ $(CLIENT_DIR)/tests/ -v --tb=short
+	@echo "Running core tests..."
+	pytest $(CORE_DIR)/tests/ -v --tb=short
+	@echo "Running web tests..."
+	pytest $(PACKAGE_DIR)/tests/ -v --tb=short
+	@echo "Running client tests..."
+	pytest $(CLIENT_DIR)/tests/ -v --tb=short
 	@echo "Tests completed."
 
 # ──────────────────────────────────────────────
-# Package targets
+# Core package targets
+# ──────────────────────────────────────────────
+
+build-core: clean-core
+	@echo "Building mansio-core version $(V)..."
+	python -m build $(CORE_DIR)/
+	@echo "Build complete. Distribution files are in $(CORE_DIST_DIR)/"
+
+push-core:
+	@echo "Pushing mansio-core to PyPI..."
+	twine upload $(CORE_DIST_DIR)/*
+	@echo "mansio-core pushed to PyPI."
+
+clean-core:
+	@echo "Cleaning up core build and distribution files..."
+	rm -rf $(CORE_DIST_DIR) $(CORE_DIR)/src/*.egg-info
+	@echo "Core cleanup complete."
+
+# ──────────────────────────────────────────────
+# Server package targets
 # ──────────────────────────────────────────────
 
 build-package: clean-package
@@ -66,7 +89,7 @@ push-package:
 
 clean-package:
 	@echo "Cleaning up build and distribution files..."
-	rm -rf $(DIST_DIR) *.egg-info $(PACKAGE_DIR)/src/*.egg-info
+	rm -rf $(DIST_DIR) $(PACKAGE_DIR)/src/*.egg-info
 	@echo "Cleanup complete."
 
 # Aliases
@@ -109,6 +132,11 @@ build-docker:
 		LOCAL_WHEEL=$$(ls $(DIST_DIR)/*$(V)*.whl | head -n 1 | xargs basename); \
 		echo "Found local wheel: $$LOCAL_WHEEL"; \
 		BUILD_ARGS="$$BUILD_ARGS --build-arg LOCAL_WHEEL=$$LOCAL_WHEEL"; \
+		if [ -d "$(CORE_DIST_DIR)" ] && [ -n "$$(ls -A $(CORE_DIST_DIR)/*.whl 2>/dev/null)" ]; then \
+			LOCAL_CORE_WHEEL=$$(ls $(CORE_DIST_DIR)/*.whl | head -n 1 | xargs basename); \
+			echo "Found local core wheel: $$LOCAL_CORE_WHEEL"; \
+			BUILD_ARGS="$$BUILD_ARGS --build-arg LOCAL_CORE_WHEEL=$$LOCAL_CORE_WHEEL"; \
+		fi; \
 	elif echo "$(V)" | grep -qE '^[0-9]+\.[0-9]+'; then \
 		echo "Using version from PyPI: $(V)"; \
 		BUILD_ARGS="$$BUILD_ARGS --build-arg PACKAGE_VERSION=$(V)"; \
@@ -147,11 +175,16 @@ help:
 	@echo "Development:"
 	@echo "  format         - Run ruff check --fix and ruff format"
 	@echo "  lint           - Run ruff check and ty type checker"
-	@echo "  test           - Run tests with pytest"
+	@echo "  test           - Run core, web and client tests with pytest"
 	@echo ""
-	@echo "Package (mansio):"
-	@echo "  build-package  - Build the Python package"
-	@echo "  push-package   - Push the package to PyPI"
+	@echo "Core (mansio-core):"
+	@echo "  build-core     - Build the core package"
+	@echo "  push-core      - Push mansio-core to PyPI"
+	@echo "  clean-core     - Clean up core build files"
+	@echo ""
+	@echo "Server (mansio):"
+	@echo "  build-package  - Build the server package"
+	@echo "  push-package   - Push the server package to PyPI"
 	@echo "  clean-package  - Clean up build and distribution files"
 	@echo ""
 	@echo "Client (mansio-client):"
@@ -172,20 +205,11 @@ help:
 	@echo "Composite targets:"
 	@echo "  all            - Run format, lint, and test (default)"
 	@echo ""
-	@echo "Usage examples:"
-	@echo "  make build-docker                  # build from local wheel or PyPI, tag=VERSION"
-	@echo "  make build-docker V=0.1.0          # install 0.1.0 from PyPI, tag=0.1.0"
-	@echo "  make build-docker V=dev-test       # use local wheel in dist/, tag=dev-test"
-	@echo "  make build-docker PYPI_MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple"
-	@echo "  make build-docker REGISTRY_MIRROR=docker.1ms.run"
-	@echo ""
 	@echo "Variables:"
 	@echo "  V=<version|tag>          - Docker image tag (default: auto-detected from __init__.py)"
-	@echo "                             Semver values also set the PyPI install version"
-	@echo "                             Non-semver values (e.g. dev-test) use local wheel in dist/"
 	@echo "  PYPI_MIRROR=<url>        - PyPI mirror URL"
 	@echo "  REGISTRY_MIRROR=<host>   - Docker registry mirror"
 	@echo ""
 	@echo "Detected version: $(VERSION)"
 
-.PHONY: all format lint test build-package push-package clean-package build push clean build-client push-client clean-client build-docker push-docker clean-docker help
+.PHONY: all format lint test build-core push-core clean-core build-package push-package clean-package build push clean build-client push-client clean-client build-docker push-docker clean-docker help

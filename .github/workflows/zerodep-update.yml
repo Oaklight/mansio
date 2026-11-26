@@ -44,7 +44,7 @@ jobs:
         run: |
           python3 .github/scripts/zerodep_guard.py inspect \
             "$RUNNER_TEMP/zerodep-plan.json" "$GITHUB_STEP_SUMMARY" \
-            mansio mansio-client shared >> "$GITHUB_OUTPUT"
+            packages/mansio-core packages/mansio-web packages/mansio-client >> "$GITHUB_OUTPUT"
 
       - name: Update safe modules
         if: steps.state.outputs.has_updates == 'true'

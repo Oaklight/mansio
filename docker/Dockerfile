@@ -7,6 +7,7 @@ FROM ${REGISTRY_MIRROR:-docker.io}/python:${PYTHON_VERSION}-alpine AS base
 ARG PYPI_MIRROR
 ARG EXTRA_INDEX_URL
 ARG LOCAL_WHEEL
+ARG LOCAL_CORE_WHEEL
 ARG PACKAGE_VERSION
 
 # Prevents Python from writing pyc files and enables unbuffered output.
@@ -24,7 +25,8 @@ RUN apk add --no-cache su-exec
 
 # Copy only the dist/ directory for local wheels (never copy the full tree —
 # even with .dockerignore, a broad COPY risks leaking secrets into layers).
-COPY mansio/dist/ /tmp/dist/
+COPY packages/mansio-web/dist/ /tmp/dist/
+COPY packages/mansio-core/dist/ /tmp/core-dist/
 
 # Install mansio: local wheel > specific version > latest from PyPI
 #
@@ -34,6 +36,10 @@ COPY mansio/dist/ /tmp/dist/
 RUN PIP_ARGS="--no-cache-dir"; \
     [ -n "$PYPI_MIRROR" ] && PIP_ARGS="$PIP_ARGS -i $PYPI_MIRROR"; \
     if [ -n "$LOCAL_WHEEL" ] && [ -f "/tmp/dist/$LOCAL_WHEEL" ]; then \
+        if [ -n "$LOCAL_CORE_WHEEL" ] && [ -f "/tmp/core-dist/$LOCAL_CORE_WHEEL" ]; then \
+            echo "Installing mansio-core from local wheel: $LOCAL_CORE_WHEEL"; \
+            pip install $PIP_ARGS "/tmp/core-dist/${LOCAL_CORE_WHEEL}"; \
+        fi; \
         echo "Installing from local wheel: $LOCAL_WHEEL"; \
         pip install $PIP_ARGS "/tmp/dist/${LOCAL_WHEEL}"; \
     elif [ -n "$EXTRA_INDEX_URL" ] && [ -n "$PACKAGE_VERSION" ]; then \
