@@ -65,3 +65,43 @@ def test_retired_channel_can_be_reused():
     assert bus.channels() == ["jobs"]
     assert bus.stats()["total_channels"] == 1
     assert bus.backend.message_count("jobs") == 1
+
+
+class TestCompactQueueStatus:
+    """compact() must forget queue status for every message it removes."""
+
+    @pytest.mark.parametrize(
+        "make_backend",
+        [MemoryBackend, lambda: SQLiteBackend(":memory:")],
+        ids=["memory", "sqlite"],
+    )
+    def test_trim_drops_status_of_removed_queue_messages(self, make_backend):
+        bus = Bus(backend=make_backend())
+        ids = [bus.publish("jobs", "producer", "task", f"task-{i}", queue=True) for i in range(3)]
+        _drain_queue(bus, "jobs", 3)
+
+        assert bus.backend.compact("jobs", max_messages=1) == 2
+
+        assert bus.backend.queue_status(ids[0]) is None
+        assert bus.backend.queue_status(ids[1]) is None
+        assert bus.backend.queue_status(ids[2]) is not None
+        assert bus.backend.queue_stats() == {"unclaimed": 0, "claimed": 0, "completed": 1}
+
+    @pytest.mark.parametrize(
+        "make_backend",
+        [MemoryBackend, lambda: SQLiteBackend(":memory:")],
+        ids=["memory", "sqlite"],
+    )
+    def test_dedup_drops_status_of_removed_queue_messages(self, make_backend):
+        bus = Bus(backend=make_backend())
+        first_a = bus.publish("jobs", "a", "task", "a1", queue=True)
+        first_b = bus.publish("jobs", "b", "task", "b1", queue=True)
+        last_a = bus.publish("jobs", "a", "task", "a2", queue=True)
+        _drain_queue(bus, "jobs", 3)
+
+        assert bus.backend.compact("jobs", keep_latest_per_sender=True) == 1
+
+        assert bus.backend.queue_status(first_a) is None
+        assert bus.backend.queue_status(first_b) is not None
+        assert bus.backend.queue_status(last_a) is not None
+        assert bus.backend.queue_stats()["completed"] == 2
