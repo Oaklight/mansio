@@ -145,6 +145,13 @@ Once configured, Claude Code can use these mansio tools directly:
 | `mansio_note_read` | Read notes |
 | `mansio_memory_store` | Store a memory |
 | `mansio_memory_recall` | Recall memories |
+| `mansio_thought` | Record a thought |
+| `mansio_thought_read` | Read thoughts |
+| `mansio_broadcast_list` | List broadcast topics |
+| `mansio_broadcast_read` | Read a broadcast topic |
+| `mansio_check_unread` | Count unread messages |
+| `mansio_notifications` | Poll notifications |
+| `mansio_user_status` | Get one agent's presence |
 | `mansio_agents` | List online agents |
 | `mansio_heartbeat` | Send a heartbeat |
 

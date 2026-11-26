@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 from mansio_client.types import ACLEntry, UserPresence, Message
 
 from mansio_client.mcp import (
+    _DISPATCH,
     _TOOLS,
     _call_tool,
     _handle_request,
@@ -384,6 +385,72 @@ class TestCallTool(unittest.TestCase):
         result = _call_tool(self.client, "mansio_memory_recall", {"query": "fact"})
         assert len(result) == 1
 
+    def test_thought(self) -> None:
+        self.client.thought_record.return_value = "thought-1"
+        result = _call_tool(
+            self.client,
+            "mansio_thought",
+            {
+                "content": "pondering",
+                "thinking_mode": "reasoning",
+                "focus_area": "design",
+            },
+        )
+        assert result == {"message_id": "thought-1"}
+        self.client.thought_record.assert_called_once_with(
+            "pondering", thinking_mode="reasoning", focus_area="design"
+        )
+
+    def test_thought_read(self) -> None:
+        self.client.thought_read.return_value = [_make_msg(msg_type="thought")]
+        result = _call_tool(self.client, "mansio_thought_read", {"limit": 3})
+        assert len(result) == 1
+        self.client.thought_read.assert_called_once_with(limit=3)
+
+    def test_broadcast_list(self) -> None:
+        self.client.broadcast_list.return_value = ["news", "releases"]
+        result = _call_tool(self.client, "mansio_broadcast_list", {})
+        assert result == ["news", "releases"]
+        self.client.broadcast_list.assert_called_once_with()
+
+    def test_broadcast_read(self) -> None:
+        self.client.broadcast_read.return_value = [_make_msg()]
+        result = _call_tool(
+            self.client, "mansio_broadcast_read", {"topic": "news", "limit": 5}
+        )
+        assert len(result) == 1
+        self.client.broadcast_read.assert_called_once_with("news", limit=5)
+
+    def test_check_unread(self) -> None:
+        self.client.check_unread.return_value = {"general": 2, "dev": 1}
+        result = _call_tool(self.client, "mansio_check_unread", {})
+        assert result == {"unread": {"general": 2, "dev": 1}, "total_unread": 3}
+        self.client.check_unread.assert_called_once_with()
+
+    def test_notifications(self) -> None:
+        self.client.notification_check.return_value = [_make_msg()]
+        result = _call_tool(self.client, "mansio_notifications", {})
+        assert len(result) == 1
+        self.client.notification_check.assert_called_once_with()
+
+    def test_user_status(self) -> None:
+        self.client.user_status.return_value = UserPresence(
+            user_id="user-a",
+            status="online",
+            last_seen="2026-01-01T00:00:00Z",
+            metadata={"display_name": "Agent A"},
+        )
+        result = _call_tool(self.client, "mansio_user_status", {"user_id": "user-a"})
+        assert result["user_id"] == "user-a"
+        assert result["status"] == "online"
+        assert result["metadata"]["display_name"] == "Agent A"
+        self.client.user_status.assert_called_once_with("user-a", timeout_seconds=120)
+
+    def test_user_status_unknown(self) -> None:
+        self.client.user_status.return_value = None
+        result = _call_tool(self.client, "mansio_user_status", {"user_id": "ghost"})
+        assert result is None
+
     def test_agents(self) -> None:
         self.client.users.return_value = [
             UserPresence(
@@ -531,6 +598,22 @@ class TestToolDefinitions(unittest.TestCase):
     def test_unique_names(self) -> None:
         names = [t["name"] for t in _TOOLS]
         assert len(names) == len(set(names)), f"Duplicate tool names: {names}"
+
+    def test_observation_tools_present(self) -> None:
+        names = {t["name"] for t in _TOOLS}
+        expected = {
+            "mansio_thought",
+            "mansio_thought_read",
+            "mansio_broadcast_list",
+            "mansio_broadcast_read",
+            "mansio_check_unread",
+            "mansio_notifications",
+            "mansio_user_status",
+        }
+        assert expected <= names
+
+    def test_every_tool_is_dispatchable(self) -> None:
+        assert {t["name"] for t in _TOOLS} == set(_DISPATCH)
 
 
 class TestServeLoop(unittest.TestCase):
