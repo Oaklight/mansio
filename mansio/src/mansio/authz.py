@@ -165,6 +165,42 @@ class ChannelAuthorizer:
         """True if *user_id* may publish *msg_type* to *channel*."""
         return self.publish_denial(user_id, channel, msg_type) is None
 
+    # ── create ───────────────────────────────────────────────
+
+    def create_denial(self, user_id: str, channel: str) -> str | None:
+        """Return a denial message if *user_id* may not create *channel*'s row.
+
+        Applies the structural rules of the private namespaces, the same way
+        :meth:`publish_denial` does: an agent may create a ``notebook:`` or
+        ``memory:`` namespace only for itself, and a ``dm:`` name only when it
+        is one of the two participants.  ``_system:`` names are reserved for
+        supertokens and no-auth callers, which never reach this method.
+
+        A ``broadcast:`` topic is reserved for its first publisher: a scoped
+        token claims ownership by publishing, which auto-creates the row, so
+        creating one directly is denied.  A supertoken or no-auth caller may
+        pre-create a topic and set its owner explicitly.
+
+        Plain channels stay open to every scoped token.
+        """
+        if channel.startswith("_system:"):
+            return f"Channel '{channel}' is reserved for system use"
+
+        if channel.startswith("broadcast:"):
+            return f"Channel '{channel}' is reserved for its first publisher"
+
+        if is_private_channel(channel) and not is_channel_member(user_id, channel):
+            if channel.startswith(PRIVATE_CHANNEL_PREFIXES):
+                owner = channel.split(":", 1)[1]
+                return f"Channel '{channel}' belongs to agent '{owner}'"
+            return f"Channel '{channel}' is private"
+
+        return None
+
+    def can_create_channel(self, user_id: str, channel: str) -> bool:
+        """True if *user_id* may create *channel*'s metadata row."""
+        return self.create_denial(user_id, channel) is None
+
     # ── read ─────────────────────────────────────────────────
 
     def can_read(self, user_id: str, channel: str) -> bool:
