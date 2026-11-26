@@ -927,7 +927,13 @@ tr:hover { background: var(--accent-light); }
         <h3>Create Agent Token</h3>
         <div class="form-group" style="margin-bottom:12px">
             <label>Agent ID</label>
-            <input id="newTokenAgentId" type="text" placeholder="agent-alice (leave empty for supertoken)">
+            <input id="newTokenAgentId" type="text" placeholder="agent-alice">
+        </div>
+        <div class="form-group" style="margin-bottom:12px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input id="newTokenSupertoken" type="checkbox" onchange="syncSupertokenInput()">
+                Supertoken (wildcard — not bound to an agent)
+            </label>
         </div>
         <div class="form-group" style="margin-bottom:16px">
             <label>Label</label>
@@ -1010,10 +1016,16 @@ class MansioAPI {
 
     // Token management
     async listTokens() { return this.request('/api/tokens'); }
-    async createToken(agentId, label) {
+    async createToken(userId, label, supertoken) {
+        const body = { label: label || '' };
+        if (supertoken) {
+            body.supertoken = true;
+        } else {
+            body.user_id = userId || '';
+        }
         return this.request('/api/tokens', {
             method: 'POST',
-            body: JSON.stringify({ agent_id: agentId || null, label: label || '' }),
+            body: JSON.stringify(body),
         });
     }
     async deleteToken(id) {
@@ -1715,7 +1727,7 @@ async function loadTokens() {
         tbody.innerHTML = data.tokens.map(t => `
             <tr>
                 <td style="font-family:monospace;font-size:0.8rem">${esc(t.id)}</td>
-                <td>${t.agent_id ? esc(t.agent_id) : '<em style="color:var(--warning)">supertoken</em>'}</td>
+                <td>${t.user_id ? esc(t.user_id) : '<em style="color:var(--warning)">supertoken</em>'}</td>
                 <td>${esc(t.label)}</td>
                 <td style="font-family:monospace;font-size:0.8rem">${esc(t.token_prefix)}…</td>
                 <td style="font-size:0.8rem;color:var(--text-secondary)">${formatTime(t.created_at)}</td>
@@ -1735,7 +1747,20 @@ function showCreateTokenModal() {
     document.getElementById('createTokenModal').classList.remove('hidden');
     document.getElementById('newTokenAgentId').value = '';
     document.getElementById('newTokenLabel').value = '';
+    document.getElementById('newTokenSupertoken').checked = false;
+    syncSupertokenInput();
     document.getElementById('newTokenAgentId').focus();
+}
+
+function syncSupertokenInput() {
+    const supertoken = document.getElementById('newTokenSupertoken').checked;
+    const input = document.getElementById('newTokenAgentId');
+    input.disabled = supertoken;
+    if (supertoken) {
+        input.value = '';
+    } else {
+        input.focus();
+    }
 }
 
 function hideCreateTokenModal() {
@@ -1745,16 +1770,23 @@ function hideCreateTokenModal() {
 async function submitCreateToken() {
     const agentId = document.getElementById('newTokenAgentId').value.trim();
     const label = document.getElementById('newTokenLabel').value.trim();
+    const supertoken = document.getElementById('newTokenSupertoken').checked;
+    if (!supertoken && !agentId) {
+        showToast('Agent ID is required unless creating a supertoken', 'error');
+        return;
+    }
     try {
-        const result = await api.createToken(agentId, label);
-        hideCreateTokenModal();
-        if (result.ok && result.token) {
-            showTokenReveal(result.token.token, 'New token created — copy it now, it won\'t be shown again:');
-            showToast('Token created for ' + (agentId || 'supertoken'), 'success');
+        const result = await api.createToken(agentId, label, supertoken);
+        if (!result.ok || !result.token) {
+            showToast(result.message || 'Failed to create token', 'error');
+            return;
         }
+        hideCreateTokenModal();
+        showTokenReveal(result.token.token, 'New token created — copy it now, it won\'t be shown again:');
+        showToast('Token created for ' + (supertoken ? 'supertoken' : agentId), 'success');
         loadTokens();
     } catch (e) {
-        showToast('Failed to create token', 'error');
+        showToast(e.message || 'Failed to create token', 'error');
     }
 }
 
