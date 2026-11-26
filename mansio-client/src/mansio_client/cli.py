@@ -6,8 +6,10 @@ import argparse
 import json
 import sys
 import warnings
+from typing import NoReturn
 
-from mansio_client import MansioClient, __version__
+from mansio_client import MansioAPIError, MansioClient, __version__
+from mansio_client._vendor.httpclient import HttpClientError
 from mansio_client.env import env_or as _env_or
 
 
@@ -144,11 +146,29 @@ def main(argv: list[str] | None = None) -> None:
         )
         sys.exit(1)
 
-    client = MansioClient(args.server, user_id, token=args.token)
+    try:
+        client = MansioClient(args.server, user_id, token=args.token)
+    except ValueError as exc:
+        _fail(str(exc))
+    except MansioAPIError as exc:
+        _fail(str(exc))
+    except HttpClientError as exc:
+        _fail(f"cannot reach {args.server}: {exc}")
+
     try:
         _dispatch(args, client)
+    except MansioAPIError as exc:
+        _fail(str(exc))
+    except HttpClientError as exc:
+        _fail(f"cannot reach {args.server}: {exc}")
     finally:
         client.close()
+
+
+def _fail(message: str) -> NoReturn:
+    """Print one error line to stderr and exit non-zero."""
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(1)
 
 
 def _dispatch(args: argparse.Namespace, client: MansioClient) -> None:
