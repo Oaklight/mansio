@@ -1,0 +1,50 @@
+{
+  "generated_by": "zerodep 2026.10.24",
+  "lock_version": 1,
+  "modules": {
+    "httpclient": {
+      "files": {
+        "httpclient.py": "5f91aa2c588bf6ce8aad6acf238e45457c6486dc0bf18f8b14661cdb90928488"
+      },
+      "requested": true,
+      "upstream_hash": "410166bee26d34f4d875e115fc3a567c74d8bef7405107479a15185582346d8d",
+      "version": "0.7.4"
+    },
+    "httpserver": {
+      "files": {
+        "httpserver.py": "5c9b0e413aeff0d4b967f09aad6893bd11b0827914f62882d14dbecca307da6a"
+      },
+      "requested": true,
+      "upstream_hash": "25b9cae3fa9bbf2daa265b27373d6ed1b043d86a53e2dfcfe39bc991f1b1dfa1",
+      "version": "0.8.0"
+    },
+    "retry": {
+      "files": {
+        "retry.py": "da6440805ddec363699fcb1a8440459933846a052e56954bee844ef0a1b2ae18"
+      },
+      "requested": true,
+      "upstream_hash": "b29ca3c9022a2d305ce05e2c5024ce51abf655856b8be3e2ed2fd98130a94a26",
+      "version": "0.3.1"
+    },
+    "sse": {
+      "files": {
+        "sse.py": "3f216fb3faf657070a074dfed0ee17097743494d92ac7660c20857c1f43ec925"
+      },
+      "requested": true,
+      "upstream_hash": "b793744684933d6494436a2934fdb30691b8f39ee004037bddac3c09833fef0d",
+      "version": "0.4.1"
+    },
+    "structlog": {
+      "files": {
+        "structlog.py": "6340d09bd07480fc691a61a64b323ba8d736c2c8fa5596ae3b455ac3fffc9d93"
+      },
+      "requested": true,
+      "upstream_hash": "d2616b1a69fe42b1367d413888c69dd2026c00e58c36e1e83acda77fd3633ed6",
+      "version": "0.3.0"
+    }
+  },
+  "source": {
+    "ref": "v2026.11.20",
+    "repo": "Oaklight/zerodep"
+  }
+}

@@ -38,3 +38,6 @@ where = ["src"]
 
 [tool.ruff]
 extend-exclude = ["src/mansio_client/_vendor/"]
+
+[tool.zerodep]
+vendor-dir = "src/mansio_client/_vendor"

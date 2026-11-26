@@ -44,6 +44,23 @@ class MansioAPIError(Exception):
         super().__init__(f"HTTP {status_code}: {message}")
 
 
+def _response_socket(resp: object) -> socket.socket | None:
+    """Return the live socket behind a streaming response, if any.
+
+    ``http.client`` detaches ``HTTPConnection.sock`` when the response will
+    close the connection (``Connection: close`` or HTTP/1.0). The socket
+    then lives behind the response's buffered reader, so reach it there.
+    """
+    conn = getattr(resp, "_sync_conn", None)
+    sock = getattr(conn, "sock", None) if conn is not None else None
+    if sock is not None:
+        return sock
+    sync_resp = getattr(resp, "_sync_resp", None)
+    fp = getattr(sync_resp, "fp", None)
+    raw = getattr(fp, "raw", None)
+    return getattr(raw, "_sock", None)
+
+
 class HttpTransport:
     """Client-side transport that talks to a remote HttpFrontend.
 
@@ -537,7 +554,11 @@ class HttpTransport:
 
         This reaches into the vendored SSE client and HTTP client for the
         live response and its connection; the regression test asserting
-        close() returns quickly is what catches a rename upstream.
+        close() returns quickly is what catches a rename upstream. A
+        response that will close its connection (the server sends
+        ``Connection: close`` for SSE) has already detached
+        ``HTTPConnection.sock``, so fall back to the socket held by the
+        response's buffered reader.
         """
         client = self._sse_client
         if client is None:
@@ -546,8 +567,7 @@ class HttpTransport:
         if resp is None:
             return
 
-        conn = resp._sync_conn
-        sock = conn.sock if conn is not None else None
+        sock = _response_socket(resp)
         if sock is None:
             return
         try:

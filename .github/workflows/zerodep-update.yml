@@ -23,6 +23,10 @@ jobs:
   check-and-update:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Modules patched locally after each vendor copy. The guard reports
+      # them as expected instead of asking for a human decision.
+      ZERODEP_EXPECTED_LOCAL: "httpclient httpserver sse"
     steps:
       - uses: actions/checkout@v4
 
@@ -40,7 +44,7 @@ jobs:
         run: |
           python3 .github/scripts/zerodep_guard.py inspect \
             "$RUNNER_TEMP/zerodep-plan.json" "$GITHUB_STEP_SUMMARY" \
-            mansio >> "$GITHUB_OUTPUT"
+            mansio mansio-client shared >> "$GITHUB_OUTPUT"
 
       - name: Update safe modules
         if: steps.state.outputs.has_updates == 'true'
