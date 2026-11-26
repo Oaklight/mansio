@@ -90,9 +90,15 @@ class Bus:
         self._backend = backend or SQLiteBackend()
         self._compaction_policy = compaction_policy or system_channel_policy
         self._subs: dict[str, dict[str, Callable[[Message], None]]] = defaultdict(dict)
+        # Serializes the subscription registry and dispatch snapshots.
+        # Callbacks are invoked outside this lock.
+        self._subs_lock = threading.RLock()
         # Channel → backend watch ID, for backends that deliver messages
         # stored by other processes.  One watch per watched channel.
         self._watches: dict[str, str] = {}
+        # Serializes watch creation/removal so concurrent first subscribers
+        # cannot create two watches for one channel.
+        self._watch_lock = threading.Lock()
         self._ensured_channels: set[str] = set()
         self._metrics = MetricsCollector()
 
@@ -302,7 +308,8 @@ class Bus:
         if user_id is not None and not self.check_access(channel, user_id, "read"):
             raise PermissionError(f"agent '{user_id}' lacks read permission on '{channel}'")
         sub_id = uuid.uuid4().hex[:8]
-        self._subs[channel][sub_id] = callback
+        with self._subs_lock:
+            self._subs[channel][sub_id] = callback
         self._start_watch(channel)
         return sub_id
 
@@ -312,9 +319,15 @@ class Bus:
         Args:
             subscription_id: ID returned by subscribe().
         """
-        for channel, channel_subs in self._subs.items():
-            if channel_subs.pop(subscription_id, None) is not None and not channel_subs:
-                self._stop_watch(channel)
+        stopped_channel: str | None = None
+        with self._subs_lock:
+            for channel, channel_subs in self._subs.items():
+                if channel_subs.pop(subscription_id, None) is not None:
+                    if not channel_subs:
+                        stopped_channel = channel
+                    break
+        if stopped_channel is not None:
+            self._stop_watch(stopped_channel)
 
     def _notify(self, channel: str, message: Message) -> None:
         """Deliver *message* to this channel's in-process subscribers.
@@ -322,10 +335,14 @@ class Bus:
         Each callback runs isolated.  A callback that raises is logged and
         skipped so the publisher and the remaining subscribers are not
         affected; this also keeps a Watchable backend's delivery thread
-        alive.  The callback list is snapshotted so a callback may
-        subscribe or unsubscribe during delivery.
+        alive.  The callback list is snapshotted under the registry lock
+        and invoked after releasing it, so a callback may subscribe or
+        unsubscribe during delivery and concurrent mutation cannot break
+        the iteration.
         """
-        for callback in list(self._subs.get(channel, {}).values()):
+        with self._subs_lock:
+            callbacks = list(self._subs.get(channel, {}).values())
+        for callback in callbacks:
             try:
                 callback(message)
             except Exception:
@@ -337,19 +354,21 @@ class Bus:
 
     def _start_watch(self, channel: str) -> None:
         """Ensure a backend watch exists for *channel*, if the backend supports it."""
-        if channel in self._watches or not isinstance(self._backend, Watchable):
-            return
+        with self._watch_lock:
+            if channel in self._watches or not isinstance(self._backend, Watchable):
+                return
 
-        def _deliver(msg: Message) -> None:
-            self._notify(channel, msg)
+            def _deliver(msg: Message) -> None:
+                self._notify(channel, msg)
 
-        self._watches[channel] = self._backend.watch(channel, _deliver)
+            self._watches[channel] = self._backend.watch(channel, _deliver)
 
     def _stop_watch(self, channel: str) -> None:
         """Release the backend watch for *channel*, if one is active."""
-        watch_id = self._watches.pop(channel, None)
-        if watch_id is not None and isinstance(self._backend, Watchable):
-            self._backend.unwatch(watch_id)
+        with self._watch_lock:
+            watch_id = self._watches.pop(channel, None)
+            if watch_id is not None and isinstance(self._backend, Watchable):
+                self._backend.unwatch(watch_id)
 
     @overload
     def channels(self) -> list[str]: ...
@@ -395,7 +414,8 @@ class Bus:
 
         Only channels with active subscriptions are included.
         """
-        return {ch: list(subs.keys()) for ch, subs in self._subs.items() if subs}
+        with self._subs_lock:
+            return {ch: list(subs.keys()) for ch, subs in self._subs.items() if subs}
 
     def queue_claim(
         self, channel: str, claimed_by: str, *, lease_seconds: int = 300
@@ -595,7 +615,8 @@ class Bus:
             raise PermissionError(f"agent '{user_id}' lacks delete permission on '{channel}'")
         count = dl.delete_channel(channel)
         # Clean up subscriptions
-        self._subs.pop(channel, None)
+        with self._subs_lock:
+            self._subs.pop(channel, None)
         self._stop_watch(channel)
         # Invalidate sugar-channel cache
         self._ensured_channels.discard(channel)
@@ -756,7 +777,9 @@ class Bus:
 
     def close(self) -> None:
         """Release backend watches and resources held by the backend."""
-        for channel in list(self._watches):
+        with self._watch_lock:
+            watched = list(self._watches)
+        for channel in watched:
             self._stop_watch(channel)
         self._backend.close()
 
