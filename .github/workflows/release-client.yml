@@ -22,7 +22,7 @@ jobs:
 
       - name: Verify version matches package
         run: |
-          PKG_VER=$(python -c "import re; m=re.search(r'__version__\s*=\s*\"(.+?)\"', open('mansio-client/src/mansio_client/__init__.py').read()); print(m.group(1))")
+          PKG_VER=$(python -c "import re; m=re.search(r'__version__\s*=\s*\"(.+?)\"', open('packages/mansio-client/src/mansio_client/__init__.py').read()); print(m.group(1))")
           echo "Package version: $PKG_VER"
           echo "Requested version: ${{ inputs.version }}"
           [ "$PKG_VER" = "${{ inputs.version }}" ] || \
@@ -52,18 +52,18 @@ jobs:
       - name: Build wheel + sdist
         run: |
           pip install --upgrade pip build
-          python -m build mansio-client/
+          python -m build packages/mansio-client/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: mansio-client/dist/
+          packages-dir: packages/mansio-client/dist/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: client-dist
-          path: mansio-client/dist/*
+          path: packages/mansio-client/dist/*
           retention-days: 7
 
   github-release:
