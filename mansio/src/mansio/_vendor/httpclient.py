@@ -1,9 +1,9 @@
 # /// zerodep
-# version = "0.4.4"
+# version = "0.7.4"
 # deps = []
 # tier = "subsystem"
 # category = "network"
-# note = "Install/update via: https://zerodep.readthedocs.io/en/latest/guide/cli/"
+# note = "Install/update via `zerodep add httpclient`"
 # ///
 
 """Zero-dependency sync + async HTTP REST client.
@@ -31,6 +31,40 @@ Session usage::
 
     async with AsyncClient() as client:
         r = await client.get("https://httpbin.org/get")
+
+Redirects:
+    ``Authorization``, ``Proxy-Authorization`` and ``Cookie`` are bound to
+    the origin that received them.  A redirect to a different scheme, host
+    or port -- including an ``https`` → ``http`` downgrade -- drops them
+    before the next hop.  They stay dropped if a later hop returns to the
+    original origin, because the redirect chain keeps one header set.
+    Digest auth is disabled at the same time, so a 401 challenge from a new
+    origin cannot harvest the configured username and password.
+
+    Set ``follow_redirects=False`` (on a client or a single request) to
+    receive the first 3xx response unchanged: status, headers -- including
+    ``Location`` -- and body as received, with no connection to the target
+    opened.  The caller can validate the next hop and issue its own request.
+    This differs from ``max_redirects=0``, which raises
+    :class:`TooManyRedirects` and exposes neither the response nor its
+    ``Location``.  The rule covers ``stream=True`` responses (the 3xx is
+    returned unread; drain or close it before the connection returns to the
+    pool) and a redirect reached after a Digest-auth retry.  The default
+    follows redirects up to ``max_redirects``.
+
+Address pinning:
+    ``resolve_to`` lets a caller that has already validated a name's
+    addresses pin the TCP peer to one of them (or try several in order)
+    while the URL host still provides the ``Host`` header, TLS SNI and
+    certificate verification.  It exists for DNS-rebinding protection: the
+    caller resolves and checks the address, and this module connects to it
+    without resolving again.  The caller owns the policy.  Each entry must
+    be an IP literal: a hostname is refused with ``ValueError`` because the
+    socket layer would resolve it, silently turning the pin back into a
+    normal lookup.  ``resolve_to`` cannot be combined with ``proxy`` --
+    the proxy resolves the name, so the pin would be unenforceable -- and a
+    redirect that changes scheme, host or port drops the pin for the rest
+    of the chain.
 """
 
 # ── Imports ──
@@ -41,19 +75,23 @@ import asyncio
 import base64
 import hashlib
 import http.client
+import http.cookies
+import ipaddress
 import json as _json
 import logging
 import os
+import select
 import socket
 import ssl
 import struct
 import threading
 import time
 import warnings
+import weakref
 import zlib
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from typing import IO, Any
-from urllib.parse import quote, urlencode, urlparse
+from urllib.parse import quote, urlencode, urljoin, urlparse
 
 __all__ = [
     # Constants
@@ -62,12 +100,15 @@ __all__ = [
     "DEFAULT_USER_AGENT",
     "DEFAULT_POOL_SIZE",
     "DEFAULT_POOL_IDLE_TIMEOUT",
+    "DEFAULT_MAX_TOTAL_CONNECTIONS",
     # Exceptions
     "HttpClientError",
     "HTTPError",
     "TooManyRedirects",
     "HttpConnectionError",
     "HttpTimeoutError",
+    "ResponseTooLargeError",
+    "DecompressionError",
     "Socks5Error",
     # Data structures
     "CaseInsensitiveDict",
@@ -97,6 +138,9 @@ __all__ = [
     # Client classes
     "Client",
     "AsyncClient",
+    # Default pool lifecycle
+    "close_pools",
+    "aclose_pools",
 ]
 
 # ── Constants / Defaults ──
@@ -105,9 +149,47 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_REDIRECTS = 10
+
+#: Request headers that are scoped to the origin that received them.
+#: A cross-origin redirect drops these before the next hop, so a caller's
+#: bearer token, basic credentials, or session cookie cannot be replayed to
+#: a different scheme, host or port (including an ``https`` → ``http``
+#: downgrade).  The names are lower-case because header lookups are
+#: case-insensitive.
+_REDIRECT_CREDENTIAL_HEADERS = (
+    "authorization",
+    "proxy-authorization",
+    "cookie",
+)
+
 DEFAULT_USER_AGENT = "zerodep-http/0.1"
 DEFAULT_POOL_SIZE = 10
 DEFAULT_POOL_IDLE_TIMEOUT = 60.0
+#: Upper bound on idle connections held across *all* hosts.  ``pool_size``
+#: is per (host, port, scheme, verify) key, so a process that talks to many
+#: hosts could otherwise hold ``pool_size`` sockets for each of them.
+DEFAULT_MAX_TOTAL_CONNECTIONS = 100
+
+#: Methods a stale pooled connection may be retried with: the request is safe
+#: to repeat, so a connection the server closed between requests does not turn
+#: into an error.
+_RETRYABLE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
+
+# The module re-exports ``TimeoutError = HttpTimeoutError`` for backwards
+# compatibility, which shadows the builtin, so the transport-level timeout
+# classes are captured here before that alias exists.
+_TRANSPORT_TIMEOUTS = (socket.timeout, asyncio.TimeoutError)
+
+# Called with a milestone name and the seconds elapsed since the request
+# started, on a monotonic clock.  Milestones are ``"request_started"``,
+# ``"headers_received"`` and ``"body_complete"``.
+TimingHook = Callable[[str, float], None]
+
+
+def _emit_timing(on_timing: TimingHook | None, start: float, event: str) -> None:
+    """Call *on_timing* with *event* and the elapsed seconds, if installed."""
+    if on_timing is not None:
+        on_timing(event, time.perf_counter() - start)
 
 
 # ── CaseInsensitiveDict ──
@@ -312,6 +394,46 @@ ConnectionError = HttpConnectionError  # noqa: A001
 TimeoutError = HttpTimeoutError  # noqa: A001
 
 
+class ResponseTooLargeError(HttpClientError):
+    """Raised when a response body exceeds the configured size limit.
+
+    Attributes:
+        url: The URL whose response exceeded the limit.
+        max_size: The configured limit, in bytes.
+        declared: The ``Content-Length`` the server declared, or ``None``
+            when the body was chunked or EOF-delimited.
+        received: Body bytes charged against the limit when it was enforced:
+            the wire bytes read for an undeclared body, the decompressed
+            bytes when decompression crossed the cap, or -- when the async
+            chunked reader refuses a frame from its size line -- the total
+            that frame would have produced.  ``0`` when a declared length was
+            refused before any body byte was read.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        max_size: int,
+        *,
+        declared: int | None = None,
+        received: int = 0,
+    ) -> None:
+        self.url = url
+        self.max_size = max_size
+        self.declared = declared
+        self.received = received
+        super().__init__(f"Response body from {url} exceeds the {max_size}-byte limit")
+
+
+class DecompressionError(HttpClientError):
+    """Raised when a response body is not a complete compressed stream.
+
+    A truncated gzip or deflate body would otherwise decode to a prefix of
+    the real content, which is worse than failing: the caller cannot tell
+    the result apart from a complete one.
+    """
+
+
 class Socks5Error(HttpConnectionError):
     """Raised on SOCKS5 proxy handshake failures."""
 
@@ -329,7 +451,16 @@ class Response:
         url: Final URL after redirects.
     """
 
-    __slots__ = ("status_code", "headers", "content", "url", "_text", "_json")
+    __slots__ = (
+        "status_code",
+        "headers",
+        "content",
+        "url",
+        "_text",
+        "_json",
+        "_raw_set_cookies",
+        "_cookies",
+    )
 
     def __init__(
         self,
@@ -337,6 +468,7 @@ class Response:
         headers: CaseInsensitiveDict,
         content: bytes,
         url: str,
+        raw_set_cookies: list[str] | None = None,
     ) -> None:
         self.status_code = status_code
         self.headers = headers
@@ -344,6 +476,8 @@ class Response:
         self.url = url
         self._text: str | None = None
         self._json: Any = None
+        self._raw_set_cookies: list[str] = raw_set_cookies or []
+        self._cookies: dict[str, str] | None = None
 
     @property
     def text(self) -> str:
@@ -368,6 +502,13 @@ class Response:
         """Raise HTTPError if status is not 2xx."""
         if not self.ok:
             raise HTTPError(self.status_code, self.text, self.url)
+
+    @property
+    def cookies(self) -> dict[str, str]:
+        """Parse Set-Cookie headers into a ``{name: value}`` dict (cached)."""
+        if self._cookies is None:
+            self._cookies = _parse_cookies(self._raw_set_cookies)
+        return self._cookies
 
     def _guess_encoding(self) -> str:
         return _guess_encoding_from_headers(self.headers)
@@ -394,6 +535,35 @@ class Response:
 
     def __repr__(self) -> str:
         return f"<Response [{self.status_code}]>"
+
+
+def _parse_cookies(raw_set_cookies: list[str]) -> dict[str, str]:
+    """Parse raw Set-Cookie header values into a ``{name: value}`` dict."""
+    result: dict[str, str] = {}
+    for raw in raw_set_cookies:
+        sc = http.cookies.SimpleCookie()
+        try:
+            sc.load(raw)
+        except http.cookies.CookieError:
+            continue
+        for name, morsel in sc.items():
+            result[name] = morsel.value
+    return result
+
+
+def _expired_cookie_names(raw_set_cookies: list[str]) -> set[str]:
+    """Return names of cookies with Max-Age=0 (deletion markers)."""
+    names: set[str] = set()
+    for raw in raw_set_cookies:
+        sc = http.cookies.SimpleCookie()
+        try:
+            sc.load(raw)
+        except http.cookies.CookieError:
+            continue
+        for name, morsel in sc.items():
+            if morsel.get("max-age") == "0":
+                names.add(name)
+    return names
 
 
 def _guess_encoding_from_headers(headers: CaseInsensitiveDict) -> str:
@@ -540,24 +710,132 @@ def _parse_digest_challenge(header_value: str) -> dict[str, str]:
 # ── Compression / Encoding helpers ──
 
 
-def _decompress_body(body: bytes, encoding: str) -> bytes:
+def _decompress_body(
+    body: bytes,
+    encoding: str,
+    *,
+    max_size: int | None = None,
+    url: str = "",
+) -> bytes:
     """Decompress a response body based on Content-Encoding.
+
+    A gzip body may concatenate several members.  They are one stream and
+    every member is decoded; ``max_size`` bounds their combined output.
 
     Args:
         body: The raw response body bytes.
         encoding: The Content-Encoding value.
+        max_size: Optional cap on the decompressed size, in bytes.  The wire
+            bytes may be well under the cap while the expanded body is not,
+            so a compressed bomb is refused here too.
+        url: Response URL, used in the size error.
 
     Returns:
         Decompressed bytes, or original body if encoding is unsupported.
+
+    Raises:
+        ResponseTooLargeError: If the decompressed body exceeds *max_size*.
+        DecompressionError: If the stream is truncated or otherwise does not
+            decode completely.
     """
+    if encoding not in ("gzip", "x-gzip", "deflate"):
+        return body
+
     if encoding in ("gzip", "x-gzip"):
-        return zlib.decompress(body, 16 + zlib.MAX_WBITS)
-    if encoding == "deflate":
+        return _decompress_gzip_members(body, max_size=max_size, url=url)
+
+    # ``max_length=0`` tells zlib to apply no limit.
+    max_length = max_size + 1 if max_size is not None else 0
+    # Some servers send a zlib-wrapped stream under "deflate"; try the
+    # wrapped form when the raw attempt rejects the bytes.
+    decompressors: list[zlib._Decompress] = [
+        zlib.decompressobj(-zlib.MAX_WBITS),
+        zlib.decompressobj(),
+    ]
+
+    last_error: zlib.error | None = None
+    for decompressor in decompressors:
         try:
-            return zlib.decompress(body, -zlib.MAX_WBITS)
-        except zlib.error:
-            return zlib.decompress(body)
-    return body
+            out = decompressor.decompress(body, max_length)
+        except zlib.error as exc:
+            last_error = exc
+            continue
+        if max_size is not None and len(out) > max_size:
+            raise ResponseTooLargeError(url, max_size, received=len(out))
+        try:
+            # A stream that only fails at flush must still try the
+            # zlib-wrapped deflate fallback.
+            out += decompressor.flush()
+        except zlib.error as exc:
+            last_error = exc
+            continue
+        if max_size is not None and len(out) > max_size:
+            raise ResponseTooLargeError(url, max_size, received=len(out))
+        if not decompressor.eof:
+            # The stream ended before its final block: fail rather than
+            # return a prefix of the real body.
+            last_error = zlib.error("incomplete or truncated compressed stream")
+            continue
+        return out
+    raise DecompressionError(
+        f"Incomplete or truncated {encoding} response body from {url}"
+    ) from last_error
+
+
+def _decompress_gzip_members(
+    body: bytes,
+    *,
+    max_size: int | None = None,
+    url: str = "",
+) -> bytes:
+    """Decode every member of a concatenated gzip stream.
+
+    ``zlib.decompressobj`` stops at the end of the first member and keeps
+    the bytes that follow in ``unused_data``.  RFC 1952 allows a gzip stream
+    to carry any number of members, and a response assembled from several
+    compressed parts relies on every one being decoded.
+
+    Args:
+        body: The raw response body bytes.
+        max_size: Optional cap on the total decompressed size.  The budget
+            spans all members, so several small members cannot combine past
+            it.
+        url: Response URL, used in the size error.
+
+    Returns:
+        The concatenation of every member's decompressed content.
+
+    Raises:
+        ResponseTooLargeError: If the total decompressed body exceeds
+            *max_size*.
+        DecompressionError: If a member is truncated or does not decode.
+    """
+    message = f"Incomplete or truncated gzip response body from {url}"
+    out = bytearray()
+    data = body
+    while True:
+        decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        # Leave room for one byte past the budget, so crossing it is visible.
+        max_length = 0 if max_size is None else max_size - len(out) + 1
+        if max_size is not None and max_length <= 0:
+            raise ResponseTooLargeError(url, max_size, received=len(out) + 1)
+        try:
+            out += decompressor.decompress(data, max_length)
+        except zlib.error as exc:
+            raise DecompressionError(message) from exc
+        if max_size is not None and len(out) > max_size:
+            raise ResponseTooLargeError(url, max_size, received=len(out))
+        try:
+            out += decompressor.flush()
+        except zlib.error as exc:
+            raise DecompressionError(message) from exc
+        if max_size is not None and len(out) > max_size:
+            raise ResponseTooLargeError(url, max_size, received=len(out))
+        if not decompressor.eof:
+            raise DecompressionError(message)
+        data = decompressor.unused_data
+        if not data:
+            return bytes(out)
 
 
 def _make_decompressor(encoding: str) -> zlib._Decompress | None:
@@ -577,6 +855,11 @@ def _make_decompressor(encoding: str) -> zlib._Decompress | None:
 
 
 # ── Streaming Response (state machine) ──
+
+
+def _response_has_body(method: str, status: int) -> bool:
+    """Whether a response to *method* may carry a message body."""
+    return method.upper() != "HEAD" and status not in (204, 304)
 
 
 class StreamingResponse:
@@ -607,7 +890,13 @@ class StreamingResponse:
         "_is_chunked",
         "_content_length",
         "_bytes_remaining",
+        "_sync_received",
         "_closed",
+        "_raw_set_cookies",
+        "_cookies",
+        "_on_timing",
+        "_timing_start",
+        "_timing_done",
     )
 
     status_code: int
@@ -623,7 +912,13 @@ class StreamingResponse:
     _is_chunked: bool
     _content_length: int | None
     _bytes_remaining: int | None
+    _sync_received: int
     _closed: bool
+    _raw_set_cookies: list[str]
+    _cookies: dict[str, str] | None
+    _on_timing: TimingHook | None
+    _timing_start: float
+    _timing_done: bool
 
     def __init__(self) -> None:
         raise TypeError("Use _from_sync() or _from_async()")
@@ -637,6 +932,10 @@ class StreamingResponse:
         resp: http.client.HTTPResponse,
         conn: http.client.HTTPConnection,
         content_encoding: str = "",
+        raw_set_cookies: list[str] | None = None,
+        on_timing: TimingHook | None = None,
+        timing_start: float = 0.0,
+        expect_body: bool = True,
     ) -> "StreamingResponse":
         obj = object.__new__(cls)
         obj.status_code = status_code
@@ -649,10 +948,23 @@ class StreamingResponse:
         obj._async_reader = None
         obj._async_writer = None
         obj._async_timeout = None
-        obj._is_chunked = False
-        obj._content_length = None
-        obj._bytes_remaining = None
+        chunked = "chunked" in headers.get("transfer-encoding", "").lower()
+        content_length = None
+        if expect_body and not chunked and headers.get("content-length") is not None:
+            try:
+                content_length = int(headers["content-length"])
+            except ValueError:
+                content_length = None
+        obj._is_chunked = chunked
+        obj._content_length = content_length
+        obj._bytes_remaining = content_length
+        obj._sync_received = 0
         obj._closed = False
+        obj._raw_set_cookies = raw_set_cookies or []
+        obj._cookies = None
+        obj._on_timing = on_timing
+        obj._timing_start = timing_start
+        obj._timing_done = False
         return obj
 
     @classmethod
@@ -667,6 +979,10 @@ class StreamingResponse:
         content_length: int | None,
         timeout: float,
         content_encoding: str = "",
+        raw_set_cookies: list[str] | None = None,
+        on_timing: TimingHook | None = None,
+        timing_start: float = 0.0,
+        expect_body: bool = True,
     ) -> "StreamingResponse":
         obj = object.__new__(cls)
         obj.status_code = status_code
@@ -679,11 +995,29 @@ class StreamingResponse:
         obj._async_reader = reader
         obj._async_writer = writer
         obj._async_timeout = timeout
+        if not expect_body:
+            content_length = None
         obj._is_chunked = is_chunked
         obj._content_length = content_length
         obj._bytes_remaining = content_length
+        obj._sync_received = 0
         obj._closed = False
+        obj._raw_set_cookies = raw_set_cookies or []
+        obj._cookies = None
+        obj._on_timing = on_timing
+        obj._timing_start = timing_start
+        obj._timing_done = False
         return obj
+
+    def _fire_body_complete(self) -> None:
+        """Report the ``body_complete`` milestone once, when a hook is set."""
+        # Read defensively: a response built outside ``_from_sync`` /
+        # ``_from_async`` does not carry the timing attributes.
+        on_timing = getattr(self, "_on_timing", None)
+        if on_timing is None or getattr(self, "_timing_done", False):
+            return
+        self._timing_done = True
+        on_timing("body_complete", time.perf_counter() - getattr(self, "_timing_start", 0.0))
 
     @property
     def ok(self) -> bool:
@@ -709,37 +1043,89 @@ class StreamingResponse:
         """Parse body as JSON."""
         return _json.loads(self.content)
 
+    @property
+    def cookies(self) -> dict[str, str]:
+        """Parse Set-Cookie headers into a ``{name: value}`` dict (cached)."""
+        if self._cookies is None:
+            self._cookies = _parse_cookies(self._raw_set_cookies)
+        return self._cookies
+
     # ── Sync iteration ──
 
+    def _decompress_chunk(self, chunk: bytes) -> bytes:
+        """Expand *chunk* and continue past gzip member boundaries.
+
+        A ``decompressobj`` stops at the end of the first member and keeps
+        the following bytes in ``unused_data``.  A gzip stream may carry
+        several members, so each boundary starts a fresh decompressor for
+        the rest of the bytes.  Non-gzip encodings keep one member.
+        """
+        decompressor = self._decompressor
+        if decompressor is None:
+            return chunk
+        out = bytearray()
+        while True:
+            out += decompressor.decompress(chunk)
+            if not decompressor.eof:
+                return bytes(out)
+            chunk = decompressor.unused_data
+            if not chunk:
+                return bytes(out)
+            encoding = self.headers.get("content-encoding", "").lower()
+            if encoding not in ("gzip", "x-gzip"):
+                return bytes(out)
+            decompressor = _make_decompressor(encoding)
+            if decompressor is None:
+                return bytes(out)
+            self._decompressor = decompressor
+
     def iter_bytes(self, chunk_size: int = 4096) -> Iterator[bytes]:
-        """Yield response body in chunks."""
+        """Yield response body in chunks as soon as they arrive.
+
+        Uses ``read1()`` when the underlying response provides it, so a
+        chunked body is yielded per HTTP chunk instead of being accumulated
+        until ``chunk_size`` bytes are available.  This matters for
+        long-lived streams (SSE, LLM token streams): ``read(n)`` on a
+        buffered response blocks until ``n`` bytes or EOF, which delays every
+        event until the stream closes or fills the buffer.
+        """
         if self._sync_resp is None:
             raise RuntimeError("iter_bytes() on async response")
+        read1 = getattr(self._sync_resp, "read1", None)
         try:
             while True:
-                chunk = self._sync_resp.read(chunk_size)
+                chunk = read1(chunk_size) if read1 is not None else self._sync_resp.read(chunk_size)
                 if not chunk:
                     break
-                if self._decompressor:
-                    chunk = self._decompressor.decompress(chunk)
-                yield chunk
+                self._sync_received = getattr(self, "_sync_received", 0) + len(chunk)
+                yield self._decompress_chunk(chunk)
             if self._decompressor:
                 remaining = self._decompressor.flush()
                 if remaining:
                     yield remaining
         except (OSError, http.client.HTTPException) as exc:
             raise HttpConnectionError(str(exc)) from exc
+        received = getattr(self, "_sync_received", 0)
+        if self._content_length is not None and received < self._content_length:
+            raise HttpConnectionError(
+                f"Response body ended after {received} of "
+                f"{self._content_length} bytes for {self.url}"
+            )
+        self._fire_body_complete()
 
     def iter_lines(self) -> Iterator[str]:
         """Yield response body line by line (decoded)."""
         if self._sync_resp is None:
             raise RuntimeError("iter_lines() on async response")
+        buf = b""
         try:
-            while True:
-                line = self._sync_resp.readline()
-                if not line:
-                    break
-                yield line.decode(self._encoding, errors="replace").rstrip("\r\n")
+            for chunk in self.iter_bytes():
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    yield line.rstrip(b"\r").decode(self._encoding, errors="replace")
+            if buf:
+                yield buf.rstrip(b"\r").decode(self._encoding, errors="replace")
         except (OSError, http.client.HTTPException) as exc:
             raise HttpConnectionError(str(exc)) from exc
 
@@ -756,9 +1142,7 @@ class StreamingResponse:
         try:
             raw_iter = self._select_raw_iterator(chunk_size)
             async for chunk in raw_iter:
-                if self._decompressor:
-                    chunk = self._decompressor.decompress(chunk)
-                yield chunk
+                yield self._decompress_chunk(chunk)
             if self._decompressor:
                 remaining = self._decompressor.flush()
                 if remaining:
@@ -771,6 +1155,7 @@ class StreamingResponse:
             )
         except OSError as exc:
             raise HttpConnectionError(str(exc)) from exc
+        self._fire_body_complete()
 
     async def _select_raw_iterator(self, chunk_size: int) -> AsyncIterator[bytes]:
         """Select and yield from the appropriate raw byte iterator."""
@@ -787,23 +1172,29 @@ class StreamingResponse:
     async def _aiter_fixed_length(self, chunk_size: int) -> AsyncIterator[bytes]:
         """Read a known-length response body in chunks."""
         assert self._async_reader is not None
+        reader = self._async_reader
         while self._bytes_remaining is not None and self._bytes_remaining > 0:
             to_read = min(chunk_size, self._bytes_remaining)
             data = await asyncio.wait_for(
-                self._async_reader.read(to_read),
+                reader.read(to_read),
                 timeout=self._async_timeout,
             )
             if not data:
-                break
+                raise HttpConnectionError(
+                    f"Response body ended after "
+                    f"{self._content_length - self._bytes_remaining} of "
+                    f"{self._content_length} bytes for {self.url}"
+                )
             self._bytes_remaining -= len(data)
             yield data
 
     async def _aiter_until_eof(self, chunk_size: int) -> AsyncIterator[bytes]:
         """Read response body until EOF in chunks."""
         assert self._async_reader is not None
+        reader = self._async_reader
         while True:
             data = await asyncio.wait_for(
-                self._async_reader.read(chunk_size),
+                reader.read(chunk_size),
                 timeout=self._async_timeout,
             )
             if not data:
@@ -820,7 +1211,14 @@ class StreamingResponse:
             size_str = size_line.decode("latin-1").split(";")[0].strip()
             if not size_str:
                 break
-            chunk_size = int(size_str, 16)
+            try:
+                chunk_size = int(size_str, 16)
+            except ValueError:
+                preview = size_str[:100]
+                raise HttpConnectionError(
+                    f"Invalid chunked encoding: expected hex chunk size, "
+                    f"got {preview!r} (upstream may have injected an error mid-stream)"
+                ) from None
             if chunk_size == 0:
                 await asyncio.wait_for(reader.readline(), timeout=timeout)  # trailing \r\n
                 break
@@ -830,14 +1228,14 @@ class StreamingResponse:
 
     async def aiter_lines(self) -> AsyncIterator[str]:
         """Async yield response body line by line (decoded)."""
-        buf = ""
+        buf = b""
         async for chunk in self.aiter_bytes():
-            buf += chunk.decode(self._encoding, errors="replace")
-            while "\n" in buf:
-                line, buf = buf.split("\n", 1)
-                yield line.rstrip("\r")
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                yield line.rstrip(b"\r").decode(self._encoding, errors="replace")
         if buf:
-            yield buf.rstrip("\r")
+            yield buf.rstrip(b"\r").decode(self._encoding, errors="replace")
 
     async def aread(self) -> bytes:
         """Async consume entire stream into bytes."""
@@ -861,7 +1259,7 @@ class StreamingResponse:
         await self.aclose()
 
     def close(self) -> None:
-        """Close the underlying sync connection."""
+        """Close the underlying connection (sync or async best-effort)."""
         if self._closed:
             return
         self._closed = True
@@ -875,6 +1273,7 @@ class StreamingResponse:
                     self.url,
                     exc_info=True,
                 )
+            self._sync_resp = None
         if self._sync_conn is not None:
             try:
                 self._sync_conn.close()
@@ -884,6 +1283,28 @@ class StreamingResponse:
                     self.url,
                     exc_info=True,
                 )
+            self._sync_conn = None
+        # Release async reader reference (unblock pending reads if possible).
+        if self._async_reader is not None:
+            try:
+                self._async_reader.feed_eof()
+            except Exception:
+                logger.debug(
+                    "failed to feed_eof async reader for %s",
+                    self.url,
+                    exc_info=True,
+                )
+            self._async_reader = None
+        if self._async_writer is not None:
+            try:
+                self._async_writer.close()
+            except Exception:
+                logger.debug(
+                    "failed to close async writer for %s",
+                    self.url,
+                    exc_info=True,
+                )
+            self._async_writer = None
 
     async def aclose(self) -> None:
         """Close the underlying async connection."""
@@ -891,6 +1312,20 @@ class StreamingResponse:
             return
         self._closed = True
         # Tier 2: best-effort observable -- active streaming resource
+        #
+        # Release the reader first: feed_eof() unblocks any pending reads
+        # so the writer close can complete cleanly.  Then drop the reference
+        # to allow GC of the transport/socket even if the writer close fails.
+        if self._async_reader is not None:
+            try:
+                self._async_reader.feed_eof()
+            except Exception:
+                logger.debug(
+                    "failed to feed_eof async reader for %s",
+                    self.url,
+                    exc_info=True,
+                )
+            self._async_reader = None
         if self._async_writer is not None:
             try:
                 self._async_writer.close()
@@ -901,6 +1336,7 @@ class StreamingResponse:
                     self.url,
                     exc_info=True,
                 )
+            self._async_writer = None
 
     def __del__(self) -> None:
         if not self._closed:
@@ -916,6 +1352,31 @@ class StreamingResponse:
 
 
 # ── Connection Pools (Sync + Async) ──
+
+
+def _socket_peer_closed(sock: object) -> bool:
+    """Whether a kept-alive socket was closed by the peer.
+
+    A remote FIN leaves the local socket usable-looking (``fileno()`` stays
+    valid), so a pooled connection can be dead without this check.  A TLS
+    socket cannot be peeked without de-framing, so it reports "not closed" and
+    relies on the request retry instead.
+
+    Args:
+        sock: The socket behind a pooled connection.
+
+    Returns:
+        ``True`` when the peer has hung up.
+    """
+    if isinstance(sock, ssl.SSLSocket):
+        return False
+    try:
+        readable, _, _ = select.select([sock], [], [], 0)
+        if not readable:
+            return False
+        return sock.recv(1, socket.MSG_PEEK) == b""  # type: ignore[attr-defined]
+    except (OSError, ValueError, TypeError):
+        return True
 
 
 class _SyncConnectionPool:
@@ -936,12 +1397,19 @@ class _SyncConnectionPool:
           ``__del__``.  The connection is never returned to the pool.
     """
 
-    def __init__(self, pool_size: int = DEFAULT_POOL_SIZE) -> None:
+    def __init__(
+        self,
+        pool_size: int = DEFAULT_POOL_SIZE,
+        max_total: int = DEFAULT_MAX_TOTAL_CONNECTIONS,
+        idle_timeout: float = DEFAULT_POOL_IDLE_TIMEOUT,
+    ) -> None:
         self._pool: dict[
-            tuple[str, int, bool],
+            tuple[str, int, bool, bool, tuple[str, ...] | None],
             list[tuple[http.client.HTTPConnection, float]],
         ] = {}
         self._pool_size = pool_size
+        self._max_total = max_total
+        self._idle_timeout = idle_timeout
         self._lock = threading.Lock()
 
     def acquire(
@@ -951,6 +1419,7 @@ class _SyncConnectionPool:
         is_https: bool,
         timeout: float,
         verify: bool,
+        resolve_to: tuple[str, ...] | None = None,
     ) -> http.client.HTTPConnection | None:
         """Acquire a connection from the pool if available.
 
@@ -960,24 +1429,31 @@ class _SyncConnectionPool:
             is_https: Whether the connection uses TLS.
             timeout: Connection timeout.
             verify: Whether to verify TLS certificates.
+            resolve_to: The pinned address list, if any.  It is part of the
+                key so a pinned connection is never handed to an unpinned
+                request, or to a request pinned elsewhere.
 
         Returns:
             A reusable connection or None.
         """
-        key = (host, port, is_https)
+        key = (host, port, is_https, verify, resolve_to)
         now = time.monotonic()
         with self._lock:
             conns = self._pool.get(key, [])
             while conns:
                 conn, timestamp = conns.pop()
-                if now - timestamp > DEFAULT_POOL_IDLE_TIMEOUT:
+                if now - timestamp > self._idle_timeout:
                     # Tier 3: best-effort silent -- stale connection eviction
                     try:
                         conn.close()
                     except Exception:
                         pass
                     continue
-                if conn.sock is not None and conn.sock.fileno() != -1:
+                if (
+                    conn.sock is not None
+                    and conn.sock.fileno() != -1
+                    and not _socket_peer_closed(conn.sock)
+                ):
                     return conn
                 # Tier 3: best-effort silent -- dead connection eviction
                 try:
@@ -992,6 +1468,9 @@ class _SyncConnectionPool:
         port: int,
         is_https: bool,
         conn: http.client.HTTPConnection,
+        *,
+        verify: bool = True,
+        resolve_to: tuple[str, ...] | None = None,
     ) -> None:
         """Return a connection to the pool.
 
@@ -1000,18 +1479,76 @@ class _SyncConnectionPool:
             port: Target port.
             is_https: Whether the connection uses TLS.
             conn: The connection to return.
+            verify: Whether the connection verifies TLS certificates.  It is
+                part of the key so a connection built with ``verify=False``
+                is never handed to a verifying request.
+            resolve_to: The pinned address list, if any.  Part of the key for
+                the same reason.
         """
-        key = (host, port, is_https)
+        key = (host, port, is_https, verify, resolve_to)
         with self._lock:
             conns = self._pool.setdefault(key, [])
             if len(conns) < self._pool_size:
                 conns.append((conn, time.monotonic()))
+                self._sweep_locked(time.monotonic())
             else:
                 # Tier 3: best-effort silent -- pool overflow discard
                 try:
                     conn.close()
                 except Exception:
                     pass
+
+    def _sweep_locked(self, now: float) -> None:
+        """Drop expired connections and enforce the global cap.
+
+        Expiry was only checked for the key being acquired, so idle
+        connections to hosts that are no longer used stayed open until
+        ``close_all()``.  The sweep runs on release, keeps the pool bounded
+        across keys, and evicts the oldest connection first so the one just
+        returned survives.
+
+        Args:
+            now: Current monotonic time.  The caller holds the lock.
+        """
+        total = 0
+        for key in list(self._pool):
+            fresh = []
+            for conn, timestamp in self._pool[key]:
+                if now - timestamp > self._idle_timeout:
+                    # Tier 3: best-effort silent -- idle expiry
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                else:
+                    fresh.append((conn, timestamp))
+            if fresh:
+                self._pool[key] = fresh
+                total += len(fresh)
+            else:
+                del self._pool[key]
+
+        while total > self._max_total:
+            oldest_key: Any = None
+            oldest_index = 0
+            oldest_ts = float("inf")
+            for key, conns in self._pool.items():
+                for index, (_, timestamp) in enumerate(conns):
+                    if timestamp < oldest_ts:
+                        oldest_ts = timestamp
+                        oldest_key = key
+                        oldest_index = index
+            if oldest_key is None:
+                return
+            conn, _ = self._pool[oldest_key].pop(oldest_index)
+            if not self._pool[oldest_key]:
+                del self._pool[oldest_key]
+            # Tier 3: best-effort silent -- global cap eviction
+            try:
+                conn.close()
+            except Exception:
+                pass
+            total -= 1
 
     def close_all(self) -> None:
         """Close all pooled connections."""
@@ -1045,9 +1582,14 @@ class _AsyncConnectionPool:
           the pool.
     """
 
-    def __init__(self, pool_size: int = DEFAULT_POOL_SIZE) -> None:
+    def __init__(
+        self,
+        pool_size: int = DEFAULT_POOL_SIZE,
+        max_total: int = DEFAULT_MAX_TOTAL_CONNECTIONS,
+        idle_timeout: float = DEFAULT_POOL_IDLE_TIMEOUT,
+    ) -> None:
         self._pool: dict[
-            tuple[str, int, bool],
+            tuple[str, int, bool, bool, tuple[str, ...] | None],
             list[
                 tuple[
                     asyncio.StreamReader,
@@ -1057,6 +1599,8 @@ class _AsyncConnectionPool:
             ],
         ] = {}
         self._pool_size = pool_size
+        self._max_total = max_total
+        self._idle_timeout = idle_timeout
         self._lock = asyncio.Lock()
 
     async def acquire(
@@ -1066,6 +1610,7 @@ class _AsyncConnectionPool:
         is_https: bool,
         timeout: float,
         verify: bool,
+        resolve_to: tuple[str, ...] | None = None,
     ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter] | None:
         """Acquire a connection from the pool if available.
 
@@ -1075,17 +1620,20 @@ class _AsyncConnectionPool:
             is_https: Whether the connection uses TLS.
             timeout: Connection timeout.
             verify: Whether to verify TLS certificates.
+            resolve_to: The pinned address list, if any.  It is part of the
+                key so a pinned connection is never handed to an unpinned
+                request, or to a request pinned elsewhere.
 
         Returns:
             A (reader, writer) tuple or None.
         """
-        key = (host, port, is_https)
+        key = (host, port, is_https, verify, resolve_to)
         now = time.monotonic()
         async with self._lock:
             conns = self._pool.get(key, [])
             while conns:
                 reader, writer, timestamp = conns.pop()
-                if now - timestamp > DEFAULT_POOL_IDLE_TIMEOUT:
+                if now - timestamp > self._idle_timeout:
                     # Tier 3: best-effort silent -- stale connection eviction
                     try:
                         writer.close()
@@ -1110,6 +1658,9 @@ class _AsyncConnectionPool:
         is_https: bool,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
+        *,
+        verify: bool = True,
+        resolve_to: tuple[str, ...] | None = None,
     ) -> None:
         """Return a connection to the pool.
 
@@ -1119,12 +1670,18 @@ class _AsyncConnectionPool:
             is_https: Whether the connection uses TLS.
             reader: The stream reader.
             writer: The stream writer.
+            verify: Whether the connection verifies TLS certificates.  It is
+                part of the key so an unverified connection is never handed to
+                a verifying request.
+            resolve_to: The pinned address list, if any.  Part of the key for
+                the same reason.
         """
-        key = (host, port, is_https)
+        key = (host, port, is_https, verify, resolve_to)
         async with self._lock:
             conns = self._pool.setdefault(key, [])
             if len(conns) < self._pool_size:
                 conns.append((reader, writer, time.monotonic()))
+                await self._sweep_locked(time.monotonic())
             else:
                 # Tier 3: best-effort silent -- pool overflow discard
                 try:
@@ -1132,6 +1689,59 @@ class _AsyncConnectionPool:
                     await writer.wait_closed()
                 except Exception:
                     pass
+
+    async def _sweep_locked(self, now: float) -> None:
+        """Drop expired connections and enforce the global cap.
+
+        See :meth:`_SyncConnectionPool._sweep_locked`; the async pool needs
+        the same bound because ``pool_size`` is per key, so many hosts would
+        otherwise pin one socket each with no way to release them short of
+        ``close_all()``.
+
+        Args:
+            now: Current monotonic time.  The caller holds the lock.
+        """
+        total = 0
+        for key in list(self._pool):
+            fresh = []
+            for reader, writer, timestamp in self._pool[key]:
+                if now - timestamp > self._idle_timeout:
+                    # Tier 3: best-effort silent -- idle expiry
+                    try:
+                        writer.close()
+                        await writer.wait_closed()
+                    except Exception:
+                        pass
+                else:
+                    fresh.append((reader, writer, timestamp))
+            if fresh:
+                self._pool[key] = fresh
+                total += len(fresh)
+            else:
+                del self._pool[key]
+
+        while total > self._max_total:
+            oldest_key: Any = None
+            oldest_index = 0
+            oldest_ts = float("inf")
+            for key, conns in self._pool.items():
+                for index, (_, _, timestamp) in enumerate(conns):
+                    if timestamp < oldest_ts:
+                        oldest_ts = timestamp
+                        oldest_key = key
+                        oldest_index = index
+            if oldest_key is None:
+                return
+            _, writer, _ = self._pool[oldest_key].pop(oldest_index)
+            if not self._pool[oldest_key]:
+                del self._pool[oldest_key]
+            # Tier 3: best-effort silent -- global cap eviction
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+            total -= 1
 
     async def close_all(self) -> None:
         """Close all pooled connections."""
@@ -1145,6 +1755,94 @@ class _AsyncConnectionPool:
                     except Exception:
                         pass
             self._pool.clear()
+
+    def close_all_nowait(self) -> None:
+        """Close all pooled connections without awaiting (fork child, GC)."""
+        for conns in self._pool.values():
+            for _, writer, _ in conns:
+                try:
+                    writer.close()
+                except Exception:
+                    pass
+        self._pool.clear()
+
+
+# ── Default pools for the module-level helpers ──
+#
+# ``get()``/``post()``/``async_get()`` and friends reuse connections through a
+# process-wide pool, so a script that calls them in a loop no longer pays a TCP
+# (and TLS) handshake per request.  Async pools are per event loop: the pooled
+# stream readers/writers belong to the loop that created them.
+
+#: Attribute the default async pool is stored on under its event loop.  The
+#: pool is hung off the loop rather than a module-level mapping: a pool holds
+#: stream readers/writers whose transports reference the loop, so a
+#: ``WeakKeyDictionary`` keyed by the loop could never drop an entry and every
+#: ``asyncio.run()`` would leak one socket.
+_POOL_ATTR = "_httpclient_default_pool"
+
+_DEFAULT_SYNC_POOL = _SyncConnectionPool(DEFAULT_POOL_SIZE)
+#: Every async pool ever created, so a forked child can drop the sockets it
+#: inherited instead of talking on its parent's connections.
+_async_pools: weakref.WeakSet[_AsyncConnectionPool] = weakref.WeakSet()
+
+
+def _default_async_pool() -> _AsyncConnectionPool:
+    """Return the default pool for the running event loop.
+
+    Returns:
+        The pool owned by the current loop, created on first use.
+    """
+    loop = asyncio.get_running_loop()
+    pool = getattr(loop, _POOL_ATTR, None)
+    if pool is None:
+        pool = _AsyncConnectionPool(DEFAULT_POOL_SIZE)
+        _async_pools.add(pool)
+        try:
+            setattr(loop, _POOL_ATTR, pool)
+        except AttributeError:  # pragma: no cover - exotic loop without __dict__
+            pass
+    return pool
+
+
+def close_pools() -> None:
+    """Close every connection held by the default sync pool.
+
+    The module-level helpers keep connections open between calls, so a
+    long-lived process can release them explicitly.  Connections also close
+    at process exit, and a forked child drops the sockets it inherited.
+    """
+    _DEFAULT_SYNC_POOL.close_all()
+
+
+async def aclose_pools() -> None:
+    """Close the default async pool of the running event loop."""
+    loop = asyncio.get_running_loop()
+    pool = getattr(loop, _POOL_ATTR, None)
+    if pool is None:
+        return
+    try:
+        delattr(loop, _POOL_ATTR)
+    except AttributeError:  # pragma: no cover - exotic loop without __dict__
+        pass
+    await pool.close_all()
+
+
+def _drop_inherited_pools() -> None:
+    """Close pooled sockets in a forked child.
+
+    A child inherits the parent's file descriptors, and an HTTP/1.1
+    connection is single-stream: using an inherited one interleaves both
+    processes' requests.  Closing them in the child makes the next request
+    open its own connection.
+    """
+    _DEFAULT_SYNC_POOL.close_all()
+    for pool in list(_async_pools):
+        pool.close_all_nowait()
+
+
+if hasattr(os, "register_at_fork"):  # pragma: no branch - POSIX only
+    os.register_at_fork(after_in_child=_drop_inherited_pools)
 
 
 # ── Transport (request execution) ──
@@ -1400,6 +2098,27 @@ def _parse_url(url: str) -> tuple[str, str, int, str, bool]:
     return parsed.scheme, host, port, path, is_https
 
 
+def _authority(host: str, port: int | None = None) -> str:
+    """Format ``host[:port]`` for an authority, bracketing IPv6 literals.
+
+    ``urlparse().hostname`` strips the brackets from an IP literal, but RFC
+    3986 section 3.2.2 requires them in a URI authority.  ``http.client``
+    brackets them on the sync path, so this keeps the async path equal.
+    """
+    host_part = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    return host_part if port is None else f"{host_part}:{port}"
+
+
+def _host_header_value(host: str, port: int, is_https: bool) -> str:
+    """Return the ``Host`` header value for an origin request.
+
+    The port is included only when it is not the scheme default
+    (RFC 7230 section 5.4), matching ``http.client``.
+    """
+    default_port = 443 if is_https else 80
+    return _authority(host) if port == default_port else _authority(host, port)
+
+
 # -- Shared request preparation helpers --
 
 
@@ -1434,6 +2153,7 @@ def _prepare_request(
     files: dict[str, Any] | list[tuple[str, Any]] | None,
     params: dict[str, Any] | None,
     auth: tuple[str, str] | Auth | None,
+    cookies: dict[str, str] | None = None,
 ) -> tuple[str, bytes | None, CaseInsensitiveDict, Auth | None]:
     """Build URL, encode body, assemble headers, and normalize auth.
 
@@ -1442,8 +2162,9 @@ def _prepare_request(
     Header precedence (highest → lowest):
       1. auth headers (digest/basic — must override everything)
       2. user-supplied *headers*
-      3. body-derived defaults (Content-Type, Content-Length)
-      4. library defaults (User-Agent, Accept-Encoding)
+      3. cookies (serialised as ``Cookie`` header if not already set)
+      4. body-derived defaults (Content-Type, Content-Length)
+      5. library defaults (User-Agent, Accept-Encoding)
 
     All keys are normalised to lowercase via :class:`CaseInsensitiveDict`;
     no duplicate header names are ever emitted.
@@ -1466,6 +2187,12 @@ def _prepare_request(
     if body is not None:
         _headers_set_default(req_headers, "Content-Length", str(len(body)))
 
+    # Cookies — serialised as a single Cookie header (user header wins)
+    if cookies:
+        sc = http.cookies.SimpleCookie(cookies)
+        cookie_header = sc.output(header="", sep="; ").strip()
+        _headers_set_default(req_headers, "Cookie", cookie_header)
+
     # User headers win over all of the above
     _headers_merge_user(req_headers, headers)
 
@@ -1477,11 +2204,133 @@ def _prepare_request(
     return url, body, req_headers, auth_obj
 
 
+def _origin(url: str) -> tuple[str, str, int]:
+    """Return the ``(scheme, host, port)`` origin of *url*.
+
+    A URL without a scheme or host produces an empty origin, which never
+    equals a real one.  An unparseable redirect target therefore counts as
+    cross-origin and loses its credentials instead of forwarding them.
+
+    Args:
+        url: Absolute or relative URL.
+
+    Returns:
+        A comparable origin tuple.  Default ports are normalised by
+        :func:`_parse_url`.
+    """
+    scheme, host, port, _, _ = _parse_url(url)
+    return scheme.lower(), host.lower(), port
+
+
+#: A caller-supplied address, or ordered list of addresses, to connect to
+#: while the URL host keeps providing ``Host``, TLS SNI and certificate
+#: verification.
+ResolveTo = str | Sequence[str] | None
+
+
+def _normalize_resolve_to(resolve_to: ResolveTo) -> tuple[str, ...] | None:
+    """Normalize ``resolve_to`` to an ordered tuple of IP addresses.
+
+    Args:
+        resolve_to: ``None``, one address, or a sequence of addresses.  A
+            single string is accepted for convenience.
+
+    Returns:
+        ``None`` when no pin was requested, otherwise a non-empty tuple.
+        The caller is responsible for choosing acceptable addresses; this
+        module does not re-check the policy (see #305).
+
+    Raises:
+        ValueError: If the sequence is empty, or an entry is not an IP
+            address.  A hostname entry would be resolved by the socket
+            layer, silently downgrading the pin to a normal lookup, which is
+            the behaviour this option exists to prevent.
+    """
+    if resolve_to is None:
+        return None
+    if isinstance(resolve_to, str):
+        addresses = (resolve_to,)
+    else:
+        addresses = tuple(resolve_to)
+    if not addresses:
+        raise ValueError("resolve_to must contain at least one address")
+    normalized = tuple(str(address) for address in addresses)
+    for address in normalized:
+        try:
+            ipaddress.ip_address(address)
+        except ValueError as exc:
+            raise ValueError(f"resolve_to entry {address!r} is not an IP address") from exc
+    return normalized
+
+
+def _reject_proxy_with_resolve_to(resolve_to: object, proxy: str | None) -> None:
+    """Reject address pinning through a proxy, which resolves the name itself.
+
+    The check runs on the raw value, before normalization, so an empty
+    address list is refused on the same terms as a populated one: the
+    behaviour must not depend on the list's contents.
+
+    Args:
+        resolve_to: The caller's ``resolve_to`` value.
+        proxy: The configured proxy URL, or ``None``.
+
+    Raises:
+        ValueError: If both are set.  A proxy resolves the destination host,
+            so the client cannot enforce the pinned address; this fails
+            closed instead of reporting a guarantee it does not provide.
+    """
+    if resolve_to is not None and proxy is not None:
+        raise ValueError(
+            "resolve_to cannot be combined with proxy: the proxy resolves "
+            "the destination host, so the client cannot enforce the pinned "
+            "address"
+        )
+
+
+def _redact_pinned(text: str, addresses: Sequence[str] | None, host: str) -> str:
+    """Remove pinned addresses from an error message.
+
+    A transport error may embed the address it failed to reach.  The caller
+    supplied that address and already knows it, but the message is the wrong
+    place for it: it can end up in a log or an HTTP error body.  An address
+    equal to the URL host is left alone -- that is the host the message
+    already names, not leaked pin material.
+    """
+    if not addresses:
+        return text
+    for address in addresses:
+        if address == host:
+            continue
+        text = text.replace(address, "<pinned>")
+    return text
+
+
+def _strip_redirect_credentials(
+    req_headers: CaseInsensitiveDict, source_url: str, target_url: str
+) -> None:
+    """Drop credential headers when a redirect changes origin.
+
+    ``Authorization``, ``Proxy-Authorization`` and ``Cookie`` are scoped to
+    the origin that received them.  Sending them to a different scheme,
+    host or port leaks the caller's credentials, so the next hop starts
+    without them.
+
+    Args:
+        req_headers: Headers for the redirect chain; mutated in place.
+        source_url: URL of the request that produced the redirect.
+        target_url: Resolved redirect target.
+    """
+    if _origin(source_url) == _origin(target_url):
+        return
+    for name in _REDIRECT_CREDENTIAL_HEADERS:
+        req_headers.pop(name, None)
+
+
 def _compute_redirect(
     status: int,
     method: str,
     body: bytes | None,
-    req_headers: dict[str, str],
+    req_headers: CaseInsensitiveDict,
     resp_headers: dict[str, str],
     scheme: str,
     host: str,
@@ -1490,22 +2339,31 @@ def _compute_redirect(
     redirects: int,
     max_redirects: int,
 ) -> tuple[str, str, bytes | None]:
-    """Compute redirect target and adjust method/body.
+    """Compute the redirect target and adjust method, body and headers.
+
+    Resolves relative ``Location`` values, converts the method for 303 and
+    POST-on-301/302 redirects, and removes credential headers when the
+    target origin differs from the current one.
 
     Raises:
         TooManyRedirects: If redirect limit exceeded.
 
     Returns:
-        (new_url, new_method, new_body).
+        (new_url, new_method, new_body).  *req_headers* is modified in
+        place.
     """
     redirects_now = redirects + 1
     if redirects_now > max_redirects:
         raise TooManyRedirects(url, max_redirects)
     location = resp_headers["location"]
-    if location.startswith("/"):
+    if location.startswith("//"):
+        # Scheme-relative: keep the current scheme, replace the authority.
+        new_url = f"{scheme}:{location}"
+    elif location.startswith("/"):
         new_url = f"{scheme}://{host}:{port}{location}"
     else:
-        new_url = location
+        # Absolute URL, relative path, or query-only target.
+        new_url = urljoin(url, location)
     new_method = method
     new_body = body
     if status == 303 or (status in (301, 302) and method == "POST"):
@@ -1513,6 +2371,7 @@ def _compute_redirect(
         new_body = None
         req_headers.pop("Content-Type", None)
         req_headers.pop("Content-Length", None)
+    _strip_redirect_credentials(req_headers, url, new_url)
     return new_url, new_method, new_body
 
 
@@ -1526,24 +2385,193 @@ def _should_attempt_digest(
     status: int,
     resp_headers: dict[str, str],
     digest_attempted: bool,
+    same_origin: bool,
 ) -> bool:
-    """Return True if a Digest auth retry should be attempted."""
+    """Return True if a Digest auth retry should be attempted.
+
+    Args:
+        auth_obj: Configured auth object.
+        status: Response status code.
+        resp_headers: Response headers.
+        digest_attempted: Whether this request already answered a Digest
+            challenge.
+        same_origin: Whether the request still targets the origin the
+            credentials were configured for.  A cross-origin redirect clears
+            this for the rest of the chain, so the new origin cannot harvest
+            the credentials with a 401 challenge.
+    """
     return (
-        isinstance(auth_obj, DigestAuth)
+        same_origin
+        and isinstance(auth_obj, DigestAuth)
         and status == 401
         and not digest_attempted
         and resp_headers.get("www-authenticate", "").lower().startswith("digest")
     )
 
 
+# Contexts are safe to share between connections; a fresh SSLObject is
+# created per connection.  The key includes the CA path and the file's
+# identity, so a bundle rotated in place is picked up on the next call.
+_SSLContextKey = tuple[bool, str, str, str, str, int, int, int, int]
+_SSL_CONTEXT_CACHE: dict[_SSLContextKey, ssl.SSLContext] = {}
+_SSL_CONTEXT_LOCK = threading.Lock()
+
+
+def _path_state(path: str) -> tuple[int, int]:
+    """Return ``(mtime_ns, size)`` for a CA file or directory.
+
+    ``SSL_CERT_DIR`` is a path list on OpenSSL, so every entry is
+    combined.  A missing path contributes zeros.
+    """
+    if not path:
+        return (0, 0)
+    mtimes: list[int] = []
+    total_size = 0
+    for entry in path.split(os.pathsep):
+        try:
+            state = os.stat(entry)
+        except OSError:
+            continue
+        mtimes.append(state.st_mtime_ns)
+        total_size += state.st_size
+    return (max(mtimes) if mtimes else 0, total_size)
+
+
+def _ssl_context_key(verify: bool) -> _SSLContextKey:
+    """Return the cache key for an SSL context.
+
+    The CA path is resolved the same way ``ssl.create_default_context()``
+    resolves it.  The mtime and size of the resolved file or directory are
+    part of the key, so a bundle rotated in place invalidates the cache.
+    """
+    env_file = os.environ.get("SSL_CERT_FILE", "")
+    env_dir = os.environ.get("SSL_CERT_DIR", "")
+    defaults = ssl.get_default_verify_paths()
+    cert_file = defaults.cafile or env_file
+    cert_dir = defaults.capath or env_dir
+    file_mtime, file_size = _path_state(cert_file)
+    dir_mtime, dir_size = _path_state(cert_dir)
+    return (
+        verify,
+        env_file,
+        env_dir,
+        cert_file,
+        cert_dir,
+        file_mtime,
+        file_size,
+        dir_mtime,
+        dir_size,
+    )
+
+
 def _make_ssl_context(verify: bool) -> ssl.SSLContext:
-    """Create an SSL context based on verification setting."""
-    if verify:
-        return ssl.create_default_context()
-    return ssl._create_unverified_context()
+    """Return a cached SSL context for the verification setting."""
+    key = _ssl_context_key(verify)
+    with _SSL_CONTEXT_LOCK:
+        context = _SSL_CONTEXT_CACHE.get(key)
+        if context is None:
+            if verify:
+                context = ssl.create_default_context()
+            else:
+                context = ssl._create_unverified_context()
+            _SSL_CONTEXT_CACHE[key] = context
+        return context
 
 
 # -- Sync transport helpers --
+
+
+def _connect_to_addresses(
+    addresses: Sequence[str],
+    port: int,
+    timeout: float,
+    source_address: tuple[str, int] | None = None,
+) -> socket.socket:
+    """Connect to the first reachable address in *addresses*.
+
+    The addresses are tried in order.  Each attempt uses its own ``timeout``
+    budget, so a caller that pins several unreachable addresses can wait for
+    the sum of them.
+
+    Args:
+        addresses: Validated addresses to try, in order.
+        port: Destination port from the URL.
+        timeout: Connect timeout per attempt.
+        source_address: Optional local address, for ``http.client`` parity.
+
+    Returns:
+        A connected socket.
+
+    Raises:
+        OSError: The last connect error, when every address failed.
+    """
+    last_error: OSError | None = None
+    for address in addresses:
+        try:
+            return socket.create_connection((address, port), timeout, source_address)
+        except OSError as exc:
+            last_error = exc
+    assert last_error is not None
+    raise last_error
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """``HTTPConnection`` that connects to caller-supplied addresses.
+
+    ``host`` stays the URL host, so the ``Host`` header is unchanged; only
+    the TCP peer comes from the pinned list.
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        *,
+        addresses: Sequence[str],
+        timeout: float,
+    ) -> None:
+        super().__init__(host, port, timeout=timeout)
+        self._pinned_addresses = addresses
+        self._create_connection = self._create_pinned_connection
+
+    def _create_pinned_connection(
+        self,
+        address: tuple[str, int],
+        timeout: float,
+        source_address: tuple[str, int] | None = None,
+    ) -> socket.socket:
+        """Replace ``socket.create_connection`` for this connection."""
+        return _connect_to_addresses(self._pinned_addresses, address[1], timeout, source_address)
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """``HTTPSConnection`` that connects to caller-supplied addresses.
+
+    ``host`` stays the URL host, so TLS SNI and certificate verification use
+    it even though the TCP peer is pinned.
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        *,
+        addresses: Sequence[str],
+        timeout: float,
+        context: ssl.SSLContext | None = None,
+    ) -> None:
+        super().__init__(host, port, timeout=timeout, context=context)
+        self._pinned_addresses = addresses
+        self._create_connection = self._create_pinned_connection
+
+    def _create_pinned_connection(
+        self,
+        address: tuple[str, int],
+        timeout: float,
+        source_address: tuple[str, int] | None = None,
+    ) -> socket.socket:
+        """Replace ``socket.create_connection`` for this connection."""
+        return _connect_to_addresses(self._pinned_addresses, address[1], timeout, source_address)
 
 
 def _sync_connect_via_proxy(
@@ -1575,10 +2603,10 @@ def _sync_connect_via_proxy(
 
     # CONNECT tunnel for HTTPS through proxy
     tunnel_conn = http.client.HTTPConnection(proxy_host, proxy_port, timeout=timeout)
-    connect_headers: dict[str, str] = {"Host": f"{host}:{port}"}
+    connect_headers: dict[str, str] = {"Host": _authority(host, port)}
     if proxy_user and proxy_pass:
         connect_headers["Proxy-Authorization"] = _proxy_auth_header(proxy_user, proxy_pass)
-    tunnel_conn.request("CONNECT", f"{host}:{port}", headers=connect_headers)
+    tunnel_conn.request("CONNECT", _authority(host, port), headers=connect_headers)
     tunnel_resp = tunnel_conn.getresponse()
     if tunnel_resp.status != 200:
         tunnel_conn.close()
@@ -1641,32 +2669,97 @@ def _sync_acquire_connection(
     _pool: _SyncConnectionPool | None,
     req_headers: dict[str, str],
     url: str,
-) -> tuple[http.client.HTTPConnection, str]:
+    resolve_to: tuple[str, ...] | None = None,
+) -> tuple[http.client.HTTPConnection, str, bool]:
     """Acquire a sync HTTP connection via proxy, pool, or direct creation.
 
+    Args:
+        host: URL host, used for ``Host``, SNI and certificate verification.
+        port: URL port.
+        path: Request path.
+        is_https: Whether the request uses TLS.
+        timeout: Connect and socket timeout.
+        verify: Whether to verify TLS certificates.
+        proxy: Proxy URL, or ``None``.
+        _pool: Connection pool, or ``None``.
+        req_headers: Request headers, updated for keep-alive.
+        url: Full request URL, used for proxied requests.
+        resolve_to: Pinned addresses, or ``None``.
+
     Returns:
-        (connection, request_path).
+        (connection, request_path, reused) -- *reused* is True when the
+        connection came from the pool and may therefore be stale.
+
+    Raises:
+        ValueError: If *resolve_to* is set together with *proxy*.  The
+            request loop rejects the combination earlier; this keeps the
+            helper safe on its own.
     """
     if proxy:
+        _reject_proxy_with_resolve_to(resolve_to, proxy)
         if _is_socks_proxy(proxy):
-            return _sync_connect_via_socks5(host, port, path, is_https, timeout, verify, proxy)
-        return _sync_connect_via_proxy(
+            return (
+                *_sync_connect_via_socks5(host, port, path, is_https, timeout, verify, proxy),
+                False,
+            )
+        conn, request_path = _sync_connect_via_proxy(
             host, port, path, is_https, timeout, verify, proxy, req_headers, url
         )
+        return conn, request_path, False
 
     if _pool:
-        pooled_conn = _pool.acquire(host, port, is_https, timeout, verify)
+        pooled_conn = _pool.acquire(host, port, is_https, timeout, verify, resolve_to)
         if pooled_conn is not None:
             req_headers["Connection"] = "keep-alive"
-            return pooled_conn, path
+            # ``http.client`` fixes the socket timeout when the connection is
+            # opened, so a reused socket would otherwise keep the timeout of
+            # whoever created it and ignore the caller's budget.
+            pooled_conn.timeout = timeout
+            if pooled_conn.sock is not None:
+                pooled_conn.sock.settimeout(timeout)
+            return pooled_conn, path, True
 
     # Direct connection
+    if resolve_to is not None:
+        if is_https:
+            ctx = _make_ssl_context(verify)
+            conn = _PinnedHTTPSConnection(
+                host, port, addresses=resolve_to, timeout=timeout, context=ctx
+            )
+        else:
+            conn = _PinnedHTTPConnection(host, port, addresses=resolve_to, timeout=timeout)
+        return conn, path, False
     if is_https:
         ctx = _make_ssl_context(verify)
         conn = http.client.HTTPSConnection(host, port, timeout=timeout, context=ctx)
     else:
         conn = http.client.HTTPConnection(host, port, timeout=timeout)
-    return conn, path
+    return conn, path, False
+
+
+def _response_is_persistent(resp_headers: dict[str, str], resp_version: int | None) -> bool:
+    """Whether a response may leave the connection open for another request.
+
+    HTTP/1.1 is persistent unless the response sets ``Connection: close``;
+    HTTP/1.0 is not unless the response opts in with
+    ``Connection: keep-alive`` (RFC 7230 §6.3).  Servers that speak HTTP/1.0
+    and simply close the socket are common in tests and old deployments, and
+    pooling those connections turns the next request into an EOF error.
+
+    Args:
+        resp_headers: Lower-cased response headers.
+        resp_version: Response protocol version (10 or 11), or ``None`` when
+            unknown.
+
+    Returns:
+        ``True`` when the connection can be reused.
+    """
+    connection = resp_headers.get("connection", "").lower()
+    if "close" in {token.strip() for token in connection.split(",")}:
+        return False
+    if resp_version == 10:
+        return "keep-alive" in {token.strip() for token in connection.split(",")}
+    return True
 
 
 def _sync_release_or_close(
@@ -1679,6 +2772,9 @@ def _sync_release_or_close(
     port: int,
     is_https: bool,
     conn: http.client.HTTPConnection,
+    verify: bool = True,
+    resp_version: int | None = None,
+    resolve_to: tuple[str, ...] | None = None,
 ) -> None:
     """Release a sync connection back to the pool or close it.
 
@@ -1693,10 +2789,73 @@ def _sync_release_or_close(
     """
     if not close_conn:
         return
-    if _pool and not proxy and not stream and resp_headers.get("connection", "").lower() != "close":
-        _pool.release(host, port, is_https, conn)
+    if _pool and not proxy and not stream and _response_is_persistent(resp_headers, resp_version):
+        _pool.release(host, port, is_https, conn, verify=verify, resolve_to=resolve_to)
     else:
         conn.close()
+
+
+#: Bytes requested per read when a response body has no known length.
+_RESPONSE_READ_CHUNK = 64 * 1024
+
+
+def _validate_max_response_size(max_response_size: int | None) -> None:
+    """Reject an unusable response-size cap before any I/O starts.
+
+    ``None`` means "no limit".  Zero and negative values are refused: a
+    negative cap would make the bounded reads degrade to ``read(0)`` and the
+    decompression probe to zlib's "no limit", so it must never reach them.
+
+    Raises:
+        ValueError: If *max_response_size* is not positive.
+    """
+    if max_response_size is not None and max_response_size <= 0:
+        raise ValueError(
+            f"max_response_size must be a positive integer or None, got {max_response_size!r}"
+        )
+
+
+def _sync_read_capped(
+    resp: http.client.HTTPResponse,
+    url: str,
+    max_size: int | None,
+) -> bytes:
+    """Read a sync response body, refusing more than *max_size* bytes.
+
+    A declared ``Content-Length`` above the limit is refused before any body
+    byte is read.  A chunked or EOF-delimited body is read in bounded pieces
+    and refused as soon as the accumulated bytes cross the limit.
+
+    Args:
+        resp: The response to read.
+        url: Response URL, used in the size error.
+        max_size: The limit in bytes, or ``None`` for no limit.
+
+    Returns:
+        The response body.
+
+    Raises:
+        ResponseTooLargeError: If the body exceeds *max_size*.  The caller
+            closes the connection; it cannot be reused with an unread body.
+    """
+    if max_size is None:
+        return resp.read()
+
+    declared = resp.length
+    if declared is not None and declared > max_size:
+        raise ResponseTooLargeError(url, max_size, declared=declared)
+
+    chunks: list[bytes] = []
+    received = 0
+    while True:
+        chunk = resp.read(min(_RESPONSE_READ_CHUNK, max_size - received + 1))
+        if not chunk:
+            break
+        received += len(chunk)
+        if received > max_size:
+            raise ResponseTooLargeError(url, max_size, received=received)
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _build_sync_response(
@@ -1706,8 +2865,16 @@ def _build_sync_response(
     resp: http.client.HTTPResponse,
     conn: http.client.HTTPConnection,
     stream: bool,
+    method: str = "GET",
+    raw_set_cookies: list[str] | None = None,
+    on_timing: TimingHook | None = None,
+    timing_start: float = 0.0,
+    max_response_size: int | None = None,
 ) -> tuple[Response | StreamingResponse, bool]:
     """Build a final sync response (streaming or buffered).
+
+    ``max_response_size`` bounds the buffered body; a ``stream=True``
+    response is not buffered and is therefore not limited.
 
     Returns:
         (response, close_conn) -- close_conn is False when streaming.
@@ -1721,12 +2888,31 @@ def _build_sync_response(
             resp,
             conn,
             content_encoding=content_encoding,
+            raw_set_cookies=raw_set_cookies,
+            on_timing=on_timing,
+            timing_start=timing_start,
+            expect_body=_response_has_body(method, status),
         ), False
 
-    resp_body = resp.read()
-    if content_encoding:
-        resp_body = _decompress_body(resp_body, content_encoding)
-    return Response(status, resp_headers, resp_body, url), True
+    resp_body = _sync_read_capped(resp, url, max_response_size)
+    _emit_timing(on_timing, timing_start, "body_complete")
+    # HEAD, 204 and 304 have no body; a Content-Encoding header describes the
+    # representation, not bytes that are present, so decompressing would
+    # report a truncated stream.
+    if content_encoding and _response_has_body(method, status):
+        resp_body = _decompress_body(
+            resp_body,
+            content_encoding,
+            max_size=max_response_size,
+            url=url,
+        )
+    return Response(
+        status,
+        resp_headers,
+        resp_body,
+        url,
+        raw_set_cookies=raw_set_cookies,
+    ), True
 
 
 def _wrap_sync_errors(
@@ -1735,13 +2921,33 @@ def _wrap_sync_errors(
     port: int,
     url: str,
     timeout: float,
+    pinned: Sequence[str] | None = None,
 ) -> HttpClientError:
-    """Translate low-level sync exceptions into httpclient exceptions."""
-    if isinstance(exc, (HttpTimeoutError, HttpConnectionError, TooManyRedirects)):
+    """Translate low-level sync exceptions into httpclient exceptions.
+
+    ``pinned`` is redacted from the message: the caller supplied those
+    addresses, and a transport error is not the place to repeat them.
+    """
+    if isinstance(
+        exc,
+        (
+            HttpTimeoutError,
+            HttpConnectionError,
+            TooManyRedirects,
+            ResponseTooLargeError,
+        ),
+    ):
         return exc
+    if isinstance(exc, _TRANSPORT_TIMEOUTS):
+        return HttpTimeoutError(
+            f"Request to {url} timed out after {timeout}s",
+            url=url,
+            timeout=timeout,
+        )
     if isinstance(exc, (OSError, http.client.HTTPException)):
+        detail = _redact_pinned(str(exc), pinned, host)
         return HttpConnectionError(
-            f"Connection to {host}:{port} failed: {exc}",
+            f"Connection to {host}:{port} failed: {detail}",
             host=host,
             port=port,
         )
@@ -1765,13 +2971,27 @@ def _sync_request(
     params: dict[str, Any] | None = None,
     timeout: float = DEFAULT_TIMEOUT,
     max_redirects: int = DEFAULT_MAX_REDIRECTS,
+    follow_redirects: bool = True,
     verify: bool = True,
     stream: bool = False,
     auth: tuple[str, str] | Auth | None = None,
     proxy: str | None = None,
-    _pool: _SyncConnectionPool | None = None,
+    resolve_to: ResolveTo = None,
+    cookies: dict[str, str] | None = None,
+    on_timing: TimingHook | None = None,
+    max_response_size: int | None = None,
+    _pool: _SyncConnectionPool | None = _DEFAULT_SYNC_POOL,
 ) -> Response | StreamingResponse:
     """Perform a synchronous HTTP request.
+
+    ``resolve_to`` connects to the caller-supplied IP address (or addresses,
+    in order) while the URL host still provides ``Host``, TLS SNI and
+    certificate verification.  The caller is responsible for choosing the
+    addresses; this module does not re-check the policy.  An entry that is
+    not an IP literal raises ``ValueError``.  It cannot be combined
+    with ``proxy``: the proxy resolves the name, so the pin is unenforceable.
+    A redirect that changes scheme, host or port drops the pin for the rest
+    of the chain.
 
     Phase structure (mirrors _async_request):
         1-3. Request preparation (URL, body, headers, auth)
@@ -1780,19 +3000,47 @@ def _sync_request(
            b. Send request + read response
            c. Handle redirects / digest auth / response construction
            d. Connection lifecycle (pool release or close)
+
+    With ``follow_redirects=False`` a 3xx is returned like any other
+    response instead of being followed, so the caller can read ``Location``
+    and validate the next hop.  The decision is taken after a Digest-auth
+    retry as well, and it applies to ``stream=True`` responses.
     """
+    _validate_max_response_size(max_response_size)
+    timing_start = time.perf_counter()
+    if on_timing is not None:
+        on_timing("request_started", 0.0)
     url, body, req_headers, auth_obj = _prepare_request(
-        method, url, headers, data, json, files, params, auth
+        method, url, headers, data, json, files, params, auth, cookies
     )
 
+    _reject_proxy_with_resolve_to(resolve_to, proxy)
+    pinned = _normalize_resolve_to(resolve_to)
+    pinned_origin: tuple[str, str, int] | None = None
+    if pinned is not None:
+        scheme0, host0, port0, _, _ = _parse_url(url)
+        pinned_origin = (scheme0, host0, port0)
+
+    credential_origin = _origin(url)
+    same_origin = True
     redirects = 0
     _digest_attempted = False
+    retried = False
+    pool = _pool
+    accumulated_set_cookies: list[str] = []
     while True:
         scheme, host, port, path, is_https = _parse_url(url)
+        # A redirect that changes origin must not pin the new host to the
+        # address validated for the old one.  Stay dropped for the chain,
+        # like the credential rule.
+        if pinned is not None and (scheme, host, port) != pinned_origin:
+            pinned = None
         close_conn = True
+        completed = False
+        resp_version: int | None = None
         resp_headers: dict[str, str] = {}
         try:
-            conn, request_path = _sync_acquire_connection(
+            conn, request_path, reused = _sync_acquire_connection(
                 host,
                 port,
                 path,
@@ -1800,21 +3048,49 @@ def _sync_request(
                 timeout,
                 verify,
                 proxy,
-                _pool,
+                pool,
                 req_headers,
                 url,
+                pinned,
             )
-            if _pool and not proxy:
+            if pool and not proxy:
                 req_headers.setdefault("Connection", "keep-alive")
 
             try:
-                conn.request(method, request_path, body=body, headers=req_headers)
-                resp = conn.getresponse()
-                resp_headers = CaseInsensitiveDict(resp.getheaders())
+                try:
+                    conn.request(method, request_path, body=body, headers=req_headers)
+                    resp = conn.getresponse()
+                    resp_version = resp.version
+                    _emit_timing(on_timing, timing_start, "headers_received")
+                except (OSError, http.client.HTTPException) as exc:
+                    # A timeout is not a stale connection: retrying would
+                    # double the caller's wall-clock budget and could reach
+                    # the server twice.
+                    if isinstance(exc, _TRANSPORT_TIMEOUTS) or not (
+                        reused and not retried and method in _RETRYABLE_METHODS
+                    ):
+                        raise
+                    # The server closed a kept-alive connection between
+                    # requests; repeat once on a fresh connection.
+                    logger.debug("Retrying %s after stale pooled connection: %s", url, exc)
+                    retried = True
+                    pool = None
+                    close_conn = False
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    continue
+                raw_headers = resp.getheaders()
+                accumulated_set_cookies.extend(
+                    v for k, v in raw_headers if k.lower() == "set-cookie"
+                )
+                resp_headers = CaseInsensitiveDict(raw_headers)
                 status = resp.status
 
-                if _is_redirect(status, resp_headers):
-                    resp.read()
+                if follow_redirects and _is_redirect(status, resp_headers):
+                    _sync_read_capped(resp, url, max_response_size)
+                    completed = True
                     url, method, body = _compute_redirect(
                         status,
                         method,
@@ -1828,11 +3104,14 @@ def _sync_request(
                         redirects,
                         max_redirects,
                     )
+                    same_origin = same_origin and _origin(url) == credential_origin
                     redirects += 1
                     continue
 
-                if _should_attempt_digest(auth_obj, status, resp_headers, _digest_attempted):
-                    resp.read()
+                if _should_attempt_digest(
+                    auth_obj, status, resp_headers, _digest_attempted, same_origin
+                ):
+                    _sync_read_capped(resp, url, max_response_size)
                     www_auth = resp_headers["www-authenticate"]
                     req_headers.update(auth_obj.auth_headers_from_challenge(method, path, www_auth))
                     _digest_attempted = True
@@ -1846,22 +3125,42 @@ def _sync_request(
                     resp,
                     conn,
                     stream,
+                    method,
+                    raw_set_cookies=accumulated_set_cookies,
+                    on_timing=on_timing,
+                    timing_start=timing_start,
+                    max_response_size=max_response_size,
                 )
+                completed = True
                 return result
             finally:
-                _sync_release_or_close(
-                    close_conn,
-                    _pool,
-                    proxy,
-                    stream,
-                    resp_headers,
-                    host,
-                    port,
-                    is_https,
-                    conn,
-                )
+                # Only a connection that finished its request/response cycle
+                # is safe to reuse: after a mid-body failure http.client still
+                # believes a response is pending, so the next caller would fail
+                # inside ``request()``.
+                if completed:
+                    _sync_release_or_close(
+                        close_conn and completed,
+                        _pool,
+                        proxy,
+                        stream,
+                        resp_headers,
+                        host,
+                        port,
+                        is_https,
+                        conn,
+                        verify,
+                        resp_version,
+                        pinned,
+                    )
+                elif close_conn:
+                    # The body was not fully read (an error, or a
+                    # ResponseTooLargeError).  Close now rather than leaving
+                    # the socket to the garbage collector; a caller that
+                    # keeps the exception would keep the fd alive.
+                    conn.close()
         except Exception as exc:
-            wrapped = _wrap_sync_errors(exc, host, port, url, timeout)
+            wrapped = _wrap_sync_errors(exc, host, port, url, timeout, pinned)
             if wrapped is exc:
                 raise
             raise wrapped from exc
@@ -1873,14 +3172,15 @@ def _sync_request(
 async def _async_read_response_headers(
     reader: asyncio.StreamReader,
     timeout: float,
-) -> tuple[int, CaseInsensitiveDict]:
+) -> tuple[int, CaseInsensitiveDict, list[str], int | None]:
     """Read HTTP status line and headers from an asyncio StreamReader.
 
     Does NOT consume the body -- the reader is left positioned at the
     start of the response body.
 
     Returns:
-        (status_code, headers_dict).
+        (status_code, headers_dict, raw_set_cookies, version), where
+        *version* is 11 for ``HTTP/1.1`` and 10 for ``HTTP/1.0``.
     """
     # Status line: "HTTP/1.1 200 OK\r\n"
     status_line = await asyncio.wait_for(reader.readline(), timeout=timeout)
@@ -1889,9 +3189,11 @@ async def _async_read_response_headers(
     if len(parts) < 2:
         raise HttpConnectionError(f"Malformed status line: {status_str}")
     status_code = int(parts[1])
+    version = 10 if parts[0].endswith("1.0") else 11
 
     # Headers until empty line
     headers: CaseInsensitiveDict = CaseInsensitiveDict()
+    raw_set_cookies: list[str] = []
     while True:
         line = await asyncio.wait_for(reader.readline(), timeout=timeout)
         decoded = line.decode("latin-1").rstrip("\r\n")
@@ -1899,17 +3201,32 @@ async def _async_read_response_headers(
             break
         if ":" in decoded:
             k, v = decoded.split(":", 1)
-            headers[k.strip()] = v.strip()
+            k_stripped = k.strip()
+            v_stripped = v.strip()
+            if k_stripped.lower() == "set-cookie":
+                raw_set_cookies.append(v_stripped)
+            headers[k_stripped] = v_stripped
 
-    return status_code, headers
+    return status_code, headers, raw_set_cookies, version
 
 
 async def _async_read_chunked_body(
     reader: asyncio.StreamReader,
     timeout: float,
+    *,
+    url: str = "",
+    max_size: int | None = None,
 ) -> bytes:
-    """Read a chunked transfer-encoded body from an asyncio StreamReader."""
+    """Read a chunked transfer-encoded body from an asyncio StreamReader.
+
+    With *max_size*, a chunk that would push the accumulated body over the
+    limit is refused before its payload is read.
+
+    Raises:
+        ResponseTooLargeError: If the body exceeds *max_size*.
+    """
     parts: list[bytes] = []
+    received = 0
     while True:
         size_line = await asyncio.wait_for(reader.readline(), timeout=timeout)
         size_str = size_line.decode("latin-1").split(";")[0].strip()
@@ -1919,8 +3236,11 @@ async def _async_read_chunked_body(
         if chunk_size == 0:
             await asyncio.wait_for(reader.readline(), timeout=timeout)  # trailing \r\n
             break
+        if max_size is not None and received + chunk_size > max_size:
+            raise ResponseTooLargeError(url, max_size, received=received + chunk_size)
         data = await asyncio.wait_for(reader.readexactly(chunk_size), timeout=timeout)
         await asyncio.wait_for(reader.readline(), timeout=timeout)  # trailing \r\n
+        received += len(data)
         parts.append(data)
     return b"".join(parts)
 
@@ -1929,24 +3249,52 @@ async def _async_read_body(
     reader: asyncio.StreamReader,
     headers: dict[str, str],
     timeout: float,
+    *,
+    url: str = "",
+    max_size: int | None = None,
 ) -> bytes:
     """Read the response body based on Content-Length or Transfer-Encoding.
 
-    Falls back to reading until EOF when neither header is present.
+    Falls back to reading until EOF when neither header is present.  With
+    *max_size*, a declared length above the limit is refused before reading,
+    and an undeclared body is read in bounded pieces until it crosses the
+    limit.
+
+    Raises:
+        ResponseTooLargeError: If the body exceeds *max_size*.
     """
     te = headers.get("transfer-encoding", "")
     if te.lower() == "chunked":
-        return await _async_read_chunked_body(reader, timeout)
+        return await _async_read_chunked_body(reader, timeout, url=url, max_size=max_size)
 
     cl = headers.get("content-length")
     if cl is not None:
         length = int(cl)
+        if max_size is not None and length > max_size:
+            raise ResponseTooLargeError(url, max_size, declared=length)
         if length == 0:
             return b""
         return await asyncio.wait_for(reader.readexactly(length), timeout=timeout)
 
-    # No Content-Length, no chunked -- read until EOF
-    return await asyncio.wait_for(reader.read(), timeout=timeout)
+    if max_size is None:
+        # No Content-Length, no chunked -- read until EOF
+        return await asyncio.wait_for(reader.read(), timeout=timeout)
+
+    # No Content-Length, no chunked -- read until EOF, bounded.
+    chunks: list[bytes] = []
+    received = 0
+    while True:
+        chunk = await asyncio.wait_for(
+            reader.read(min(_RESPONSE_READ_CHUNK, max_size - received + 1)),
+            timeout=timeout,
+        )
+        if not chunk:
+            break
+        received += len(chunk)
+        if received > max_size:
+            raise ResponseTooLargeError(url, max_size, received=received)
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 # -- Async connection helpers --
@@ -1992,14 +3340,14 @@ async def _async_connect_via_proxy_tunnel(
         asyncio.open_connection(proxy_host, proxy_port),
         timeout=timeout,
     )
-    connect_line = f"CONNECT {host}:{port} HTTP/1.1\r\n"
-    connect_headers = f"Host: {host}:{port}\r\n"
+    connect_line = f"CONNECT {_authority(host, port)} HTTP/1.1\r\n"
+    connect_headers = f"Host: {_authority(host, port)}\r\n"
     if proxy_user and proxy_pass:
         connect_headers += f"Proxy-Authorization: {_proxy_auth_header(proxy_user, proxy_pass)}\r\n"
     connect_headers += "\r\n"
     proxy_writer.write((connect_line + connect_headers).encode("latin-1"))
     await asyncio.wait_for(proxy_writer.drain(), timeout=timeout)
-    tunnel_status, _ = await _async_read_response_headers(proxy_reader, timeout)
+    tunnel_status, _, _, _ = await _async_read_response_headers(proxy_reader, timeout)
     if tunnel_status != 200:
         proxy_writer.close()
         # Tier 3: best-effort silent -- proxy tunnel teardown
@@ -2063,6 +3411,52 @@ async def _async_connect_via_socks5(
     return reader, writer
 
 
+async def _async_open_pinned(
+    addresses: Sequence[str],
+    port: int,
+    timeout: float,
+    ssl_context: ssl.SSLContext | None,
+    server_hostname: str,
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Open a connection to the first reachable pinned address.
+
+    ``server_hostname`` is the URL host passed verbatim from
+    :func:`_parse_url`: it is used for TLS SNI and certificate verification
+    even though the TCP peer comes from *addresses*.  Passing it explicitly
+    is required, because asyncio would otherwise verify the pinned IP.
+
+    Args:
+        addresses: Validated addresses to try, in order.
+        port: Destination port from the URL.
+        timeout: Connect timeout per attempt.
+        ssl_context: TLS context for HTTPS, or ``None`` for plain HTTP.
+        server_hostname: URL host for SNI and verification.
+
+    Returns:
+        A connected (reader, writer) pair.
+
+    Raises:
+        OSError: The last connect error, when every address failed.
+        asyncio.TimeoutError: The last attempt timed out.
+    """
+    last_error: BaseException | None = None
+    for address in addresses:
+        try:
+            return await asyncio.wait_for(
+                asyncio.open_connection(
+                    address,
+                    port,
+                    ssl=ssl_context,
+                    server_hostname=(server_hostname if ssl_context is not None else None),
+                ),
+                timeout=timeout,
+            )
+        except (OSError, asyncio.TimeoutError) as exc:
+            last_error = exc
+    assert last_error is not None
+    raise last_error
+
+
 async def _async_acquire_connection(
     host: str,
     port: int,
@@ -2074,21 +3468,40 @@ async def _async_acquire_connection(
     _pool: _AsyncConnectionPool | None,
     req_headers: dict[str, str],
     url: str,
-) -> tuple[asyncio.StreamReader, asyncio.StreamWriter, str]:
+    resolve_to: tuple[str, ...] | None = None,
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter, str, bool]:
     """Acquire an async connection via proxy, pool, or direct creation.
 
     Wraps connection errors into HttpConnectionError / HttpTimeoutError.
 
+    Args:
+        host: URL host, used for ``Host``, SNI and certificate verification.
+        port: URL port.
+        path: Request path.
+        is_https: Whether the request uses TLS.
+        timeout: Connect timeout.
+        verify: Whether to verify TLS certificates.
+        proxy: Proxy URL, or ``None``.
+        _pool: Connection pool, or ``None``.
+        req_headers: Request headers, updated for keep-alive.
+        url: Full request URL, used for proxied requests.
+        resolve_to: Pinned addresses, or ``None``.
+
     Returns:
-        (reader, writer, request_path).
+        (reader, writer, request_path, reused) -- *reused* is True when the
+        connection came from the pool and may therefore be stale.
+
+    Raises:
+        ValueError: If *resolve_to* is set together with *proxy*.
     """
     try:
         if proxy:
+            _reject_proxy_with_resolve_to(resolve_to, proxy)
             if _is_socks_proxy(proxy):
                 reader, writer = await _async_connect_via_socks5(
                     host, port, timeout, verify, is_https, proxy
                 )
-                return reader, writer, path
+                return reader, writer, path, False
             if not is_https:
                 proxy_host, proxy_port, proxy_user, proxy_pass = _parse_proxy(proxy)
                 reader, writer = await asyncio.wait_for(
@@ -2097,32 +3510,36 @@ async def _async_acquire_connection(
                 )
                 if proxy_user and proxy_pass:
                     req_headers["Proxy-Authorization"] = _proxy_auth_header(proxy_user, proxy_pass)
-                return reader, writer, url
+                return reader, writer, url, False
             reader, writer = await _async_connect_via_proxy_tunnel(
                 host, port, timeout, verify, proxy
             )
-            return reader, writer, path
+            return reader, writer, path, False
 
         if _pool:
-            result = await _pool.acquire(host, port, is_https, timeout, verify)
+            result = await _pool.acquire(host, port, is_https, timeout, verify, resolve_to)
             if result is not None:
                 reader, writer = result
                 req_headers["Connection"] = "keep-alive"
-                return reader, writer, path
+                return reader, writer, path, True
 
         # Direct connection
         ctx = _make_ssl_context(verify) if is_https else None
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port, ssl=ctx),
-            timeout=timeout,
-        )
-        return reader, writer, path
+        if resolve_to is not None:
+            reader, writer = await _async_open_pinned(resolve_to, port, timeout, ctx, host)
+        else:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port, ssl=ctx),
+                timeout=timeout,
+            )
+        return reader, writer, path, False
     except asyncio.TimeoutError:
         msg = f"Connection to {host}:{port} timed out after {timeout}s"
         raise HttpTimeoutError(msg, url=url, timeout=timeout)
     except OSError as exc:
+        detail = _redact_pinned(str(exc), resolve_to, host)
         raise HttpConnectionError(
-            f"Connection to {host}:{port} failed: {exc}",
+            f"Connection to {host}:{port} failed: {detail}",
             host=host,
             port=port,
         ) from exc
@@ -2132,6 +3549,8 @@ def _build_raw_http_request(
     method: str,
     request_path: str,
     host: str,
+    port: int,
+    is_https: bool,
     req_headers: dict[str, str],
     use_pool: bool,
     use_proxy: bool,
@@ -2142,6 +3561,11 @@ def _build_raw_http_request(
         method: HTTP method.
         request_path: The request path or full URL (for proxy).
         host: Target hostname.
+        port: Target port from the URL; part of the ``Host`` header when it
+            is not the scheme default (RFC 7230 section 5.4).  Under a
+            proxy the socket port is the proxy's, not this one.
+        is_https: Whether the request is over TLS, which sets the default
+            port for the ``Host`` header.
         req_headers: Request headers dict.
         use_pool: Whether connection pooling is active.
         use_proxy: Whether a proxy is being used.
@@ -2151,8 +3575,10 @@ def _build_raw_http_request(
     """
     request_line = f"{method} {request_path} HTTP/1.1\r\n"
     # Emit Host first (RFC 7230 §5.4). req_headers is a CaseInsensitiveDict
-    # so the 'in' check is O(1) and case-insensitive.
-    header_lines = "" if "host" in req_headers else f"Host: {host}\r\n"
+    # so the 'in' check is O(1) and case-insensitive.  A non-default port is
+    # included and IPv6 literals are bracketed, matching http.client.
+    host_header = _host_header_value(host, port, is_https)
+    header_lines = "" if "host" in req_headers else f"Host: {host_header}\r\n"
     for k, v in req_headers.items():
         header_lines += f"{k}: {v}\r\n"
     if (not use_pool or use_proxy) and "connection" not in req_headers:
@@ -2172,6 +3598,9 @@ async def _async_release_or_close(
     is_https: bool,
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
+    verify: bool = True,
+    resp_version: int | None = None,
+    resolve_to: tuple[str, ...] | None = None,
 ) -> None:
     """Release an async connection back to the pool or close it.
 
@@ -2186,8 +3615,10 @@ async def _async_release_or_close(
     """
     if not close_writer:
         return
-    if _pool and not proxy and not stream and resp_headers.get("connection", "").lower() != "close":
-        await _pool.release(host, port, is_https, reader, writer)
+    if _pool and not proxy and not stream and _response_is_persistent(resp_headers, resp_version):
+        await _pool.release(
+            host, port, is_https, reader, writer, verify=verify, resolve_to=resolve_to
+        )
     else:
         writer.close()
         # Tier 3: best-effort silent -- wait_closed on direct close
@@ -2213,6 +3644,10 @@ def _build_async_streaming_response(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     timeout: float,
+    method: str = "GET",
+    raw_set_cookies: list[str] | None = None,
+    on_timing: TimingHook | None = None,
+    timing_start: float = 0.0,
 ) -> StreamingResponse:
     """Build an async StreamingResponse from response metadata."""
     content_encoding = resp_headers.get("content-encoding", "")
@@ -2230,6 +3665,10 @@ def _build_async_streaming_response(
         content_length,
         timeout,
         content_encoding=content_encoding,
+        raw_set_cookies=raw_set_cookies,
+        on_timing=on_timing,
+        timing_start=timing_start,
+        expect_body=_response_has_body(method, status),
     )
 
 
@@ -2247,13 +3686,27 @@ async def _async_request(
     params: dict[str, Any] | None = None,
     timeout: float = DEFAULT_TIMEOUT,
     max_redirects: int = DEFAULT_MAX_REDIRECTS,
+    follow_redirects: bool = True,
     verify: bool = True,
     stream: bool = False,
     auth: tuple[str, str] | Auth | None = None,
     proxy: str | None = None,
+    resolve_to: ResolveTo = None,
+    cookies: dict[str, str] | None = None,
+    on_timing: TimingHook | None = None,
+    max_response_size: int | None = None,
     _pool: _AsyncConnectionPool | None = None,
 ) -> Response | StreamingResponse:
     """Perform an asynchronous HTTP request using asyncio streams.
+
+    ``resolve_to`` connects to the caller-supplied IP address (or addresses,
+    in order) while the URL host still provides ``Host``, TLS SNI and
+    certificate verification.  The caller is responsible for choosing the
+    addresses; this module does not re-check the policy.  An entry that is
+    not an IP literal raises ``ValueError``.  It cannot be combined
+    with ``proxy``: the proxy resolves the name, so the pin is unenforceable.
+    A redirect that changes scheme, host or port drops the pin for the rest
+    of the chain.
 
     Phase structure (mirrors _sync_request):
         1-3. Request preparation (URL, body, headers, auth)
@@ -2262,42 +3715,119 @@ async def _async_request(
            b. Send raw HTTP/1.1 request + read response headers
            c. Handle redirects / digest auth / response construction
            d. Connection lifecycle (pool release or close)
+
+    With ``follow_redirects=False`` a 3xx is returned like any other
+    response instead of being followed, so the caller can read ``Location``
+    and validate the next hop.  The decision is taken after a Digest-auth
+    retry as well, and it applies to ``stream=True`` responses.
     """
+    _validate_max_response_size(max_response_size)
+    timing_start = time.perf_counter()
+    if on_timing is not None:
+        on_timing("request_started", 0.0)
     url, body, req_headers, auth_obj = _prepare_request(
-        method, url, headers, data, json, files, params, auth
+        method, url, headers, data, json, files, params, auth, cookies
     )
 
+    _reject_proxy_with_resolve_to(resolve_to, proxy)
+    pinned = _normalize_resolve_to(resolve_to)
+    pinned_origin: tuple[str, str, int] | None = None
+    if pinned is not None:
+        scheme0, host0, port0, _, _ = _parse_url(url)
+        pinned_origin = (scheme0, host0, port0)
+
+    credential_origin = _origin(url)
+    same_origin = True
     redirects = 0
     _digest_attempted = False
+    retried = False
+    pool = _pool
+    accumulated_set_cookies: list[str] = []
     while True:
         scheme, host, port, path, is_https = _parse_url(url)
+        # A redirect that changes origin must not pin the new host to the
+        # address validated for the old one.  Stay dropped for the chain,
+        # like the credential rule.
+        if pinned is not None and (scheme, host, port) != pinned_origin:
+            pinned = None
 
-        reader, writer, request_path = await _async_acquire_connection(
-            host, port, path, is_https, timeout, verify, proxy, _pool, req_headers, url
+        reader, writer, request_path, reused = await _async_acquire_connection(
+            host,
+            port,
+            path,
+            is_https,
+            timeout,
+            verify,
+            proxy,
+            pool,
+            req_headers,
+            url,
+            pinned,
         )
-        if _pool and not proxy:
+        if pool and not proxy:
             req_headers.setdefault("Connection", "keep-alive")
 
         close_writer = True
+        completed = False
+        resp_version: int | None = None
         resp_headers: dict[str, str] = {}
         try:
-            raw_request = _build_raw_http_request(
-                method,
-                request_path,
-                host,
-                req_headers,
-                use_pool=bool(_pool),
-                use_proxy=bool(proxy),
-            )
-            writer.write(raw_request)
-            if body:
-                writer.write(body)
-            await asyncio.wait_for(writer.drain(), timeout=timeout)
+            try:
+                raw_request = _build_raw_http_request(
+                    method,
+                    request_path,
+                    host,
+                    port,
+                    is_https,
+                    req_headers,
+                    use_pool=bool(pool),
+                    use_proxy=bool(proxy),
+                )
+                writer.write(raw_request)
+                if body:
+                    writer.write(body)
+                await asyncio.wait_for(writer.drain(), timeout=timeout)
 
-            status, resp_headers = await _async_read_response_headers(reader, timeout)
+                (
+                    status,
+                    resp_headers,
+                    iter_set_cookies,
+                    resp_version,
+                ) = await _async_read_response_headers(reader, timeout)
+                _emit_timing(on_timing, timing_start, "headers_received")
+            except (
+                OSError,
+                asyncio.IncompleteReadError,
+                http.client.HTTPException,
+                HttpConnectionError,
+            ) as exc:
+                # ``HttpConnectionError`` covers the EOF case: a server that
+                # closed a kept-alive connection yields an empty status line,
+                # which is reported as a malformed response.
+                if isinstance(exc, _TRANSPORT_TIMEOUTS) or not (
+                    reused and not retried and method in _RETRYABLE_METHODS
+                ):
+                    # A timeout is not a stale connection: retrying would
+                    # double the caller's wall-clock budget and could reach
+                    # the server twice.
+                    raise
+                logger.debug("Retrying %s after stale pooled connection: %s", url, exc)
+                retried = True
+                pool = None
+                close_writer = False
+                await _async_close_writer_silent(writer)
+                continue
+            accumulated_set_cookies.extend(iter_set_cookies)
 
-            if _is_redirect(status, resp_headers):
-                await _async_read_body(reader, resp_headers, timeout)
+            if follow_redirects and _is_redirect(status, resp_headers):
+                await _async_read_body(
+                    reader,
+                    resp_headers,
+                    timeout,
+                    url=url,
+                    max_size=max_response_size,
+                )
+                completed = True
                 url, method, body = _compute_redirect(
                     status,
                     method,
@@ -2311,11 +3841,20 @@ async def _async_request(
                     redirects,
                     max_redirects,
                 )
+                same_origin = same_origin and _origin(url) == credential_origin
                 redirects += 1
                 continue
 
-            if _should_attempt_digest(auth_obj, status, resp_headers, _digest_attempted):
-                await _async_read_body(reader, resp_headers, timeout)
+            if _should_attempt_digest(
+                auth_obj, status, resp_headers, _digest_attempted, same_origin
+            ):
+                await _async_read_body(
+                    reader,
+                    resp_headers,
+                    timeout,
+                    url=url,
+                    max_size=max_response_size,
+                )
                 www_auth = resp_headers["www-authenticate"]
                 req_headers.update(auth_obj.auth_headers_from_challenge(method, path, www_auth))
                 _digest_attempted = True
@@ -2332,13 +3871,37 @@ async def _async_request(
                     reader,
                     writer,
                     timeout,
+                    method,
+                    raw_set_cookies=accumulated_set_cookies,
+                    on_timing=on_timing,
+                    timing_start=timing_start,
                 )
 
             content_encoding = resp_headers.get("content-encoding", "")
-            resp_body = await _async_read_body(reader, resp_headers, timeout)
-            if content_encoding:
-                resp_body = _decompress_body(resp_body, content_encoding)
-            return Response(status, resp_headers, resp_body, url)
+            has_body = _response_has_body(method, status)
+            resp_body = await _async_read_body(
+                reader,
+                resp_headers,
+                timeout,
+                url=url,
+                max_size=max_response_size if has_body else None,
+            )
+            _emit_timing(on_timing, timing_start, "body_complete")
+            if content_encoding and has_body:
+                resp_body = _decompress_body(
+                    resp_body,
+                    content_encoding,
+                    max_size=max_response_size,
+                    url=url,
+                )
+            completed = True
+            return Response(
+                status,
+                resp_headers,
+                resp_body,
+                url,
+                raw_set_cookies=accumulated_set_cookies,
+            )
         except asyncio.TimeoutError:
             raise HttpTimeoutError(
                 f"Request to {url} timed out after {timeout}s",
@@ -2346,18 +3909,26 @@ async def _async_request(
                 timeout=timeout,
             )
         finally:
-            await _async_release_or_close(
-                close_writer,
-                _pool,
-                proxy,
-                stream,
-                resp_headers,
-                host,
-                port,
-                is_https,
-                reader,
-                writer,
-            )
+            if completed:
+                await _async_release_or_close(
+                    close_writer and completed,
+                    _pool,
+                    proxy,
+                    stream,
+                    resp_headers,
+                    host,
+                    port,
+                    is_https,
+                    reader,
+                    writer,
+                    verify,
+                    resp_version,
+                    pinned,
+                )
+            elif close_writer:
+                # The body was not fully read; close the transport now
+                # instead of leaving it to the collector.
+                await _async_close_writer_silent(writer)
 
 
 # ── Request Building helpers (multipart, headers) ──
@@ -2379,7 +3950,16 @@ def _prepare_body(
         (body_bytes, content_type) tuple.
     """
     if json is not None:
-        return _json.dumps(json, ensure_ascii=False).encode("utf-8"), "application/json"
+        try:
+            # allow_nan=False: NaN/Infinity are not valid JSON, so refuse to
+            # put them on the wire (requests raises InvalidJSONError here).
+            payload = _json.dumps(json, ensure_ascii=False, allow_nan=False)
+        except ValueError as exc:
+            raise ValueError(
+                f"JSON request body is not valid JSON: {exc}. Non-finite floats "
+                "(NaN, Infinity) cannot be transmitted; send null instead."
+            ) from exc
+        return payload.encode("utf-8"), "application/json"
     if files is not None:
         form_data = data if isinstance(data, dict) else None
         return _encode_multipart(form_data, files)
@@ -2540,36 +4120,43 @@ def options(url: str, **kwargs: Any) -> Response | StreamingResponse:
 
 async def async_get(url: str, **kwargs: Any) -> Response | StreamingResponse:
     """Send an async GET request."""
+    kwargs.setdefault("_pool", _default_async_pool())
     return await _async_request("GET", url, **kwargs)
 
 
 async def async_post(url: str, **kwargs: Any) -> Response | StreamingResponse:
     """Send an async POST request."""
+    kwargs.setdefault("_pool", _default_async_pool())
     return await _async_request("POST", url, **kwargs)
 
 
 async def async_put(url: str, **kwargs: Any) -> Response | StreamingResponse:
     """Send an async PUT request."""
+    kwargs.setdefault("_pool", _default_async_pool())
     return await _async_request("PUT", url, **kwargs)
 
 
 async def async_patch(url: str, **kwargs: Any) -> Response | StreamingResponse:
     """Send an async PATCH request."""
+    kwargs.setdefault("_pool", _default_async_pool())
     return await _async_request("PATCH", url, **kwargs)
 
 
 async def async_delete(url: str, **kwargs: Any) -> Response | StreamingResponse:
     """Send an async DELETE request."""
+    kwargs.setdefault("_pool", _default_async_pool())
     return await _async_request("DELETE", url, **kwargs)
 
 
 async def async_head(url: str, **kwargs: Any) -> Response | StreamingResponse:
     """Send an async HEAD request."""
+    kwargs.setdefault("_pool", _default_async_pool())
     return await _async_request("HEAD", url, **kwargs)
 
 
 async def async_options(url: str, **kwargs: Any) -> Response | StreamingResponse:
     """Send an async OPTIONS request."""
+    kwargs.setdefault("_pool", _default_async_pool())
     return await _async_request("OPTIONS", url, **kwargs)
 
 
@@ -2582,6 +4169,31 @@ class Client:
     Thread-safe: the underlying connection pool uses its own
     ``threading.Lock`` to protect shared state.
 
+    The cookie jar is a flat ``dict[str, str]`` — cookies are **not**
+    scoped by domain or path.  This is suitable for single-origin use
+    (e.g. an API client talking to one service).  For multi-origin
+    scenarios, manage cookies per-domain yourself.
+
+    ``max_response_size`` caps a buffered response body; a body above the
+    cap raises :class:`ResponseTooLargeError`.  It must be a positive
+    integer or ``None``.  The default ``None`` keeps the historical
+    unbounded behaviour.  A ``stream=True`` response is not buffered and is
+    therefore not limited.
+
+    ``follow_redirects=False`` returns the first 3xx response unchanged
+    instead of following it, so the caller can read ``Location`` and
+    validate the next hop; unlike ``max_redirects=0``, the response is
+    returned rather than an exception.  A ``stream=True`` 3xx is unread --
+    drain or close it to return the connection to the pool.  The keyword is
+    also accepted per request.
+
+    ``resolve_to`` pins the TCP peer to a caller-validated IP address, or to
+    an ordered list of IP addresses tried until one connects, while the URL
+    host still provides ``Host``, TLS SNI and certificate verification.  The
+    caller chooses the addresses.  A hostname entry raises ``ValueError``
+    rather than being resolved.  It cannot be combined with ``proxy``: that
+    raises ``ValueError`` at construction.
+
     Usage::
 
         with Client(headers={"Authorization": "Bearer token"}) as c:
@@ -2592,20 +4204,32 @@ class Client:
         self,
         *,
         headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         max_redirects: int = DEFAULT_MAX_REDIRECTS,
+        follow_redirects: bool = True,
         verify: bool = True,
         auth: tuple[str, str] | Auth | None = None,
         proxy: str | None = None,
+        resolve_to: ResolveTo = None,
         pool_size: int = DEFAULT_POOL_SIZE,
+        max_total_connections: int = DEFAULT_MAX_TOTAL_CONNECTIONS,
+        pool_idle_timeout: float = DEFAULT_POOL_IDLE_TIMEOUT,
+        max_response_size: int | None = None,
     ) -> None:
         self._base_headers = headers or {}
+        self._cookies: dict[str, str] = dict(cookies) if cookies else {}
         self._timeout = timeout
         self._max_redirects = max_redirects
+        self._follow_redirects = follow_redirects
         self._verify = verify
         self._auth = auth
         self._proxy = proxy
-        self._pool = _SyncConnectionPool(pool_size)
+        _reject_proxy_with_resolve_to(resolve_to, proxy)
+        self._resolve_to = _normalize_resolve_to(resolve_to)
+        _validate_max_response_size(max_response_size)
+        self._max_response_size = max_response_size
+        self._pool = _SyncConnectionPool(pool_size, max_total_connections, pool_idle_timeout)
 
     def request(
         self,
@@ -2614,14 +4238,27 @@ class Client:
         **kwargs: Any,
     ) -> Response | StreamingResponse:
         """Send an HTTP request."""
+        merged_cookies = dict(self._cookies)
+        per_request = kwargs.pop("cookies", None)
+        if per_request:
+            merged_cookies.update(per_request)
+        kwargs["cookies"] = merged_cookies or None
         kwargs.setdefault("timeout", self._timeout)
         kwargs.setdefault("max_redirects", self._max_redirects)
+        kwargs.setdefault("follow_redirects", self._follow_redirects)
         kwargs.setdefault("verify", self._verify)
         kwargs.setdefault("auth", self._auth)
         kwargs.setdefault("proxy", self._proxy)
+        kwargs.setdefault("resolve_to", self._resolve_to)
+        kwargs.setdefault("max_response_size", self._max_response_size)
         kwargs["_pool"] = self._pool
         kwargs["headers"] = _merge_headers(self._base_headers, kwargs.get("headers"))
-        return _sync_request(method, url, **kwargs)
+        result = _sync_request(method, url, **kwargs)
+        if result._raw_set_cookies:
+            self._cookies.update(result.cookies)
+            for name in _expired_cookie_names(result._raw_set_cookies):
+                self._cookies.pop(name, None)
+        return result
 
     def get(self, url: str, **kwargs: Any) -> Response | StreamingResponse:
         return self.request("GET", url, **kwargs)
@@ -2668,6 +4305,31 @@ class AsyncClient:
     Safe for concurrent use from multiple asyncio tasks.  The underlying
     connection pool uses its own ``asyncio.Lock`` to protect shared state.
 
+    The cookie jar is a flat ``dict[str, str]`` — cookies are **not**
+    scoped by domain or path.  This is suitable for single-origin use
+    (e.g. an API client talking to one service).  For multi-origin
+    scenarios, manage cookies per-domain yourself.
+
+    ``max_response_size`` caps a buffered response body; a body above the
+    cap raises :class:`ResponseTooLargeError`.  It must be a positive
+    integer or ``None``.  The default ``None`` keeps the historical
+    unbounded behaviour.  A ``stream=True`` response is not buffered and is
+    therefore not limited.
+
+    ``follow_redirects=False`` returns the first 3xx response unchanged
+    instead of following it, so the caller can read ``Location`` and
+    validate the next hop; unlike ``max_redirects=0``, the response is
+    returned rather than an exception.  A ``stream=True`` 3xx is unread --
+    drain or close it to return the connection to the pool.  The keyword is
+    also accepted per request.
+
+    ``resolve_to`` pins the TCP peer to a caller-validated IP address, or to
+    an ordered list of IP addresses tried until one connects, while the URL
+    host still provides ``Host``, TLS SNI and certificate verification.  The
+    caller chooses the addresses.  A hostname entry raises ``ValueError``
+    rather than being resolved.  It cannot be combined with ``proxy``: that
+    raises ``ValueError`` at construction.
+
     Usage::
 
         async with AsyncClient(headers={"Authorization": "Bearer token"}) as c:
@@ -2678,20 +4340,32 @@ class AsyncClient:
         self,
         *,
         headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         max_redirects: int = DEFAULT_MAX_REDIRECTS,
+        follow_redirects: bool = True,
         verify: bool = True,
         auth: tuple[str, str] | Auth | None = None,
         proxy: str | None = None,
+        resolve_to: ResolveTo = None,
         pool_size: int = DEFAULT_POOL_SIZE,
+        max_total_connections: int = DEFAULT_MAX_TOTAL_CONNECTIONS,
+        pool_idle_timeout: float = DEFAULT_POOL_IDLE_TIMEOUT,
+        max_response_size: int | None = None,
     ) -> None:
         self._base_headers = headers or {}
+        self._cookies: dict[str, str] = dict(cookies) if cookies else {}
         self._timeout = timeout
         self._max_redirects = max_redirects
+        self._follow_redirects = follow_redirects
         self._verify = verify
         self._auth = auth
         self._proxy = proxy
-        self._pool = _AsyncConnectionPool(pool_size)
+        _reject_proxy_with_resolve_to(resolve_to, proxy)
+        self._resolve_to = _normalize_resolve_to(resolve_to)
+        _validate_max_response_size(max_response_size)
+        self._max_response_size = max_response_size
+        self._pool = _AsyncConnectionPool(pool_size, max_total_connections, pool_idle_timeout)
 
     async def request(
         self,
@@ -2700,14 +4374,27 @@ class AsyncClient:
         **kwargs: Any,
     ) -> Response | StreamingResponse:
         """Send an async HTTP request."""
+        merged_cookies = dict(self._cookies)
+        per_request = kwargs.pop("cookies", None)
+        if per_request:
+            merged_cookies.update(per_request)
+        kwargs["cookies"] = merged_cookies or None
         kwargs.setdefault("timeout", self._timeout)
         kwargs.setdefault("max_redirects", self._max_redirects)
+        kwargs.setdefault("follow_redirects", self._follow_redirects)
         kwargs.setdefault("verify", self._verify)
         kwargs.setdefault("auth", self._auth)
         kwargs.setdefault("proxy", self._proxy)
+        kwargs.setdefault("resolve_to", self._resolve_to)
+        kwargs.setdefault("max_response_size", self._max_response_size)
         kwargs["_pool"] = self._pool
         kwargs["headers"] = _merge_headers(self._base_headers, kwargs.get("headers"))
-        return await _async_request(method, url, **kwargs)
+        result = await _async_request(method, url, **kwargs)
+        if result._raw_set_cookies:
+            self._cookies.update(result.cookies)
+            for name in _expired_cookie_names(result._raw_set_cookies):
+                self._cookies.pop(name, None)
+        return result
 
     async def get(self, url: str, **kwargs: Any) -> Response | StreamingResponse:
         return await self.request("GET", url, **kwargs)

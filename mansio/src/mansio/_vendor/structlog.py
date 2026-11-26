@@ -3,7 +3,7 @@
 # deps = []
 # tier = "medium"
 # category = "devtools"
-# note = "Install/update via: https://zerodep.readthedocs.io/en/latest/guide/cli/"
+# note = "Install/update via `zerodep add structlog`"
 # ///
 
 """Zero-dependency structured logging with pretty console output.
