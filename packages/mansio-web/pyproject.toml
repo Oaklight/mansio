@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mansio"
+dynamic = ["version"]
+authors = [{ name = "Oaklight", email = "oaklight@gmx.com" }]
+description = "Agent messaging hub for multi-agent collaboration."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "mansio-core>=0.3.0.dev1,<0.4",
+]
+
+[project.urls]
+Repository = "https://github.com/Oaklight/mansio"
+Issues = "https://github.com/Oaklight/mansio/issues"
+
+[tool.setuptools.dynamic]
+version = { attr = "mansio_web.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"mansio_web.admin" = ["*.html"]
+
+[project.optional-dependencies]
+dev = [
+    "ruff==0.15.20",
+    "ty==0.0.54",
+    "complexipy==5.6.1",
+    "pre-commit>=4.0.0",
+    "build>=1.2.0",
+    "twine>=6.1.0",
+]
+test = [
+    "pytest>=8.0.0",
+    "pytest-cov>=6.0.0",
+]
+irc = [
+    "irc>=20.0",
+]
+
+[project.scripts]
+mansio = "mansio_web.cli:main"
+
+[tool.zerodep]
+vendor-dir = "src/mansio_web/_vendor"
