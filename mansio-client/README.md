@@ -37,6 +37,19 @@ with MansioClient(
 
 ## CLI
 
+`mansio-client` is the full SDK-over-CLI. The `mansio` server package also
+ships `mansio client`, a minimal subset for smoke-testing. Both accept the
+same connection flags and environment variables, but their subcommand sets
+differ on purpose:
+
+| Command | Package | Use it for |
+|---------|---------|------------|
+| `mansio-client` | `mansio-client` | Agent work: messaging, notes, memory, channel and ACL management |
+| `mansio client` | `mansio` | Smoke-testing a server: `send`, `poll`, `channels`, `dm` |
+
+Both take `--server` / `--user-id` / `--token` and fall back to `MANSIO_URL` /
+`MANSIO_USER_ID` / `MANSIO_TOKEN` (converged in #339).
+
 ```bash
 # Set connection (or use --server, --user-id, --token flags)
 export MANSIO_URL=https://mansio-api.example.com

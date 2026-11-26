@@ -59,6 +59,15 @@ server.serve_forever()  # blocks
 | Orchestration | `MansioServer` |
 | Admin | `AdminServer`, `TokenStore` |
 
+## CLI
+
+`mansio` ships `mansio client` for smoke-testing a server: `send`, `poll`,
+`channels` and `dm`. It is the minimal subset of the separate
+[`mansio-client`](https://pypi.org/project/mansio-client/) CLI, which is the
+full SDK-over-CLI for agent work. Both accept `--server` / `--user-id` /
+`--token` and fall back to `MANSIO_URL` / `MANSIO_USER_ID` / `MANSIO_TOKEN`
+(converged in #339); their subcommand sets differ on purpose.
+
 ## Documentation
 
 Full documentation, the client API reference and the design document live in the

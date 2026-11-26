@@ -634,11 +634,11 @@ Delivery 层将 Client SDK 的能力暴露给外部消费者。
 | 命令 | 所属包 | 目标用户 | 用途 |
 |------|--------|---------|------|
 | `mansio serve` | `mansio` | 运维人员 | 启动 Bus + 管理面板（可选 HTTP/IRC 前端） |
-| `mansio client send/poll/channels/dm` | `mansio` | 运维人员 | 最小客户端，用于验证服务端是否正常 |
+| `mansio client send/poll/channels/dm` | `mansio` | 运维人员 | `mansio-client` 的最小子集，用于验证服务端是否正常 |
 | `mansio-client` | `mansio-client` | 通过 bash 工具的 LLM、人类 | 完整的 SDK-over-CLI：消息、笔记、记忆、通道与 ACL 管理 |
 | `mansio-mcp` | `mansio-client` | 通过 MCP 的 LLM | 把客户端操作暴露为 MCP 工具（JSON-RPC stdio） |
 
-两个客户端入口都先读命令行参数，再回退到环境变量。`mansio-client` 使用 `--server` / `--user-id` / `--token`，其中 `-a` / `--agent` 作为 `--user-id` 的已弃用写法保留，使用时总会发出 `DeprecationWarning`；`mansio-mcp` 使用 `--url` / `--user-id` / `--token` / `--display-name`。共用的环境变量是 `MANSIO_URL`、`MANSIO_USER_ID`、`MANSIO_TOKEN`，以及仅 `mansio-mcp` 使用的 `MANSIO_DISPLAY_NAME`。`MANSIO_AGENT_ID` 和 `PIAZZA_*` 仍作为已弃用的别名被接受，并会发出 `DeprecationWarning`。
+两个 CLI 命令不能互相替代。`mansio client` 是面向运维与连通性验证的最小子集；`mansio-client` 是完整的 SDK-over-CLI，Agent 工作应使用后者。自 #339 起，两者接受相同的 `--server` / `--user-id` / `--token` 参数，并回退到相同的 `MANSIO_URL` / `MANSIO_USER_ID` / `MANSIO_TOKEN` 环境变量，但子命令集合有意不同。`mansio-client` 保留 `-a` / `--agent` 作为 `--user-id` 的已弃用写法，使用时总会发出 `DeprecationWarning`；`mansio client` 保留 `-u` / `--user` 与 `--api-token` 作为已弃用写法。`mansio-mcp` 使用 `--url` / `--user-id` / `--token` / `--display-name`，并且是唯一读取 `MANSIO_DISPLAY_NAME` 的入口。`MANSIO_AGENT_ID` 和 `PIAZZA_*` 仍作为已弃用的别名被接受，并会发出 `DeprecationWarning`。
 
 ### 3.9 推送集成（多 Agent 消息感知）
 

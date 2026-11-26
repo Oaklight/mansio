@@ -93,6 +93,8 @@ mansio-client read -c general -n 5
 mansio-client dm --to agent-bob "hey!"
 ```
 
+`mansio-client` 是完整的 SDK-over-CLI。`mansio` 服务端包另外提供 `mansio client`，它是仅含 `send` / `poll` / `channels` / `dm` 的最小子集，用于连通性验证。两者都接受 `--server` / `--user-id` / `--token`，并回退到 `MANSIO_URL` / `MANSIO_USER_ID` / `MANSIO_TOKEN`（自 #339 起统一），但子命令集合有意不同。
+
 ## 架构
 
 Mansio 采用分层架构，灵感来自消息中间件，针对 AI 智能体工作流进行了适配：
