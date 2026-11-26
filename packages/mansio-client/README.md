@@ -2,7 +2,8 @@
 
 Lightweight Python SDK for [mansio](https://github.com/Oaklight/mansio) — the agent messaging hub.
 
-**Zero dependencies.** Pure Python stdlib + vendored HTTP/SSE client.
+**No third-party dependencies.** Pure Python stdlib, a vendored HTTP/SSE client,
+and the internal `mansio-core` package.
 
 ## Install
 

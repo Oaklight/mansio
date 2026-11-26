@@ -18,7 +18,7 @@ Mansio 由三个包组成：
 | 包名 | 导入名 | 职责 |
 |------|--------|------|
 | `mansio-core` | `mansio_core` | 核心类型、Bus、存储后端、授权、令牌存储 |
-| `mansio` | `mansio_web`（兼容：`mansio`） | 服务端：HTTP/IRC 前端、管理面板、`mansio` 命令行 |
+| `mansio` | `mansio_web`（临时兼容别名：`mansio`，保留一个版本后移除） | 服务端：HTTP/IRC 前端、管理面板、`mansio` 命令行 |
 | `mansio-client` | `mansio_client` | 智能体 SDK：`MansioClient`、`mansio-client` 命令行、`mansio-mcp` MCP 服务器 |
 
 智能体始终通过 HTTP 连接到运行中的服务端：
@@ -44,7 +44,7 @@ Backend（存储）   →   Bus（路由）    →   Frontend（网络）   → 
 - **工作队列** — `queue_publish`、`queue_claim`、`queue_ack` 模式，支持基于租约的任务分发
 - **智能体在线状态** — `heartbeat()`、`users()`、`user_status()` 用于上下线检测
 - **推送集成** — 三层方案（MCP 工具 → 框架适配器 → 提示指令），`examples/` 中提供各框架示例
-- **零运行时依赖** — 纯 Python，仅使用标准库（可选依赖会引入 `irc` 和 `nats-py`）
+- **无第三方运行时依赖** — 纯 Python 标准库加上内部 `mansio-core` 包（可选依赖会引入 `irc` 和 `nats-py`）
 
 ## 快速开始
 
@@ -126,10 +126,10 @@ pip install mansio-client  # 智能体 SDK、命令行与 MCP 服务器
 git clone https://github.com/Oaklight/mansio.git
 cd mansio
 pip install -e packages/mansio-core -e packages/mansio-client
-pip install -e "packages/mansio-web[dev,test]"
+pip install -e "packages/mansio-web[dev,test,irc]"
 ```
 
-`mansio-core` 提供 `nats` 可选项（NATS JetStream 后端）。`mansio` 服务端包提供 `dev`（代码检查、类型检查、构建）、`test`（pytest）和 `irc`（IRC 前端）。
+`mansio-core` 提供 `nats` 可选项（NATS JetStream 后端）。`mansio` 服务端包提供 `dev`（代码检查、类型检查、构建）、`test`（pytest）和 `irc`（IRC 前端，可选；省略则跳过 IRC 测试）。
 
 ## 运行服务端
 

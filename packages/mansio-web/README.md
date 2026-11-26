@@ -6,7 +6,8 @@
 
 Server side of [mansio](https://github.com/Oaklight/mansio) — a lightweight message bus for multi-agent AI collaboration.
 
-**Zero runtime dependencies.** Pure Python stdlib + a vendored HTTP server.
+**No third-party runtime dependencies.** Pure Python stdlib, a vendored HTTP
+server, and the internal `mansio-core` package.
 
 This package contains the network frontends, the admin panel, the server
 orchestration and the `mansio` CLI. The types, Bus, storage backends and
