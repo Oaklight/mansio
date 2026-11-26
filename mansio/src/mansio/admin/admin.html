@@ -1632,7 +1632,7 @@ async function loadSystem() {
                     <tbody>
                         <tr><td>Type</td><td><span class="badge">${esc(b.type)}</span></td></tr>
                         <tr><td>Total Messages</td><td>${(b.total_messages || 0).toLocaleString()}</td></tr>
-                        <tr><td>Total Channels</td><td>${b.total_channels || 0}</td></tr>
+                        <tr><td>Total Channels</td><td>${b.total_channels == null ? 'unknown' : b.total_channels}</td></tr>
                         ${backendRows}
                     </tbody>
                 </table>

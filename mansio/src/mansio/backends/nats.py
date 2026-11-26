@@ -67,21 +67,28 @@ logger = logging.getLogger(__name__)
 _DEFAULT_FETCH_CAP = 10_000
 
 
-def _subject_count(state: Any) -> int:
-    """Return the subject count from a JetStream ``StreamState``.
+def _subject_count(state: Any) -> int | None:
+    """Return the number of subjects in a JetStream ``StreamState``.
 
-    The ``num_subjects`` attribute is only populated by ``nats-py``/
-    ``nats-server`` versions that support per-subject filtering; older
-    combinations omit it entirely, so callers must not access it
-    directly.
+    ``num_subjects`` is only populated by ``nats-py``/``nats-server``
+    versions that support per-subject filtering; older combinations omit
+    it. Newer servers expose the per-subject ``subjects`` mapping instead,
+    so fall back to its length.
 
     Args:
         state: The ``state`` field of a JetStream ``StreamInfo``.
 
     Returns:
-        The subject count, or 0 if the field is unavailable.
+        The subject count, or ``None`` when the server supplies neither
+        field. ``None`` means "unknown" and is distinct from a genuine ``0``.
     """
-    return state.num_subjects if hasattr(state, "num_subjects") else 0
+    count = getattr(state, "num_subjects", None)
+    if isinstance(count, int):
+        return count
+    subjects = getattr(state, "subjects", None)
+    if subjects is not None:
+        return len(subjects)
+    return None
 
 
 class NATSBackend(Backend, Presenceable, Compactable, Watchable):
@@ -789,6 +796,9 @@ class NATSBackend(Backend, Presenceable, Compactable, Watchable):
         ``total_channels``) and falls back to message scanning for
         per-sender / per-type breakdowns.
 
+        ``total_channels`` uses the server's subject count when available
+        and otherwise the number of channels seen by the message scan.
+
         .. note::
 
             The per-channel/per-sender/per-type breakdowns scan up to
@@ -903,7 +913,12 @@ class NATSBackend(Backend, Presenceable, Compactable, Watchable):
         return self._run_async(_recent())
 
     def info(self) -> dict:
-        """Return backend type and connection info."""
+        """Return backend type and connection info.
+
+        ``total_channels`` is ``None`` when the server reports neither a
+        subject count nor the per-subject mapping, so an unknown count is
+        not mistaken for an empty stream.
+        """
         if not self._connected:
             return {
                 "type": "nats",

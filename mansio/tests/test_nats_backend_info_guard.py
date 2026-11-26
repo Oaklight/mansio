@@ -94,16 +94,35 @@ class _StateWithNumSubjects:
         self.num_subjects = num_subjects
 
 
+class _StateWithSubjects:
+    """Simulates a StreamState that carries the per-subject mapping but no num_subjects."""
+
+    def __init__(self, subjects: dict[str, int]) -> None:
+        self.messages = 5
+        self.bytes = 1234
+        self.first_seq = 1
+        self.last_seq = 5
+        self.subjects = subjects
+
+
 class TestSubjectCountHelper:
     """Unit tests for the shared _subject_count() helper."""
 
-    def test_missing_attribute_returns_zero(self):
+    def test_missing_fields_return_none(self):
         state = _make_state_without_num_subjects()
-        assert _subject_count(state) == 0
+        assert _subject_count(state) is None
 
     def test_present_attribute_is_returned(self):
         state = _StateWithNumSubjects(num_subjects=3)
         assert _subject_count(state) == 3
+
+    def test_subjects_mapping_is_used_as_fallback(self):
+        state = _StateWithSubjects({"mansio.a": 2, "mansio.b": 1})
+        assert _subject_count(state) == 2
+
+    def test_empty_subjects_mapping_is_a_genuine_zero(self):
+        state = _StateWithSubjects({})
+        assert _subject_count(state) == 0
 
 
 class TestNATSBackendInfoStreamStateGuard:
@@ -118,7 +137,7 @@ class TestNATSBackendInfoStreamStateGuard:
         assert info["connected"] is True
         assert info["total_messages"] == 5
         assert info["total_bytes"] == 1234
-        assert info["total_channels"] == 0
+        assert info["total_channels"] is None
         assert info["first_seq"] == 1
         assert info["last_seq"] == 5
 
@@ -129,6 +148,14 @@ class TestNATSBackendInfoStreamStateGuard:
         info = backend.info()
 
         assert info["total_channels"] == 7
+
+    def test_info_uses_subjects_mapping_when_num_subjects_absent(self):
+        backend = NATSBackend(stream_name="MANSIO_TEST_INFO_GUARD")
+        _wire_fake_js(backend, _StateWithSubjects({"mansio.a": 1, "mansio.b": 2}))
+
+        info = backend.info()
+
+        assert info["total_channels"] == 2
 
 
 class TestNATSBackendStatsStreamStateGuard:
@@ -151,3 +178,12 @@ class TestNATSBackendStatsStreamStateGuard:
         stats = backend.stats()
 
         assert stats["total_channels"] == 4
+
+    def test_stats_uses_subjects_mapping_when_num_subjects_absent(self):
+        backend = NATSBackend(stream_name="MANSIO_TEST_STATS_GUARD")
+        _wire_fake_js(backend, _StateWithSubjects({"mansio.a": 1, "mansio.b": 2}))
+
+        stats = backend.stats()
+
+        # The server's subject mapping wins over the empty message scan.
+        assert stats["total_channels"] == 2
