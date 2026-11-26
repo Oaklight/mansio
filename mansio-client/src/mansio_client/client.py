@@ -11,6 +11,7 @@ import logging
 import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal, cast, overload
+from uuid import uuid4
 
 from mansio_client.transport import HttpTransport
 from mansio_client.types import (
@@ -103,6 +104,29 @@ class _Coalescer:
         else:
             with self._lock:
                 self._batch.clear()
+
+
+class BurstSendError(RuntimeError):
+    """A message in a burst failed to send.
+
+    The burst stops at the first failure. Messages before ``failed_index``
+    were delivered; their ids are in ``sent_message_ids``, in send order.
+    No message at or after ``failed_index`` was attempted. The original
+    transport error is available as ``__cause__``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        burst_id: str,
+        sent_message_ids: list[str],
+        failed_index: int,
+    ) -> None:
+        super().__init__(message)
+        self.burst_id = burst_id
+        self.sent_message_ids = list(sent_message_ids)
+        self.failed_index = failed_index
 
 
 class MansioClient:
@@ -312,6 +336,83 @@ class MansioClient:
             parent_id=parent_id,
             intent=intent,
         )
+
+    def send_burst(
+        self,
+        channel: str,
+        messages: list[str],
+        *,
+        msg_type: str = "chat",
+        metadata: dict | None = None,
+        parent_id: str | None = None,
+        intent: str | None = None,
+    ) -> list[str]:
+        """Send *messages* to *channel* as one deterministic burst.
+
+        Every message carries the same generated ``burst_id`` plus
+        ``burst_index`` (0-based) and ``burst_size`` in its free-form
+        metadata, merged over *metadata*; the burst fields win on collision.
+        Receivers can therefore reassemble the burst without a timing
+        window.
+
+        Messages are sent in order, one :meth:`channel_send` request each.
+        An empty list sends nothing and returns ``[]``. The burst id is
+        generated per call (``uuid4().hex``) and cannot be supplied by the
+        caller.
+
+        Args:
+            channel: Channel name.
+            messages: Payload texts, sent in list order.
+            msg_type: Message type for every message.
+            metadata: Caller metadata copied onto every message. The dict
+                is not mutated.
+            parent_id: Parent message id for every message.
+            intent: Intent label for every message.
+
+        Returns:
+            The server-assigned message ids, in send order.
+
+        Raises:
+            BurstSendError: If a send fails. The error carries the ids of
+                the messages already sent and the index that failed; later
+                messages were not attempted. The original exception is the
+                cause. The call cannot be resumed: a retry with
+                :meth:`send_burst` starts a new burst with a new id, so the
+                caller should treat the remaining texts as a new burst or
+                send them individually.
+        """
+        if not messages:
+            return []
+
+        burst_id = uuid4().hex
+        size = len(messages)
+        sent: list[str] = []
+        for index, content in enumerate(messages):
+            burst_metadata = {
+                **(metadata or {}),
+                "burst_id": burst_id,
+                "burst_index": index,
+                "burst_size": size,
+            }
+            try:
+                sent.append(
+                    self.channel_send(
+                        channel,
+                        content,
+                        msg_type=msg_type,
+                        metadata=burst_metadata,
+                        parent_id=parent_id,
+                        intent=intent,
+                    )
+                )
+            except Exception as exc:
+                raise BurstSendError(
+                    f"burst {burst_id} failed at message {index + 1} of {size}: {exc}",
+                    burst_id=burst_id,
+                    sent_message_ids=sent,
+                    failed_index=index,
+                ) from exc
+        return sent
 
     def channel_read(
         self,

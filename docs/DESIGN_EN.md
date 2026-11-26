@@ -547,6 +547,11 @@ notification_check() -> list[Message]
 Group chat needs no dedicated methods: a group is an ordinary channel, used
 through `channel_send` / `channel_poll`.
 
+Bursts are explicit, not timing-based: `send_burst(channel, messages, ...)`
+writes the same generated `burst_id` plus `burst_index` and `burst_size` into
+each message's free-form metadata, so a receiver can reassemble a burst
+without a time window.
+
 Beyond the semantic wrappers the client also exposes work queues
 (`queue_publish`, `queue_claim`, `queue_ack`, `queue_status`), presence
 (`heartbeat`, `users`, `user_status`), channel administration
