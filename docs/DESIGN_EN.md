@@ -340,9 +340,10 @@ request is accepted.
 
 A token bound to a `user_id` may only act as that agent. A token with no
 `user_id` is a **supertoken**: it may act as any agent, write to `broadcast:*`
-channels, and bypass `_system:*` write restrictions. The admin API requires a
-`user_id`, so supertokens are created programmatically with
-`TokenStore.create_token(user_id=None)`
+channels, and bypass `_system:*` write restrictions. Create one with
+`POST /api/tokens` and `{"supertoken": true}`, omitting `user_id`; the admin
+panel exposes the same option as a **Supertoken** checkbox. Programmatic
+creation with `TokenStore.create_token(user_id=None)` remains available
 ([#299](https://github.com/Oaklight/mansio/issues/299)).
 
 Colons are reserved for system-prefix channel names and cannot appear in
