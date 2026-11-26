@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from mansio.types import permission_allows
+from mansio.types import is_valid_user_id, permission_allows
 
 if TYPE_CHECKING:
     from mansio.bus import Bus
@@ -20,15 +20,19 @@ if TYPE_CHECKING:
 
 PRIVATE_CHANNEL_PREFIXES = ("notebook:", "memory:")
 DM_PREFIX = "dm:"
-DM_NAME_EXPECTED = "Invalid dm channel name; expected 'dm:<user_a>:<user_b>'"
+DM_NAME_EXPECTED = "Invalid dm channel name; expected 'dm:<user_a>:<user_b>' with valid user ids"
 
 
 def dm_participants(channel: str) -> tuple[str, str] | None:
     """Return the two participants of a well-formed DM channel.
 
     A DM channel name is exactly ``dm:<a>:<b>``: three colon-separated
-    segments with a non-empty user id in each participant slot.  Any other
+    segments with a valid agent id in each participant slot.  Any other
     name that starts with ``dm:`` is malformed and returns ``None``.
+
+    The participant slots use the same rule as token creation
+    (:func:`mansio.types.is_valid_user_id`): 3-64 characters, lowercase
+    alphanumerics and hyphens, starting and ending with an alphanumeric.
 
     This is the single parser for DM names.  Callers that must reject a
     malformed name on input use :func:`dm_channel_error`; authorization
@@ -40,7 +44,7 @@ def dm_participants(channel: str) -> tuple[str, str] | None:
     if len(parts) != 3:
         return None
     _, first, second = parts
-    if not first or not second:
+    if not is_valid_user_id(first) or not is_valid_user_id(second):
         return None
     return first, second
 

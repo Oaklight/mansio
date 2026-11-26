@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from mansio._vendor.httpserver import App, JSONResponse, Response
 from mansio._vendor.structlog import get_logger
+from mansio.types import is_valid_user_id
 
 from .auth import SessionAuth
 
@@ -576,10 +577,8 @@ class AdminServer:
         token_store = self._token_store
         bus = self._bus
 
-        _USER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
-
         def _validate_user_id(user_id: str) -> tuple | None:
-            if not _USER_ID_RE.match(user_id):
+            if not is_valid_user_id(user_id):
                 return {
                     "error": "Bad Request",
                     "message": "user_id must be 3-64 chars, lowercase alphanumeric + hyphens",

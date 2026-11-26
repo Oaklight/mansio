@@ -8,18 +8,21 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import TYPE_CHECKING, Literal, overload
 
 from mansio_client.transport import HttpTransport
-from mansio_client.types import ACLEntry, UserPresence, ClaimResult, Message
+from mansio_client.types import (
+    ACLEntry,
+    UserPresence,
+    ClaimResult,
+    Message,
+    is_valid_user_id,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from mansio_client.injectors import Injector
-
-_USER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
 
 _log = logging.getLogger(__name__)
 
@@ -66,7 +69,7 @@ class MansioClient:
 
     @staticmethod
     def _validate_user_id(user_id: str) -> None:
-        if not _USER_ID_RE.match(user_id):
+        if not is_valid_user_id(user_id):
             raise ValueError(
                 f"Invalid user_id {user_id!r}: must be 3-64 chars, "
                 f"lowercase alphanumeric + hyphens, start/end with alphanumeric."
