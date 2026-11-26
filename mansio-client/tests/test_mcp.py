@@ -421,12 +421,12 @@ class TestCallTool(unittest.TestCase):
     def test_queue_ack(self) -> None:
         self.client.queue_ack.return_value = ClaimResult(
             message=_make_msg(id="msg-q1", channel="work"),
-            status="acked",
+            status="completed",
             claimed_by="user-a",
             claimed_at="2026-01-01T00:00:00Z",
         )
         result = _call_tool(self.client, "mansio_queue_ack", {"message_id": "msg-q1"})
-        assert result["status"] == "acked"
+        assert result["status"] == "completed"
         assert result["message"]["id"] == "msg-q1"
         self.client.queue_ack.assert_called_once_with("msg-q1")
 
