@@ -496,7 +496,27 @@ class TestSQLiteBusACL:
 
 
 class TestACLEnforcement:
-    """Bus-level ACL enforcement via opt-in parameters."""
+    """Policy and storage are separate (issue #247).
+
+    The Bus is auth-unaware: these tests pair a ``Bus.check_access`` decision
+    with the storage call a frontend would make afterwards.  Name-based
+    structural decisions (dm/notebook/memory/system/broadcast) are covered by
+    ``test_authz_policy.py``.
+    """
+
+    def test_bus_methods_expose_no_auth_parameters(self, bus):
+        import inspect
+
+        for method in (
+            bus.publish,
+            bus.query,
+            bus.subscribe,
+            bus.delete_channel,
+            bus.delete_message,
+        ):
+            params = inspect.signature(method).parameters
+            assert "user_id" not in params, method.__name__
+            assert "enforce_acl" not in params, method.__name__
 
     # ── publish ───────────────────────────────
 
@@ -504,29 +524,26 @@ class TestACLEnforcement:
         bus.create_channel("ch", "alice", visibility="private")
         entry = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
         bus.add_acl_entry(entry)
-        msg_id = bus.publish("ch", "bob", "text", "hi", enforce_acl=True)
-        assert msg_id
+        assert bus.check_access("ch", "bob", "publish")
+        assert bus.publish("ch", "bob", "text", "hi")
 
     def test_publish_write_denied(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        with pytest.raises(PermissionError, match="publish permission"):
-            bus.publish("ch", "bob", "text", "hi", enforce_acl=True)
+        assert not bus.check_access("ch", "bob", "publish")
 
     def test_publish_owner_always_allowed(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        msg_id = bus.publish("ch", "alice", "text", "hi", enforce_acl=True)
-        assert msg_id
+        assert bus.check_access("ch", "alice", "publish")
 
-    def test_publish_no_enforce_skips_check(self, bus):
+    def test_publish_is_auth_unaware(self, bus):
+        """Bus.publish has no ACL parameter; a frontend must decide first."""
         bus.create_channel("ch", "alice", visibility="private")
-        # No ACL entry for bob, but enforce_acl=False (default)
-        msg_id = bus.publish("ch", "bob", "text", "hi")
-        assert msg_id
+        assert not bus.check_access("ch", "bob", "publish")
+        assert bus.publish("ch", "bob", "text", "hi")
 
     def test_publish_public_channel_allows_write(self, bus):
         bus.create_channel("ch", "alice", visibility="public")
-        msg_id = bus.publish("ch", "bob", "text", "hi", enforce_acl=True)
-        assert msg_id
+        assert bus.check_access("ch", "bob", "publish")
 
     # ── query ─────────────────────────────────
 
@@ -535,20 +552,17 @@ class TestACLEnforcement:
         entry = ACLEntry(channel="ch", user_id="bob", permission="read", granted_at=_now())
         bus.add_acl_entry(entry)
         bus.publish("ch", "alice", "text", "hi")
-        msgs = bus.query("ch", user_id="bob")
-        assert len(msgs) == 1
+        assert bus.check_access("ch", "bob", "read")
+        assert len(bus.query("ch")) == 1
 
     def test_query_read_denied(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        bus.publish("ch", "alice", "text", "hi")
-        with pytest.raises(PermissionError, match="read permission"):
-            bus.query("ch", user_id="bob")
+        assert not bus.check_access("ch", "bob", "read")
 
-    def test_query_no_agent_skips_check(self, bus):
+    def test_query_is_auth_unaware(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
         bus.publish("ch", "alice", "text", "hi")
-        msgs = bus.query("ch")  # no user_id
-        assert len(msgs) == 1
+        assert len(bus.query("ch")) == 1
 
     # ── subscribe ─────────────────────────────
 
@@ -556,36 +570,32 @@ class TestACLEnforcement:
         bus.create_channel("ch", "alice", visibility="private")
         entry = ACLEntry(channel="ch", user_id="bob", permission="read", granted_at=_now())
         bus.add_acl_entry(entry)
-        sub_id = bus.subscribe("ch", lambda m: None, user_id="bob")
-        assert sub_id
+        assert bus.check_access("ch", "bob", "read")
+        assert bus.subscribe("ch", lambda m: None)
 
     def test_subscribe_read_denied(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        with pytest.raises(PermissionError, match="read permission"):
-            bus.subscribe("ch", lambda m: None, user_id="bob")
+        assert not bus.check_access("ch", "bob", "read")
 
     # ── delete_channel ────────────────────────
 
-    def test_delete_channel_admin_allowed(self, bus):
+    def test_delete_channel_owner_allowed(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
         bus.publish("ch", "alice", "text", "hi")
-        count = bus.delete_channel("ch", user_id="alice")  # owner = admin
-        assert count == 1
+        assert bus.check_access("ch", "alice", "delete")
+        assert bus.delete_channel("ch") == 1
         assert bus.get_channel_meta("ch") is None
 
-    def test_delete_channel_admin_denied(self, bus):
+    def test_delete_channel_denied(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
         entry = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
         bus.add_acl_entry(entry)
-        with pytest.raises(PermissionError, match="delete permission"):
-            bus.delete_channel("ch", user_id="bob")
+        assert not bus.check_access("ch", "bob", "delete")
 
-    def test_delete_channel_no_agent_skips_check(self, bus):
+    def test_delete_channel_is_auth_unaware(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
         bus.publish("ch", "alice", "text", "hi")
-        count = bus.delete_channel("ch")
-        assert count == 1
-        assert bus.get_channel_meta("ch") is None
+        assert bus.delete_channel("ch") == 1
 
     # ── delete_message ────────────────────────
 
@@ -594,27 +604,21 @@ class TestACLEnforcement:
         entry = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
         bus.add_acl_entry(entry)
         msg_id = bus.publish("ch", "bob", "text", "hi")
-        assert bus.delete_message(msg_id, user_id="bob")
+        msg = bus.get_message(msg_id)
+        assert msg is not None and msg.sender == "bob"
+        assert bus.delete_message(msg_id)
 
-    def test_delete_other_message_as_admin(self, bus):
+    def test_delete_other_message_policy(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        entry = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
+        entry = ACLEntry(channel="ch", user_id="carol", permission="owner", granted_at=_now())
         bus.add_acl_entry(entry)
-        msg_id = bus.publish("ch", "bob", "text", "hi")
-        # alice is owner (admin) — can delete bob's message
-        assert bus.delete_message(msg_id, user_id="alice")
+        # The bus has no sender check; a frontend decides.  HTTP keeps
+        # message deletion sender-only, while the channel owner holds the
+        # delete verb.
+        assert bus.check_access("ch", "alice", "delete")
+        assert bus.check_access("ch", "carol", "delete")
 
-    def test_delete_other_message_denied(self, bus):
-        bus.create_channel("ch", "alice", visibility="private")
-        entry_b = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
-        entry_c = ACLEntry(channel="ch", user_id="carol", permission="write", granted_at=_now())
-        bus.add_acl_entry(entry_b)
-        bus.add_acl_entry(entry_c)
-        msg_id = bus.publish("ch", "bob", "text", "hi")
-        with pytest.raises(PermissionError, match="cannot delete"):
-            bus.delete_message(msg_id, user_id="carol")
-
-    def test_delete_message_no_agent_skips_check(self, bus):
+    def test_delete_message_is_auth_unaware(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
         msg_id = bus.publish("ch", "alice", "text", "hi")
         assert bus.delete_message(msg_id)
@@ -623,10 +627,11 @@ class TestACLEnforcement:
 
     def test_unregistered_channel_allows_all(self, bus):
         """Channels without metadata allow all operations."""
-        msg_id = bus.publish("random", "anyone", "text", "hi", enforce_acl=True)
+        assert bus.check_access("random", "anyone", "publish")
+        assert bus.check_access("random", "anyone", "read")
+        msg_id = bus.publish("random", "anyone", "text", "hi")
         assert msg_id
-        msgs = bus.query("random", user_id="anyone")
-        assert len(msgs) == 1
+        assert len(bus.query("random")) == 1
 
     # ── permission hierarchy ──────────────────
 
@@ -634,23 +639,19 @@ class TestACLEnforcement:
         bus.create_channel("ch", "alice", visibility="private")
         entry = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
         bus.add_acl_entry(entry)
-        # bob has write, should be able to read
-        msgs = bus.query("ch", user_id="bob")
-        assert msgs == []
+        assert bus.check_access("ch", "bob", "read")
 
     def test_admin_implies_write(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
         entry = ACLEntry(channel="ch", user_id="bob", permission="admin", granted_at=_now())
         bus.add_acl_entry(entry)
-        msg_id = bus.publish("ch", "bob", "text", "hi", enforce_acl=True)
-        assert msg_id
+        assert bus.check_access("ch", "bob", "publish")
 
     def test_read_does_not_imply_write(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
         entry = ACLEntry(channel="ch", user_id="bob", permission="read", granted_at=_now())
         bus.add_acl_entry(entry)
-        with pytest.raises(PermissionError, match="publish permission"):
-            bus.publish("ch", "bob", "text", "hi", enforce_acl=True)
+        assert not bus.check_access("ch", "bob", "publish")
 
 
 # ──────────────────────────────────────────────

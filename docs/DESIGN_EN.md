@@ -231,8 +231,7 @@ class Bus:
 
     # Core operations
     def publish(self, channel, sender, msg_type, payload, metadata=None,
-                *, queue=False, parent_id=None, intent=None,
-                enforce_acl=False) -> str
+                *, queue=False, parent_id=None, intent=None) -> str
     def query(self, channel, after=None, limit=100, ...) -> list[Message]
     def subscribe(self, channel, callback) -> str
     def unsubscribe(self, subscription_id) -> None
@@ -265,7 +264,7 @@ class Bus:
 - ✅ In-process pub/sub (universal baseline)
 - ✅ Throughput metrics collection
 - ✅ Post-publish compaction policy for system channels
-- ✅ Opt-in ACL enforcement on publish (`enforce_acl=True`), delegated to the backend's `ChannelStore`
+- ❌ No authorization on message operations (Frontend policy layer's responsibility; `check_access` is a policy query, not enforcement)
 - ❌ No authentication (Frontend's responsibility, via `TokenStore`)
 - ❌ No channel-name validation (Frontend's responsibility)
 - ❌ No agent identity management (Client SDK's responsibility)
@@ -414,11 +413,11 @@ The legacy levels `read`, `write`, and `admin` remain valid and map to
 arguments `write` and `admin` as `publish` and `manage`
 ([#247](https://github.com/Oaklight/mansio/issues/247)).
 
-The message routes call `Bus.publish` and `Bus.query` without the arguments
-that would trigger a general ACL check, so ACL entries do not govern message
-access for ordinary channels. The exception is `broadcast:*` write: publish
-checks the channel owner and any entry granting `publish`
-([#298](https://github.com/Oaklight/mansio/issues/298)).
+The Bus exposes no authorization parameters: frontends authorize the caller
+before calling `Bus.publish` / `Bus.query` / delete methods, so ACL entries do
+not govern ordinary message access there. The exception is `broadcast:*`
+write: the frontend policy checks the channel owner and any entry granting
+`publish` ([#298](https://github.com/Oaklight/mansio/issues/298)).
 
 ##### Input Validation
 

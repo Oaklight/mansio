@@ -162,9 +162,9 @@ class TestBusVerbs:
             ACLEntry(channel="ch", user_id="bob", permission="member", granted_at="t")
         )
 
-        assert bus.publish("ch", "bob", "text", "hi", enforce_acl=True)
-        with pytest.raises(PermissionError, match="delete permission"):
-            bus.delete_channel("ch", user_id="bob")
+        assert bus.check_access("ch", "bob", "publish")
+        assert bus.publish("ch", "bob", "text", "hi")
+        assert not bus.check_access("ch", "bob", "delete")
         bus.close()
 
     def test_owner_preset_can_delete(self) -> None:
@@ -173,7 +173,8 @@ class TestBusVerbs:
         bus.publish("ch", "bob", "text", "hi")
         bus.add_acl_entry(ACLEntry(channel="ch", user_id="bob", permission="owner", granted_at="t"))
 
-        assert bus.delete_channel("ch", user_id="bob") == 1
+        assert bus.check_access("ch", "bob", "delete")
+        assert bus.delete_channel("ch") == 1
         bus.close()
 
 
