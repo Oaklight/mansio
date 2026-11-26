@@ -298,18 +298,18 @@ def _broadcast_write_allowed(bus: Bus | None, channel: str, user_id: str) -> boo
 
     The channel owner (its first publisher) and agents holding an explicit
     write/admin ACL entry may post.  A channel that does not exist yet is
-    open, so its first publisher becomes the owner.  Backends without
-    ChannelStore keep the old supertoken-only rule.
+    created for the first publisher by ``Bus.ensure_channel()``, whose create
+    step is atomic, so two concurrent first publishers cannot both win
+    ownership.  Backends without ChannelStore keep the old supertoken-only
+    rule.
     """
     if bus is None:
         return False
     try:
-        meta = bus.get_channel_meta(channel)
+        meta = bus.ensure_channel(channel, owner=user_id)
         acl = bus.get_acl(channel)
     except NotImplementedError:
         return False
-    if meta is None:
-        return True
     if meta.owner == user_id:
         return True
 
