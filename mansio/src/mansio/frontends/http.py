@@ -106,6 +106,10 @@ class _SSESession:
     last_event_id: str | None = None
     drop_lock: threading.Lock | None = None
     drop_counter: list[int] | None = None
+    # Opt-in: drop messages whose sender is the authenticated caller, for
+    # live delivery and Last-Event-ID replay alike.  No effect when the
+    # connection has no bound user (supertoken, no-auth).
+    exclude_own: bool = False
     # Called as the stream stays alive so an idle subscriber still counts
     # as present. None when the connection has no user identity.
     on_activity: Callable[[], None] | None = None
@@ -1718,8 +1722,14 @@ class HttpFrontend:
             # Parse Last-Event-ID for cursor-based resume
             last_event_id = request.headers.get("last-event-id", "").strip() or None
 
+            # Opt-in own-message filter, for consumers that do not use the
+            # SDK.  Compared against the authenticated identity, never a
+            # client-supplied user id; no effect for supertoken/no-auth.
+            exclude_own_param = (request.query_params.get("exclude_own") or ["false"])[0]
+            exclude_own = exclude_own_param.strip().lower() == "true"
+
             q, sub_ids, drop_lock, drop_counter = _setup_sse_subscriptions(
-                bus, ch_list, auth_result
+                bus, ch_list, auth_result, exclude_own
             )
 
             on_activity = (
@@ -1737,6 +1747,7 @@ class HttpFrontend:
                         last_event_id=last_event_id,
                         drop_lock=drop_lock,
                         drop_counter=drop_counter,
+                        exclude_own=exclude_own,
                         on_activity=on_activity,
                     )
                 ),
@@ -1757,6 +1768,10 @@ class HttpFrontend:
 
                 GET /v1/subscribe?channel=ch1&channel=ch2
                 GET /v1/subscribe?channels=ch1,ch2
+
+            ``exclude_own=true`` (default false) drops messages sent by the
+            authenticated caller.  The per-channel endpoint accepts the same
+            flag.
             """
             ch_list = list(request.query_params.get("channel", []))
             # Also accept comma-separated "channels" param
@@ -1845,7 +1860,7 @@ def _filter_visible_messages(auth_result: Any, msgs: list[Message]) -> list[Mess
 
 
 def _setup_sse_subscriptions(
-    bus: Bus, ch_list: list[str], auth_result: Any
+    bus: Bus, ch_list: list[str], auth_result: Any, exclude_own: bool = False
 ) -> tuple[asyncio.Queue[str | None], list[str], threading.Lock, list[int]]:
     """Subscribe to bus channels and return (queue, subscription_ids, drop_lock, drop_counter).
 
@@ -1882,6 +1897,8 @@ def _setup_sse_subscriptions(
                 if isinstance(auth_result, str) and not _user_involved(
                     auth_result, msg.channel, msg.sender
                 ):
+                    return
+                if exclude_own and msg.sender == auth_result:
                     return
                 data = json.dumps(
                     {"channel": target_ch, "message": _msg_to_dict(msg)}, ensure_ascii=False
@@ -1942,6 +1959,8 @@ async def _replay_missed_events(session: _SSESession) -> Any:
         )
         if isinstance(session.auth_result, str):
             missed = [m for m in missed if _user_involved(session.auth_result, m.channel, m.sender)]
+            if session.exclude_own:
+                missed = [m for m in missed if m.sender != session.auth_result]
         for m in missed:
             data = json.dumps(
                 {"channel": ch, "message": _msg_to_dict(m)},

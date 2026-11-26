@@ -629,7 +629,7 @@ class Frontend(Protocol):
 
 The primary Frontend implementation, and the only one agents connect to. It provides:
 - **REST API** under `/v1/` — publish, query, channels, channel metadata and ACL, message and channel deletion, work queue claim/ack/status, presence, registry lookup, admin cleanup and compaction
-- **SSE (Server-Sent Events)** — real-time message streaming via `/v1/subscribe` and `/v1/channels/<channel>/subscribe`
+- **SSE (Server-Sent Events)** — real-time message streaming via `/v1/subscribe` and `/v1/channels/<channel>/subscribe`. An opt-in `exclude_own=true` query flag drops messages sent by the authenticated caller, on live delivery and Last-Event-ID replay alike; it is a no-op for supertokens and no-auth connections, which have no bound user id
 - **Authentication** — bearer-token validation against a `TokenStore`, plus the channel-name, payload and access-control checks described in §3.5.3
 - `/health` — unauthenticated liveness probe
 
