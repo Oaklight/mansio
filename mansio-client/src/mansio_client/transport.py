@@ -167,6 +167,7 @@ class HttpTransport:
             status=r["status"],
             claimed_by=r["claimed_by"],
             claimed_at=r["claimed_at"],
+            lease_until=r.get("lease_until"),
         )
 
     def queue_ack(self, message_id: str, claimed_by: str) -> ClaimResult | None:
@@ -185,6 +186,7 @@ class HttpTransport:
             status=r["status"],
             claimed_by=r["claimed_by"],
             claimed_at=r["claimed_at"],
+            lease_until=r.get("lease_until"),
         )
 
     def queue_status(self, message_id: str) -> dict | None:
