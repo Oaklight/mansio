@@ -59,8 +59,8 @@ class TestDmParser:
     def test_malformed(self, channel: str) -> None:
         assert dm_participants(channel) is None
         assert dm_channel_error(channel) is not None
-        # Fail closed: an existing malformed row stays private, so a
-        # scoped token other than its sender still cannot read it.
+        # Fail closed: an existing malformed row stays private and has no
+        # members, so only its sender is considered involved.
         assert is_private_channel(channel)
 
     @pytest.mark.parametrize(
