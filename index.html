@@ -444,6 +444,7 @@ flowchart LR
       <thead><tr><th>机制</th><th>实现位置</th><th>作用</th></tr></thead>
       <tbody>
         <tr><td>游标</td><td><code>MansioClient._fetch_cursors / _save_cursors</code>，频道 <code>_system:cursors:&lt;user&gt;</code></td><td><code>channel_poll</code> 只返回新消息；游标随每次前进持久化，崩溃后不重复投递</td></tr>
+        <tr><td>自身消息过滤</td><td><code>MansioClient.subscribe / listen / channel_poll / check_unread</code> 默认 <code>include_own=False</code>；<code>channel_read</code> 保持包含自身消息；federation 显式传 <code>include_own=True</code></td><td>轮询与订阅默认不把自己的消息当作新消息；需要自回显时显式开启</td></tr>
         <tr><td>压缩</td><td><code>system_policy.system_channel_policy</code></td><td>游标快照只保留最新一条，避免系统频道无界增长</td></tr>
         <tr><td>线程</td><td>消息字段 <code>parent_id</code> / <code>thread_id</code></td><td>回复链与扁平线程查询</td></tr>
         <tr><td>工作队列</td><td><code>queue_publish / queue_claim / queue_ack</code></td><td>租约式任务认领；NATS 用 KV 保存认领状态</td></tr>
