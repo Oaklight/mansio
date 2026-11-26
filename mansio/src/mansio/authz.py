@@ -133,6 +133,19 @@ class ChannelAuthorizer:
     def __init__(self, bus: Bus) -> None:
         self._bus = bus
 
+    def _check_access(self, user_id: str, channel: str, verb: str) -> bool:
+        """Ask the channel store whether *user_id* holds *verb* on *channel*.
+
+        Backends without ``ChannelStore`` have no owner, visibility, or ACL
+        rows, so every channel is public there.  ``Bus.check_access`` already
+        answers True for them; the ``NotImplementedError`` guard keeps that
+        behavior if a store-backed method surfaces the same error.
+        """
+        try:
+            return self._bus.check_access(channel, user_id, verb)
+        except NotImplementedError:
+            return True
+
     # ── publish ──────────────────────────────────────────────
 
     def publish_denial(self, user_id: str, channel: str, msg_type: str = "") -> str | None:
@@ -153,11 +166,19 @@ class ChannelAuthorizer:
                 "and agents granted write access"
             )
 
-        if is_private_channel(channel) and not is_channel_member(user_id, channel):
+        if is_private_channel(channel):
+            if is_channel_member(user_id, channel):
+                return None
             if channel.startswith(PRIVATE_CHANNEL_PREFIXES):
                 owner = channel.split(":", 1)[1]
                 return f"Channel '{channel}' belongs to agent '{owner}'"
             return f"Channel '{channel}' is private"
+
+        # Plain and registered-prefix channels: owner, visibility, and ACL
+        # live in the channel store, so the structural rules alone cannot
+        # decide.  This is where visibility="private" is enforced.
+        if not self._check_access(user_id, channel, "publish"):
+            return f"Token for '{user_id}' cannot publish to channel '{channel}'"
 
         return None
 
@@ -227,8 +248,15 @@ class ChannelAuthorizer:
     # ── read ─────────────────────────────────────────────────
 
     def can_read(self, user_id: str, channel: str) -> bool:
-        """True if *user_id* may read *channel* (public or a member)."""
-        return not is_private_channel(channel) or is_channel_member(user_id, channel)
+        """True if *user_id* may read *channel* (public or a member).
+
+        Private-prefix and ``dm:`` channels are decided by name.  Plain and
+        registered-prefix channels consult the channel store, which enforces
+        ``visibility`` and ACL entries.
+        """
+        if is_private_channel(channel):
+            return is_channel_member(user_id, channel)
+        return self._check_access(user_id, channel, "read")
 
     def can_view_message(self, user_id: str, channel: str, sender: str) -> bool:
         """True if *user_id* may see a message in *channel* from *sender*."""
