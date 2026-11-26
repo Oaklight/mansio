@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import signal
 import sys
 import threading
@@ -20,13 +19,10 @@ from typing import Any, NoReturn
 
 from mansio import MansioAPIError, SQLiteBus, __version__
 from mansio._vendor.httpclient import HttpClientError
+from mansio.types import is_valid_user_id
 
 _LEGACY_DB = "piazza.db"
 _DEFAULT_DB = "mansio.db"
-
-# Same shape MansioClient enforces: 3-64 chars, lowercase alphanumeric and
-# hyphens, starting and ending with an alphanumeric.
-_USER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
 
 # Default token store filename for backends with an operator-named local
 # directory to put it in (currently just --maildir). Not a bare cwd-relative
@@ -855,7 +851,7 @@ def main(argv: list[str] | None = None) -> None:
             sys.exit(1)
         if not args.server or not args.user:
             _fail("--server and --user-id required (or set MANSIO_URL and MANSIO_USER_ID)")
-        if not _USER_ID_RE.match(args.user):
+        if not is_valid_user_id(args.user):
             _fail(
                 f"Invalid user_id {args.user!r}: must be 3-64 chars, "
                 "lowercase alphanumeric + hyphens, start/end with alphanumeric."

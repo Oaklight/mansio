@@ -1,10 +1,15 @@
-"""Reject malformed ``dm:`` channel names (issue #345).
+"""Reject malformed ``dm:`` channel names (issues #345, #352).
 
-A DM channel name is exactly ``dm:<user_a>:<user_b>``.  Before this rule,
-``dm:a`` was accepted at publish time but no user could ever be a member of
-it, so the emerging channel was writable by nobody.  The canonical parser in
-``mansio.authz`` now gates the publish, channel-create, query, and subscribe
-paths.
+A DM channel name is exactly ``dm:<user_a>:<user_b>``, and each slot must be a
+valid agent id: 3-64 characters, lowercase alphanumerics and hyphens, starting
+and ending with an alphanumeric.  Before #345, ``dm:a`` was accepted at
+publish time but no user could ever be a member of it; before #352, the same
+held for three-segment names whose slots were not valid agent ids
+(``dm:a:b``, ``dm:Alice:bob``, ``dm:alice.bob:carol``).
+
+The canonical parser in ``mansio.authz`` now gates the publish, channel
+create, query, and subscribe paths, and uses the shared user-id rule from
+``shared/types.py`` for both participant slots.
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from mansio.authz import (
     is_private_channel,
 )
 from mansio.frontends.http import HttpFrontend
+from mansio.types import is_valid_user_id
 
 MALFORMED_DM_NAMES = [
     "dm:a",
@@ -47,21 +53,53 @@ UNUSABLE_DM_NAMES = [
     "dm:alice:bob.",
 ]
 
-ALL_REJECTED_DM_NAMES = MALFORMED_DM_NAMES + UNUSABLE_DM_NAMES
+# Structurally three segments, but a slot is not a valid agent id, so no
+# token can ever act as that participant (#352).
+INVALID_USER_ID_DM_NAMES = [
+    "dm:a:b",  # 1-char ids
+    "dm:ab:cd",  # 2-char ids
+    "dm:Alice:bob",  # uppercase
+    "dm:alice.bob:carol",  # dot
+    "dm:alice_bob:carol",  # underscore
+    "dm:-alice:bob",  # leading hyphen
+    "dm:alice-:bob",  # trailing hyphen
+]
+
+ALL_REJECTED_DM_NAMES = MALFORMED_DM_NAMES + UNUSABLE_DM_NAMES + INVALID_USER_ID_DM_NAMES
 
 
 class TestDmParser:
     def test_well_formed(self) -> None:
         assert dm_participants("dm:alice:bob") == ("alice", "bob")
+        assert dm_participants("dm:agent-1:agent-2") == ("agent-1", "agent-2")
         assert dm_channel_error("dm:alice:bob") is None
 
-    @pytest.mark.parametrize("channel", MALFORMED_DM_NAMES)
+    @pytest.mark.parametrize("channel", MALFORMED_DM_NAMES + INVALID_USER_ID_DM_NAMES)
     def test_malformed(self, channel: str) -> None:
         assert dm_participants(channel) is None
         assert dm_channel_error(channel) is not None
         # Fail closed: an existing malformed row stays private and has no
         # members, so only its sender is considered involved.
         assert is_private_channel(channel)
+
+    def test_slots_follow_the_shared_user_id_rule(self) -> None:
+        for first, second in (
+            ("alice", "bob"),
+            ("a", "b"),
+            ("ab", "cd"),
+            ("Alice", "bob"),
+            ("alice.bob", "carol"),
+            ("alice-", "bob"),
+        ):
+            expected = is_valid_user_id(first) and is_valid_user_id(second)
+            assert (dm_participants(f"dm:{first}:{second}") is not None) is expected
+
+    def test_short_ids_are_now_rejected(self) -> None:
+        """#352 behavior change: ``dm:a:b`` used to parse; no token can use
+        those ids, so the channel was writable by nobody."""
+        assert dm_participants("dm:a:b") is None
+        assert dm_channel_error("dm:a:b") is not None
+        assert not is_channel_member("a", "dm:a:b")
 
     @pytest.mark.parametrize(
         "channel", ["general", "notebook:alice", "memory:bob", "broadcast:news"]
@@ -99,7 +137,7 @@ class TestDmAuthorization:
         finally:
             bus.close()
 
-    @pytest.mark.parametrize("channel", MALFORMED_DM_NAMES)
+    @pytest.mark.parametrize("channel", ALL_REJECTED_DM_NAMES)
     def test_no_user_is_a_member_of_a_malformed_dm(self, channel: str) -> None:
         for user_id in ("alice", "bob", "a", "b", ""):
             assert not is_channel_member(user_id, channel)
@@ -198,6 +236,20 @@ class TestHttpAcceptsWellFormedDm:
         assert data["channel"]["name"] == "dm:alice:bob"
         assert data["channel"]["visibility"] == "private"
         assert bus.get_channel_meta("dm:alice:bob") is not None
+
+    def test_create_accepts_hyphenated_ids(self, http_server) -> None:
+        base, bus = http_server
+        status, data = _http_req(
+            "POST",
+            f"{base}/v1/channels",
+            {
+                "name": "dm:agent-1:agent-2",
+                "owner": "agent-1",
+                "visibility": "private",
+            },
+        )
+        assert status == 201, data
+        assert bus.get_channel_meta("dm:agent-1:agent-2") is not None
 
     def test_both_participants_publish_and_stranger_is_denied(self, mansio_server) -> None:
         url, store, _bus, _server = mansio_server

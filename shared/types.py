@@ -3,7 +3,20 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
+
+# Agent/user identifiers are 3-64 characters: lowercase alphanumerics and
+# hyphens, starting and ending with an alphanumeric.  Token creation (admin
+# API, server CLI) and the client SDK enforce this rule; channel validation
+# uses it for the two segments of a ``dm:<a>:<b>`` name.
+USER_ID_PATTERN = r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$"
+USER_ID_RE = re.compile(USER_ID_PATTERN)
+
+
+def is_valid_user_id(user_id: str) -> bool:
+    """Return True if *user_id* matches the agent/user identifier rule."""
+    return USER_ID_RE.match(user_id) is not None
 
 
 @dataclass(frozen=True, slots=True)
