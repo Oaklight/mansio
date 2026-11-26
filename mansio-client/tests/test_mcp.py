@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import unittest
@@ -9,8 +10,14 @@ from io import StringIO
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from mansio_client import MansioAPIError
-from mansio_client.types import ACLEntry, ALLOWED_PERMISSIONS, UserPresence, Message
+from mansio_client import MansioAPIError, MansioClient
+from mansio_client.types import (
+    ACLEntry,
+    ALLOWED_PERMISSIONS,
+    ClaimResult,
+    Message,
+    UserPresence,
+)
 
 from mansio_client.mcp import (
     _DISPATCH,
@@ -358,6 +365,82 @@ class TestCallTool(unittest.TestCase):
         )
         self.client.channel_poll.assert_called_once_with("general", include_own=True)
 
+    def test_queue_publish(self) -> None:
+        self.client.queue_publish.return_value = "msg-q1"
+        result = _call_tool(
+            self.client,
+            "mansio_queue_publish",
+            {"channel": "work", "content": "do it"},
+        )
+        assert result == {"message_id": "msg-q1"}
+        self.client.queue_publish.assert_called_once_with(
+            "work", "do it", msg_type="task", metadata=None
+        )
+
+    def test_queue_publish_with_metadata(self) -> None:
+        self.client.queue_publish.return_value = "msg-q1"
+        _call_tool(
+            self.client,
+            "mansio_queue_publish",
+            {
+                "channel": "work",
+                "content": "do it",
+                "msg_type": "job",
+                "metadata": {"priority": "high"},
+            },
+        )
+        self.client.queue_publish.assert_called_once_with(
+            "work", "do it", msg_type="job", metadata={"priority": "high"}
+        )
+
+    def test_queue_claim(self) -> None:
+        self.client.queue_claim.return_value = ClaimResult(
+            message=_make_msg(id="msg-q1", channel="work"),
+            status="claimed",
+            claimed_by="user-a",
+            claimed_at="2026-01-01T00:00:00Z",
+        )
+        result = _call_tool(
+            self.client,
+            "mansio_queue_claim",
+            {"channel": "work", "lease_seconds": 45},
+        )
+        assert result["status"] == "claimed"
+        assert result["message"]["id"] == "msg-q1"
+        assert result["claimed_by"] == "user-a"
+        assert result["claimed_at"] == "2026-01-01T00:00:00Z"
+        assert "lease_until" not in result
+        self.client.queue_claim.assert_called_once_with("work", lease_seconds=45)
+
+    def test_queue_claim_empty(self) -> None:
+        self.client.queue_claim.return_value = None
+        result = _call_tool(self.client, "mansio_queue_claim", {"channel": "work"})
+        assert result is None
+        self.client.queue_claim.assert_called_once_with("work", lease_seconds=300)
+
+    def test_queue_ack(self) -> None:
+        self.client.queue_ack.return_value = ClaimResult(
+            message=_make_msg(id="msg-q1", channel="work"),
+            status="acked",
+            claimed_by="user-a",
+            claimed_at="2026-01-01T00:00:00Z",
+        )
+        result = _call_tool(self.client, "mansio_queue_ack", {"message_id": "msg-q1"})
+        assert result["status"] == "acked"
+        assert result["message"]["id"] == "msg-q1"
+        self.client.queue_ack.assert_called_once_with("msg-q1")
+
+    def test_queue_status(self) -> None:
+        self.client.queue_status.return_value = {
+            "status": "claimed",
+            "claimed_by": "user-a",
+        }
+        result = _call_tool(
+            self.client, "mansio_queue_status", {"message_id": "msg-q1"}
+        )
+        assert result == {"status": "claimed", "claimed_by": "user-a"}
+        self.client.queue_status.assert_called_once_with("msg-q1")
+
     def test_dm_send(self) -> None:
         self.client.dm_send.return_value = "dm-1"
         result = _call_tool(
@@ -692,6 +775,31 @@ class TestAclPermissionVocabulary(unittest.TestCase):
         assert resp is not None
         assert resp["result"]["isError"] is True
         assert "invalid permission" in resp["result"]["content"][0]["text"]
+
+
+class TestQueueToolSchemas(unittest.TestCase):
+    """Queue tool schemas mirror the client method signatures."""
+
+    CASES = [
+        ("mansio_queue_publish", "queue_publish"),
+        ("mansio_queue_claim", "queue_claim"),
+        ("mansio_queue_ack", "queue_ack"),
+        ("mansio_queue_status", "queue_status"),
+    ]
+
+    def test_queue_tools_are_dispatchable(self) -> None:
+        for tool_name, _ in self.CASES:
+            assert tool_name in _DISPATCH
+
+    def test_schema_arguments_match_client_method(self) -> None:
+        tools = {t["name"]: t for t in _TOOLS}
+        for tool_name, method_name in self.CASES:
+            parameters = inspect.signature(
+                getattr(MansioClient, method_name)
+            ).parameters
+            expected = [name for name in parameters if name != "self"]
+            props = list(tools[tool_name]["inputSchema"]["properties"])
+            assert props == expected, tool_name
 
 
 class TestServeLoop(unittest.TestCase):

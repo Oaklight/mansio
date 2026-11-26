@@ -20,7 +20,7 @@ from collections.abc import Callable
 from typing import Any
 
 from mansio_client import MansioClient
-from mansio_client.types import ACLEntry, ALLOWED_PERMISSIONS, Message
+from mansio_client.types import ACLEntry, ALLOWED_PERMISSIONS, ClaimResult, Message
 
 # ── Protocol Constants ────────────────────────────────────────────
 
@@ -138,6 +138,71 @@ _TOOLS: list[dict[str, Any]] = [
                 },
             },
             "required": ["channel"],
+        },
+    },
+    {
+        "name": "mansio_queue_publish",
+        "description": "Publish a task to a work-queue channel; the message can be claimed with a lease.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "channel": {"type": "string", "description": "Work-queue channel."},
+                "content": {"type": "string", "description": "Task content."},
+                "msg_type": {
+                    "type": "string",
+                    "description": "Message type (default: task).",
+                    "default": "task",
+                },
+                "metadata": {
+                    "type": "object",
+                    "description": "Optional structured metadata for the task.",
+                },
+            },
+            "required": ["channel", "content"],
+        },
+    },
+    {
+        "name": "mansio_queue_claim",
+        "description": "Claim the oldest unclaimed or lease-expired message from a work-queue channel; the claim is lease-based.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "channel": {"type": "string", "description": "Work-queue channel."},
+                "lease_seconds": {
+                    "type": "integer",
+                    "description": "Lease duration for the claim (default: 300).",
+                    "default": 300,
+                },
+            },
+            "required": ["channel"],
+        },
+    },
+    {
+        "name": "mansio_queue_ack",
+        "description": "Acknowledge a claimed work-queue message as completed.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string",
+                    "description": "ID of the claimed message.",
+                },
+            },
+            "required": ["message_id"],
+        },
+    },
+    {
+        "name": "mansio_queue_status",
+        "description": "Return the claim state of a work-queue message, or null if it has none.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string",
+                    "description": "ID of the work-queue message.",
+                },
+            },
+            "required": ["message_id"],
         },
     },
     {
@@ -564,6 +629,48 @@ def _tool_poll(client: MansioClient, args: dict[str, Any]) -> Any:
     return [_msg_to_dict(m) for m in msgs]
 
 
+def _claim_result_to_dict(result: ClaimResult) -> dict[str, Any]:
+    d: dict[str, Any] = {
+        "message": _msg_to_dict(result.message),
+        "status": result.status,
+        "claimed_by": result.claimed_by,
+        "claimed_at": result.claimed_at,
+    }
+    if result.lease_until is not None:
+        d["lease_until"] = result.lease_until
+    return d
+
+
+def _tool_queue_publish(client: MansioClient, args: dict[str, Any]) -> Any:
+    msg_id = client.queue_publish(
+        args["channel"],
+        args["content"],
+        msg_type=args.get("msg_type", "task"),
+        metadata=args.get("metadata"),
+    )
+    return {"message_id": msg_id}
+
+
+def _tool_queue_claim(client: MansioClient, args: dict[str, Any]) -> Any:
+    result = client.queue_claim(
+        args["channel"], lease_seconds=args.get("lease_seconds", 300)
+    )
+    if result is None:
+        return None
+    return _claim_result_to_dict(result)
+
+
+def _tool_queue_ack(client: MansioClient, args: dict[str, Any]) -> Any:
+    result = client.queue_ack(args["message_id"])
+    if result is None:
+        return None
+    return _claim_result_to_dict(result)
+
+
+def _tool_queue_status(client: MansioClient, args: dict[str, Any]) -> Any:
+    return client.queue_status(args["message_id"])
+
+
 def _tool_dm_send(client: MansioClient, args: dict[str, Any]) -> Any:
     return {"message_id": client.dm_send(args["to_user"], args["content"])}
 
@@ -728,6 +835,10 @@ _DISPATCH: dict[str, Callable[[MansioClient, dict[str, Any]], Any]] = {
     "mansio_send": _tool_send,
     "mansio_read": _tool_read,
     "mansio_poll": _tool_poll,
+    "mansio_queue_publish": _tool_queue_publish,
+    "mansio_queue_claim": _tool_queue_claim,
+    "mansio_queue_ack": _tool_queue_ack,
+    "mansio_queue_status": _tool_queue_status,
     "mansio_dm_send": _tool_dm_send,
     "mansio_dm_read": _tool_dm_read,
     "mansio_note": _tool_note,

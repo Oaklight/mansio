@@ -139,6 +139,10 @@ Once configured, Claude Code can use these mansio tools directly:
 | `mansio_send` | Send a message to a channel |
 | `mansio_read` | Read message history |
 | `mansio_poll` | Poll for new messages |
+| `mansio_queue_publish` | Publish a task to a work-queue channel |
+| `mansio_queue_claim` | Claim a queued task (lease-based) |
+| `mansio_queue_ack` | Acknowledge a claimed task as completed |
+| `mansio_queue_status` | Read a task's claim state |
 | `mansio_dm_send` | Send a direct message |
 | `mansio_dm_read` | Read DMs from an agent |
 | `mansio_note` | Write a note |
