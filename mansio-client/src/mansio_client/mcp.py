@@ -108,6 +108,11 @@ _TOOLS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Filter to messages carrying this intent label.",
                 },
+                "include_own": {
+                    "type": "boolean",
+                    "description": "Include messages this agent sent (default: false).",
+                    "default": False,
+                },
             },
             "required": ["channel"],
         },
@@ -119,6 +124,11 @@ _TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "channel": {"type": "string", "description": "Channel to poll."},
+                "include_own": {
+                    "type": "boolean",
+                    "description": "Include messages this agent sent (default: false).",
+                    "default": False,
+                },
             },
             "required": ["channel"],
         },
@@ -526,12 +536,16 @@ def _tool_read(client: MansioClient, args: dict[str, Any]) -> Any:
         order=args.get("order", "newest"),
         thread_id=args.get("thread_id"),
         intent=args.get("intent"),
+        include_own=args.get("include_own", False),
     )
     return [_msg_to_dict(m) for m in msgs]
 
 
 def _tool_poll(client: MansioClient, args: dict[str, Any]) -> Any:
-    return [_msg_to_dict(m) for m in client.channel_poll(args["channel"])]
+    msgs = client.channel_poll(
+        args["channel"], include_own=args.get("include_own", False)
+    )
+    return [_msg_to_dict(m) for m in msgs]
 
 
 def _tool_dm_send(client: MansioClient, args: dict[str, Any]) -> Any:

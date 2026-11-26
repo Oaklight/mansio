@@ -173,3 +173,27 @@ class TestErrorReporting:
             main(["-s", "http://127.0.0.1:1", "--user-id", "INVALID", "channels"])
         assert exc.value.code == 1
         assert "error: Invalid user_id" in capsys.readouterr().err
+
+
+class TestIncludeOwnFlags:
+    """poll and read exclude this agent's messages unless --include-own."""
+
+    def test_poll_default_excludes_own(self):
+        parser = _build_parser()
+        args = parser.parse_args(["poll", "-c", "general"])
+        assert args.include_own is False
+
+    def test_poll_include_own(self):
+        parser = _build_parser()
+        args = parser.parse_args(["poll", "-c", "general", "--include-own"])
+        assert args.include_own is True
+
+    def test_read_default_excludes_own(self):
+        parser = _build_parser()
+        args = parser.parse_args(["read", "-c", "general"])
+        assert args.include_own is False
+
+    def test_read_include_own(self):
+        parser = _build_parser()
+        args = parser.parse_args(["read", "-c", "general", "--include-own"])
+        assert args.include_own is True

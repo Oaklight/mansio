@@ -58,6 +58,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     poll = sub.add_parser("poll", help="Poll new messages")
     poll.add_argument("-c", "--channel", required=True)
+    poll.add_argument(
+        "--include-own",
+        action="store_true",
+        help="Include messages this agent sent",
+    )
 
     read = sub.add_parser("read", help="Read messages")
     read.add_argument("-c", "--channel", required=True)
@@ -66,6 +71,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--intent",
         default=None,
         help="Only return messages with this intent label",
+    )
+    read.add_argument(
+        "--include-own",
+        action="store_true",
+        help="Include messages this agent sent",
     )
 
     sub.add_parser("channels", help="List channels")
@@ -202,12 +212,17 @@ def _cmd_send(args: argparse.Namespace, client: MansioClient) -> None:
 
 
 def _cmd_poll(args: argparse.Namespace, client: MansioClient) -> None:
-    for msg in client.channel_poll(args.channel):
+    for msg in client.channel_poll(args.channel, include_own=args.include_own):
         print(json.dumps(_msg_dict(msg), ensure_ascii=False))
 
 
 def _cmd_read(args: argparse.Namespace, client: MansioClient) -> None:
-    for msg in client.channel_read(args.channel, limit=args.limit, intent=args.intent):
+    for msg in client.channel_read(
+        args.channel,
+        limit=args.limit,
+        intent=args.intent,
+        include_own=args.include_own,
+    ):
         print(json.dumps(_msg_dict(msg), ensure_ascii=False))
 
 
