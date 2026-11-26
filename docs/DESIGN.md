@@ -331,7 +331,7 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 | Notebook | `notebook:{user_id}` | 思考过程、临时笔记（含 Thought） | **私有 — 仅所属 agent 可写入**（`owner`），跨 agent 写入返回 403 |
 | Memory | `memory:{user_id}` | 长期记忆（语义记忆） | **私有 — 仅所属 agent 可写入**（`owner`），跨 agent 写入返回 403 |
 | Broadcast | `broadcast:{topic}` | 公告、任务列表、成员列表 | **supertoken、频道所有者或持有 write/admin ACL 的 agent 可写入**，其他 agent 只读 |
-| DM | `dm:{user_a}:{user_b}` | 私聊（双方 ID 按字典序排列） | 双方可读写（`member`） |
+| DM | `dm:{user_a}:{user_b}` | 私聊（双方 ID 按字典序排列） | 双方可读写（`member`），并可删除整个频道——不可逆，没有「退出」或「删除自己的副本」动词 |
 | System | `_system:{purpose}` | 内部管理（在线状态、cursor、通知） | **受限写入**（见下文） |
 | 自定义前缀 | `{prefix}:{name}` | 应用自定义命名空间，如 `group:` | 与普通频道相同，但该前缀须先在管理面板注册（`/api/prefixes`） |
 
@@ -373,6 +373,8 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 | 单个动词（`read`、`publish`、`delete`、`manage`） | 仅该动词 |
 
 旧等级 `read`、`write`、`admin` 仍然有效，分别映射到 `viewer`、`member`、`owner`。`check_access()` 同样接受旧参数 `write` 和 `admin`，分别视为 `publish` 和 `manage`（[#247](https://github.com/Oaklight/mansio/issues/247)）。
+
+ACL 条目按写入时的原样保存权限字符串——角色名、单个动词或旧等级。预设在校验时展开（`shared/types.py` 的 `expand_permission()`），而不是在创建条目时展开，因此修改 `ROLE_PRESETS` 会追溯性地改变所有使用该预设的既有条目所授予的范围。旧等级按同样的方式解析为别名，已存储的数据无需迁移。
 
 Bus 不暴露任何授权参数：Frontend 在调用 `Bus.publish` / `Bus.query` / 删除方法之前先完成授权。对于普通频道与注册前缀频道，Frontend 策略层会查询频道存储（`Bus.check_access`），因此私有频道的所有者与 ACL 条目对读写生效。`dm:`/`notebook:`/`memory:` 仍按名称结构判定，`broadcast:*` 的写入检查频道所有者以及任何授予 `publish` 的条目（[#298](https://github.com/Oaklight/mansio/issues/298)）。
 
