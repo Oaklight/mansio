@@ -247,19 +247,23 @@ def _build_parser() -> argparse.ArgumentParser:
     _client_common.add_argument(
         "-s",
         "--server",
-        required=True,
-        help="Server URL (e.g. http://localhost:8742)",
+        default=os.environ.get("MANSIO_URL"),
+        help="Server URL (or MANSIO_URL env)",
     )
     _client_common.add_argument(
         "-u",
+        "--user-id",
         "--user",
-        required=True,
-        help="User ID",
+        dest="user",
+        default=os.environ.get("MANSIO_USER_ID"),
+        help="User ID (or MANSIO_USER_ID env); --user is deprecated",
     )
     _client_common.add_argument(
+        "--token",
         "--api-token",
-        default=None,
-        help="Bearer token for API auth (mst-...)",
+        dest="api_token",
+        default=os.environ.get("MANSIO_TOKEN"),
+        help="Bearer token (or MANSIO_TOKEN env); --api-token is deprecated",
     )
 
     # client send
@@ -830,6 +834,12 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "client":
         if args.action is None:
             print("usage: mansio client {send,poll,channels,dm} ...", file=sys.stderr)
+            sys.exit(1)
+        if not args.server or not args.user:
+            print(
+                "error: --server and --user-id required (or set MANSIO_URL and MANSIO_USER_ID)",
+                file=sys.stderr,
+            )
             sys.exit(1)
         handlers = {
             "send": _cmd_client_send,

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -21,6 +22,7 @@ from mansio.cli import (
     _redact_token,
     _resolve_admin_auth,
     _resolve_token_db_path,
+    main,
     parse_args,
 )
 from mansio.frontends import HttpFrontend
@@ -265,13 +267,65 @@ class TestParseArgsClient:
         assert args.to_user == "bob"
         assert args.message == "hey bob!"
 
-    def test_client_send_missing_server(self):
-        with pytest.raises(SystemExit):
-            parse_args(["client", "send", "-u", "aaa", "-c", "ch", "msg"])
+    def test_client_user_id_alias(self):
+        args = parse_args(["client", "channels", "-s", "http://x:8742", "--user-id", "alice"])
+        assert args.user == "alice"
 
-    def test_client_send_missing_user(self):
-        with pytest.raises(SystemExit):
-            parse_args(["client", "send", "-s", "http://x:8742", "-c", "ch", "msg"])
+    def test_client_legacy_user_and_api_token(self):
+        args = parse_args(
+            [
+                "client",
+                "channels",
+                "-s",
+                "http://x:8742",
+                "--user",
+                "alice",
+                "--api-token",
+                "mst-legacy",
+            ]
+        )
+        assert args.user == "alice"
+        assert args.api_token == "mst-legacy"
+
+    def test_client_token_alias(self):
+        args = parse_args(
+            [
+                "client",
+                "channels",
+                "-s",
+                "http://x:8742",
+                "-u",
+                "alice",
+                "--token",
+                "mst-1",
+            ]
+        )
+        assert args.api_token == "mst-1"
+
+    def test_client_env_fallbacks(self, monkeypatch):
+        monkeypatch.setenv("MANSIO_URL", "http://env:8742")
+        monkeypatch.setenv("MANSIO_USER_ID", "env-agent")
+        monkeypatch.setenv("MANSIO_TOKEN", "mst-env")
+        args = parse_args(["client", "channels"])
+        assert args.server == "http://env:8742"
+        assert args.user == "env-agent"
+        assert args.api_token == "mst-env"
+
+    def test_client_send_missing_server_exits(self, monkeypatch, capsys):
+        monkeypatch.delenv("MANSIO_URL", raising=False)
+        monkeypatch.delenv("MANSIO_USER_ID", raising=False)
+        with pytest.raises(SystemExit) as exc:
+            main(["client", "send", "-u", "aaa", "-c", "ch", "msg"])
+        assert exc.value.code == 1
+        assert "MANSIO_URL" in capsys.readouterr().err
+
+    def test_client_send_missing_user_exits(self, monkeypatch, capsys):
+        monkeypatch.delenv("MANSIO_URL", raising=False)
+        monkeypatch.delenv("MANSIO_USER_ID", raising=False)
+        with pytest.raises(SystemExit) as exc:
+            main(["client", "send", "-s", "http://x:8742", "-c", "ch", "msg"])
+        assert exc.value.code == 1
+        assert "MANSIO_USER_ID" in capsys.readouterr().err
 
 
 # ── Helpers ───────────────────────────────────────────────────────
@@ -515,6 +569,44 @@ class TestClientIntegration:
         assert result.returncode == 0
         msg_id = result.stdout.strip()
         assert msg_id
+
+    def test_channels_with_env_only(self, http_server_url: str) -> None:
+        """MANSIO_URL / MANSIO_USER_ID replace the -s/-u flags."""
+        env = dict(os.environ)
+        env["MANSIO_URL"] = http_server_url
+        env["MANSIO_USER_ID"] = "env-agent"
+        env.pop("MANSIO_TOKEN", None)
+
+        result = subprocess.run(
+            [sys.executable, "-m", "mansio.cli", "client", "channels"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_send_with_user_id_alias(self, http_server_url: str) -> None:
+        """--user-id is the canonical spelling shared with mansio-client."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "mansio.cli",
+                "client",
+                "send",
+                "-s",
+                http_server_url,
+                "--user-id",
+                "alias-agent",
+                "-c",
+                "alias-ch",
+                "hi",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip()
 
 
 # ── Serve Startup and Network Exposure Guard ──────────────────────
