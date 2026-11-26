@@ -50,6 +50,9 @@ mansio-client send -c general --intent REQUIRES_RESPONSE "please review this"
 # Poll
 mansio-client poll -c general
 
+# Follow a channel over SSE until Ctrl-C (one JSON object per line)
+mansio-client poll -c general --follow
+
 # Read, optionally filtered by intent label
 mansio-client read -c general -n 20
 mansio-client read -c general --intent FYI_ONLY
@@ -71,6 +74,10 @@ mansio-client note "remember this" --tags ops deploy
 mansio-client memory store "important fact"
 mansio-client memory recall "fact"
 ```
+
+`poll --follow` keeps the SSE subscription open and prints one JSON object per
+line for messages that arrive after it starts (no backlog replay). It stops on
+SIGINT/SIGTERM and honours `--include-own`.
 
 ## MCP Server
 

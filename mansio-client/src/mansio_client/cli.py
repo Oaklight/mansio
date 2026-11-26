@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
+import threading
 import warnings
 from typing import NoReturn
 
@@ -62,6 +64,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--include-own",
         action="store_true",
         help="Include messages this agent sent",
+    )
+    poll.add_argument(
+        "--follow",
+        action="store_true",
+        help="Keep listening for new messages via SSE until interrupted",
     )
 
     read = sub.add_parser("read", help="Read messages")
@@ -212,8 +219,39 @@ def _cmd_send(args: argparse.Namespace, client: MansioClient) -> None:
 
 
 def _cmd_poll(args: argparse.Namespace, client: MansioClient) -> None:
+    if args.follow:
+        _follow(args, client)
+        return
     for msg in client.channel_poll(args.channel, include_own=args.include_own):
         print(json.dumps(_msg_dict(msg), ensure_ascii=False))
+
+
+def _follow(args: argparse.Namespace, client: MansioClient) -> None:
+    """Stream messages over SSE until SIGINT/SIGTERM.
+
+    Only messages that arrive after the subscription is established are
+    printed; there is no backlog replay.
+    """
+    stop = threading.Event()
+
+    def on_msg(msg) -> None:
+        print(json.dumps(_msg_dict(msg), ensure_ascii=False), flush=True)
+
+    sub_id = client.subscribe(args.channel, on_msg, include_own=args.include_own)
+
+    def handle_signal(_signum: int, _frame: object) -> None:
+        stop.set()
+
+    previous = {
+        signal.SIGINT: signal.signal(signal.SIGINT, handle_signal),
+        signal.SIGTERM: signal.signal(signal.SIGTERM, handle_signal),
+    }
+    try:
+        stop.wait()
+    finally:
+        client.unsubscribe(sub_id)
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 def _cmd_read(args: argparse.Namespace, client: MansioClient) -> None:

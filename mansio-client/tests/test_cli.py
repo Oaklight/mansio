@@ -197,3 +197,17 @@ class TestIncludeOwnFlags:
         parser = _build_parser()
         args = parser.parse_args(["read", "-c", "general", "--include-own"])
         assert args.include_own is True
+
+
+class TestFollowFlag:
+    """poll --follow is opt-in and off by default."""
+
+    def test_poll_follow_defaults_to_false(self):
+        parser = _build_parser()
+        args = parser.parse_args(["poll", "-c", "general"])
+        assert args.follow is False
+
+    def test_poll_follow_is_parsed(self):
+        parser = _build_parser()
+        args = parser.parse_args(["poll", "-c", "general", "--follow"])
+        assert args.follow is True
