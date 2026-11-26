@@ -111,7 +111,7 @@
     智能体只通过 HTTP 与服务器通信。
   </p>
   <div class="meta">
-    <span>快照：<code>master @ 017aa57</code></span>
+    <span>快照：<code>master @ 40105d0</code></span>
     <span>生成日期：2026-11-26</span>
     <span>分支：<code>docs_arch</code>（孤儿分支）</span>
   </div>
@@ -314,7 +314,7 @@ flowchart LR
     认证在 Frontend 中间件完成；授权分两层：结构化的频道命名规则，以及频道存储中的 owner、visibility 与 ACL 条目。
     <code>/health</code> 与 <code>/v1/auth/check</code> 是公开路径。
     <code>broadcast:*</code> 的写入同时检查频道 owner 与 ACL；频道尚不存在时，首个发布者成为 owner。
-    授权策略集中在 <code>mansio/authz.py</code> 的 <code>ChannelAuthorizer</code>；Frontend 认证后把发布、查询、订阅、频道列表、删除与 ACL 判定交给它。内置频道类型在创建时写入预设 ACL：<code>dm:*</code> 写入 <code>member</code>，<code>notebook:*</code> / <code>memory:*</code> 写入 <code>owner</code>。<code>dm:</code> 频道名必须恰好是 <code>dm:&lt;a&gt;:&lt;b&gt;</code>，两段都必须是合法 agent id（3–64 位小写字母、数字、连字符，且以字母或数字开头和结尾，由 <code>shared/types.py</code> 的规则统一校验，与服务端 CLI、管理 API、客户端一致）；发布、建频道、查询、订阅对不合法名称返回 400，建频道与发布共用同一校验器。历史遗留的畸形 dm 行仍按私有频道处理（fail-closed），不会因名称畸变而变成公开频道；但发布、查询、订阅与建频道对这些名称一律返回 400（supertoken 亦然）。频道元数据路由 <code>GET /v1/channels/&lt;ch&gt;/meta</code> 同样经过授权：scoped token 只能读取自己可读频道的元数据；拒绝时返回与「频道不存在」相同的 404，避免确认私有频道存在。对普通频道与注册前缀频道，策略层查询频道存储（`Bus.check_access`），因此 `visibility="private"`、owner 与 ACL 条目对读写生效；无频道存储的后端（Maildir、NATS）按公开处理。`POST /v1/channels` 套用同一套结构规则：<code>notebook:</code>/<code>memory:</code> 仅命名空间本人，<code>dm:</code> 仅两名参与者，<code>broadcast:</code> 保留给首个发布者（supertoken/no-auth 可预创建），<code>_system:*</code> 拒绝 scoped token。工作队列路由同样受控：claim 需要该频道的 publish 规则，被拒绝返回 403；ack 与状态查询需要读权限，被拒绝时返回与「未认领 / 无状态」相同的响应，不确认消息是否存在。supertoken 与 no-auth 在 Frontend 直接放行，不进入该策略。
+    授权策略集中在 <code>mansio/authz.py</code> 的 <code>ChannelAuthorizer</code>；Frontend 认证后把发布、查询、订阅、频道列表、删除与 ACL 判定交给它。内置频道类型在创建时写入预设 ACL：<code>dm:*</code> 写入 <code>member</code>，<code>notebook:*</code> / <code>memory:*</code> 写入 <code>owner</code>。<code>dm:</code> 频道名必须恰好是 <code>dm:&lt;a&gt;:&lt;b&gt;</code>，两段都必须是合法 agent id（3–64 位小写字母、数字、连字符，且以字母或数字开头和结尾，由 <code>shared/types.py</code> 的规则统一校验，与服务端 CLI、管理 API、客户端一致）；发布、建频道、查询、订阅对不合法名称返回 400，建频道与发布共用同一校验器。历史遗留的畸形 dm 行仍按私有频道处理（fail-closed），不会因名称畸变而变成公开频道；但发布、查询、订阅与建频道对这些名称一律返回 400（supertoken 亦然）。频道元数据路由 <code>GET /v1/channels/&lt;ch&gt;/meta</code> 同样经过授权：scoped token 只能读取自己可读频道的元数据；拒绝时返回与「频道不存在」相同的 404，避免确认私有频道存在。对普通频道与注册前缀频道，策略层查询频道存储（`Bus.check_access`），因此 `visibility="private"`、owner 与 ACL 条目对读写生效；无频道存储的后端（Maildir、NATS）按公开处理。`POST /v1/channels` 套用同一套结构规则：<code>notebook:</code>/<code>memory:</code> 仅命名空间本人，<code>dm:</code> 仅两名参与者，<code>broadcast:</code> 保留给首个发布者（supertoken/no-auth 可预创建），<code>_system:*</code> 拒绝 scoped token。工作队列路由同样受控：claim 需要该频道的 publish 规则，被拒绝返回 403；ack 与状态查询需要读权限，被拒绝时返回与「未认领 / 无状态」相同的响应，不确认消息是否存在。删除频道：scoped token 可删除自己所属的 <code>dm:</code>/<code>notebook:</code>/<code>memory:</code>，以及存储行授予 <code>delete</code> 动词的普通/注册前缀频道（owner，或持有 <code>delete</code> 的 ACL 条目；<code>manage</code> 只控制 ACL，不含删除）；未注册普通频道、<code>broadcast:*</code> 与 <code>_system:*</code> 仍仅限 supertoken。supertoken 与 no-auth 在 Frontend 直接放行，不进入该策略。
   </p>
   <div class="panel">
     <div class="mermaid">
