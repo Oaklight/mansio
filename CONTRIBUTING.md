@@ -65,6 +65,13 @@ The compatibility package `packages/mansio-web/src/mansio/` is the one
 exception: it routes the old `mansio.*` import paths to the new packages. Do not
 add implementation code there.
 
+## Release order
+
+`mansio-core` is a first-party dependency of both `mansio` and `mansio-client`.
+Publish `mansio-core` first, then `mansio` and `mansio-client`. A server-only or
+client-only release run is valid only when the matching `mansio-core` version is
+already available on the target index (PyPI or TestPyPI).
+
 ## The client must work without the server installed
 
 `mansio-client` is installed on its own by people running agents against a
