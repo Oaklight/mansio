@@ -1937,9 +1937,9 @@ def _drain_drop_counter(
 ) -> str:
     """Return an SSE warning comment if events were dropped, else empty string.
 
-    Note: the warning is emitted piggy-backed on the next live event,
-    not immediately when drops occur. If the stream goes quiet after
-    drops, the client is not notified until the next event arrives.
+    The warning is emitted after the next live event or on the next
+    keepalive tick, whichever comes first, so a stream that goes quiet
+    after drops still reports them within the keepalive interval.
     """
     if drop_lock is None or drop_counter is None:
         return ""
@@ -1952,11 +1952,22 @@ def _drain_drop_counter(
 
 
 async def _replay_missed_events(session: _SSESession) -> Any:
-    """Yield SSE events for messages published after ``last_event_id``."""
+    """Yield SSE events for messages published after ``last_event_id``.
+
+    When a channel's replay fills ``_SSE_REPLAY_LIMIT``, a warning comment
+    precedes that channel's events.  The query cannot tell whether more
+    messages exist beyond the limit, so the client should re-query; the
+    warning can be a false positive when exactly the limit is waiting.
+    """
     for ch in session.channels:
         missed = await asyncio.to_thread(
             session.bus.query, ch, after=session.last_event_id, limit=_SSE_REPLAY_LIMIT
         )
+        if len(missed) >= _SSE_REPLAY_LIMIT:
+            yield (
+                f": warning: replay truncated at {_SSE_REPLAY_LIMIT} "
+                f"for channel '{ch}', re-query for more\n\n"
+            )
         if isinstance(session.auth_result, str):
             missed = [m for m in missed if _user_involved(session.auth_result, m.channel, m.sender)]
             if session.exclude_own:
@@ -1978,7 +1989,9 @@ async def _sse_event_generator(session: _SSESession) -> Any:
     W3C SSE client can resume on reconnect.
 
     When events are dropped due to slow consumption, a warning SSE
-    comment is emitted so the client knows to re-query for any gaps.
+    comment is emitted after the next event or keepalive tick so the
+    client knows to re-query for any gaps.  A replay that fills
+    ``_SSE_REPLAY_LIMIT`` is also flagged as possibly truncated.
     """
     try:
         yield ": connected\n\n"
@@ -2004,6 +2017,10 @@ async def _sse_event_generator(session: _SSESession) -> Any:
                 data = await asyncio.wait_for(session.queue.get(), timeout=15)
             except asyncio.TimeoutError:
                 yield ": keepalive\n\n"
+                # Report drops even when the stream is otherwise quiet.
+                warning = _drain_drop_counter(session.drop_lock, session.drop_counter)
+                if warning:
+                    yield warning
                 continue
             if data is None:
                 break

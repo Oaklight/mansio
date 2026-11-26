@@ -20,12 +20,31 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "mansio-c
 
 from mansio import Bus, MemoryBackend
 from mansio.frontends.http import (
+    _SSE_REPLAY_LIMIT,
     _drain_drop_counter,
     _format_sse_event,
+    _replay_missed_events,
     _setup_sse_subscriptions,
     _sse_event_generator,
     _SSESession,
 )
+
+
+async def _collect_replay(session: _SSESession) -> list[str]:
+    return [chunk async for chunk in _replay_missed_events(session)]
+
+
+class _TimeoutThenStopQueue:
+    """Queue stand-in: first ``get()`` times out, the next signals shutdown."""
+
+    def __init__(self) -> None:
+        self._timed_out = False
+
+    async def get(self) -> None:
+        if not self._timed_out:
+            self._timed_out = True
+            raise asyncio.TimeoutError
+        return None
 
 
 class TestDropCounter(unittest.TestCase):
@@ -203,6 +222,111 @@ class TestFormatSseEvent(unittest.TestCase):
     def test_without_id(self):
         result = _format_sse_event("hello", "")
         self.assertEqual(result, "data: hello\n\n")
+
+
+class TestQuietStreamDropWarning(unittest.TestCase):
+    """A stream with no traffic still reports drops on the keepalive tick."""
+
+    def test_drop_warning_emitted_on_keepalive_tick(self):
+        bus = Bus(MemoryBackend())
+        loop = asyncio.new_event_loop()
+        drop_lock = threading.Lock()
+        drop_counter = [3]
+
+        async def _run():
+            session = _SSESession(
+                queue=_TimeoutThenStopQueue(),
+                sub_ids=[],
+                bus=bus,
+                channels=["quiet-ch"],
+                auth_result=None,
+                drop_lock=drop_lock,
+                drop_counter=drop_counter,
+            )
+            return [chunk async for chunk in _sse_event_generator(session)]
+
+        try:
+            events = loop.run_until_complete(_run())
+        finally:
+            loop.close()
+
+        text = "".join(events)
+        self.assertIn(": keepalive", text)
+        self.assertIn(": warning: 3 event(s) dropped (slow consumer)", text)
+        self.assertEqual(drop_counter[0], 0, "Counter should reset after the warning")
+
+    def test_no_warning_on_quiet_stream_without_drops(self):
+        bus = Bus(MemoryBackend())
+        loop = asyncio.new_event_loop()
+        drop_lock = threading.Lock()
+        drop_counter = [0]
+
+        async def _run():
+            session = _SSESession(
+                queue=_TimeoutThenStopQueue(),
+                sub_ids=[],
+                bus=bus,
+                channels=["quiet-ch"],
+                auth_result=None,
+                drop_lock=drop_lock,
+                drop_counter=drop_counter,
+            )
+            return [chunk async for chunk in _sse_event_generator(session)]
+
+        try:
+            events = loop.run_until_complete(_run())
+        finally:
+            loop.close()
+
+        text = "".join(events)
+        self.assertIn(": keepalive", text)
+        self.assertNotIn("warning", text)
+
+
+class TestReplayTruncationWarning(unittest.TestCase):
+    """A replay that fills the limit is flagged as possibly truncated."""
+
+    def _replay(self, bus, channel: str, last_event_id: str) -> list[str]:
+        loop = asyncio.new_event_loop()
+        session = _SSESession(
+            queue=asyncio.Queue(),
+            sub_ids=[],
+            bus=bus,
+            channels=[channel],
+            auth_result=None,
+            last_event_id=last_event_id,
+        )
+        try:
+            return loop.run_until_complete(_collect_replay(session))
+        finally:
+            loop.close()
+
+    def test_warning_when_replay_hits_limit(self):
+        bus = Bus(MemoryBackend())
+        ids = [
+            bus.publish("trunc-ch", "agent-a", "chat", f"m{i}")
+            for i in range(_SSE_REPLAY_LIMIT + 1)
+        ]
+
+        events = self._replay(bus, "trunc-ch", ids[0])
+
+        self.assertEqual(len(events), _SSE_REPLAY_LIMIT + 1)
+        self.assertEqual(
+            events[0],
+            f": warning: replay truncated at {_SSE_REPLAY_LIMIT} "
+            "for channel 'trunc-ch', re-query for more\n\n",
+        )
+        self.assertIn("m1", events[1])
+
+    def test_no_warning_for_short_replay(self):
+        bus = Bus(MemoryBackend())
+        first = bus.publish("short-ch", "agent-a", "chat", "m0")
+        bus.publish("short-ch", "agent-a", "chat", "m1")
+
+        events = self._replay(bus, "short-ch", first)
+
+        self.assertEqual(len(events), 1)
+        self.assertNotIn("warning", "".join(events))
 
 
 if __name__ == "__main__":
