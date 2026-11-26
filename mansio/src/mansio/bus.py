@@ -441,9 +441,9 @@ class Bus:
     def _ensure_sugar_channel(self, channel: str, sender: str) -> None:
         """Auto-create channel metadata for well-known prefixes.
 
-        - ``dm:alice:bob`` → private, owner = sender, ACL = both agents
-        - ``notebook:alice`` → private, owner = alice, ACL = owner-only
-        - ``memory:alice`` → private, owner = alice, ACL = owner-only
+        - ``dm:alice:bob`` → private, owner = sender, ACL = both agents (member)
+        - ``notebook:alice`` → private, owner = alice, ACL = owner-only (owner)
+        - ``memory:alice`` → private, owner = alice, ACL = owner-only (owner)
         - ``broadcast:*`` → public, owner = sender
         - ``_system:*`` → public, owner = ``_system``
         """
@@ -462,14 +462,14 @@ class Bus:
             parts = channel.split(":")
             agents = sorted(parts[1:])  # canonicalize
             acl = [
-                ACLEntry(channel=channel, user_id=a, permission="write", granted_at=now)
+                ACLEntry(channel=channel, user_id=a, permission="member", granted_at=now)
                 for a in agents
             ]
             meta = ChannelMeta(name=channel, owner=sender, visibility="private", created_at=now)
         elif channel.startswith(("notebook:", "memory:")):
             owner = channel.split(":", 1)[1]
             meta = ChannelMeta(name=channel, owner=owner, visibility="private", created_at=now)
-            acl = [ACLEntry(channel=channel, user_id=owner, permission="admin", granted_at=now)]
+            acl = [ACLEntry(channel=channel, user_id=owner, permission="owner", granted_at=now)]
         elif channel.startswith("broadcast:"):
             meta = ChannelMeta(name=channel, owner=sender, visibility="public", created_at=now)
             acl = None

@@ -53,6 +53,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from mansio._vendor.httpserver import App, JSONResponse, Response, StreamingResponse
 from mansio._vendor.structlog import get_logger
+from mansio.authz import ChannelAuthorizer
+from mansio.authz import user_involved as _user_involved
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -116,70 +118,9 @@ _RESERVED_PREFIXES = ("_system:", "dm:", "notebook:", "memory:", "broadcast:")
 _SYSTEM_CHANNEL_RE = re.compile(r"^[\w_][\w:.-]{1,126}[\w]$")
 
 
-_PRIVATE_CHANNEL_PREFIXES = ("notebook:", "memory:")
-
-
 def _now_iso() -> str:
     """Return current UTC time as ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
-
-
-def _is_private_channel(channel: str) -> bool:
-    """Return True if *channel* is a DM or private-prefix channel.
-
-    Private channels are:
-    - ``dm:*``  — direct messages between specific agents
-    - Any channel starting with a ``_PRIVATE_CHANNEL_PREFIXES`` entry
-      (currently ``notebook:`` and ``memory:``).
-
-    Everything else (plain user channels, ``_system:``, ``broadcast:``,
-    and registered-prefix channels) is considered public.
-    """
-    if channel.startswith("dm:"):
-        return True
-    return any(channel.startswith(p) for p in _PRIVATE_CHANNEL_PREFIXES)
-
-
-def _is_channel_member(user_id: str, channel: str) -> bool:
-    """Check if *user_id* is an owner/participant of a private channel.
-
-    Ownership is determined by structural parsing, **not** substring
-    matching, to prevent false positives (e.g., user "notebook" must
-    not match channel ``notebook:alice``).
-
-    Channel formats:
-    - ``notebook:<owner>`` → owner is the part after the first ``:``
-    - ``memory:<owner>``  → same as above
-    - ``dm:<A>:<B>``      → participants are exactly *A* and *B*
-    """
-    if channel.startswith("dm:"):
-        parts = channel.split(":", 2)
-        # dm:A:B → parts = ["dm", "A", "B"]
-        return len(parts) == 3 and user_id in (parts[1], parts[2])
-
-    # notebook:<owner> or memory:<owner>
-    for prefix in _PRIVATE_CHANNEL_PREFIXES:
-        if channel.startswith(prefix):
-            owner = channel[len(prefix) :]
-            return user_id == owner
-
-    return False
-
-
-def _user_involved(user_id: str, channel: str, sender: str) -> bool:
-    """Check if an agent is involved in a message (sender or channel member).
-
-    For **public** channels every authenticated agent is considered
-    involved, so all messages are visible.
-
-    For **private** channels (DMs, notebook, memory) the user must be
-    the sender or a structural member of the channel.
-    """
-    if not _is_private_channel(channel):
-        return True
-    if sender == user_id:
-        return True
-    return _is_channel_member(user_id, channel)
 
 
 def _validate_channel_name(
@@ -234,7 +175,7 @@ def _validate_and_auth_publish(
     channel: str,
     msg_type: str = "",
     token_store: TokenStore | None = None,
-    bus: Bus | None = None,
+    authz: ChannelAuthorizer | None = None,
 ) -> tuple[dict, int] | None:
     """Validate channel name and enforce publish auth.
 
@@ -254,70 +195,11 @@ def _validate_and_auth_publish(
             "message": f"Token bound to '{auth_result}', cannot publish as '{sender}'",
         }, 403
 
-    # System channels: agents can only write to their own system channels
-    if channel.startswith("_system:"):
-        # Allow: _system:agents with msg_type="presence" (SDK _announce())
-        # Allow: _system:cursors:{user_id} (own cursor persistence)
-        # System channels are write-restricted
-        # Deny: _system:agents with arbitrary msg_types
-        allowed_system = (f"_system:cursors:{auth_result}",)
-        if channel == "_system:agents" and msg_type == "presence":
-            pass  # allow SDK presence announcement
-        elif channel not in allowed_system:
-            return {
-                "error": "Forbidden",
-                "message": f"Channel '{channel}' is reserved for system use",
-            }, 403
-
-    # Broadcast channels: the owner and agents granted write/admin may post.
-    # Supertokens were already allowed above (auth_result is not a str).
-    if channel.startswith("broadcast:") and not _broadcast_write_allowed(bus, channel, auth_result):
-        return {
-            "error": "Forbidden",
-            "message": (
-                f"Channel '{channel}' is reserved for the channel owner "
-                "and agents granted write access"
-            ),
-        }, 403
-
-    # Channel ownership: notebook:X and memory:X are private to agent X
-    for prefix in _PRIVATE_CHANNEL_PREFIXES:
-        if channel.startswith(prefix):
-            owner = channel[len(prefix) :]
-            if owner != auth_result:
-                return {
-                    "error": "Forbidden",
-                    "message": f"Channel '{channel}' belongs to agent '{owner}'",
-                }, 403
+    denial = authz.publish_denial(auth_result, channel, msg_type) if authz else None
+    if denial:
+        return {"error": "Forbidden", "message": denial}, 403
 
     return None
-
-
-def _broadcast_write_allowed(bus: Bus | None, channel: str, user_id: str) -> bool:
-    """Return True if *user_id* may write to broadcast channel *channel*.
-
-    The channel owner (its first publisher) and agents holding an explicit
-    write/admin ACL entry may post.  A channel that does not exist yet is
-    created for the first publisher by ``Bus.ensure_channel()``, whose create
-    step is atomic, so two concurrent first publishers cannot both win
-    ownership.  Backends without ChannelStore keep the old supertoken-only
-    rule.
-    """
-    if bus is None:
-        return False
-    try:
-        meta = bus.ensure_channel(channel, owner=user_id)
-        acl = bus.get_acl(channel)
-    except NotImplementedError:
-        return False
-    if meta.owner == user_id:
-        return True
-
-    from mansio.types import permission_allows
-
-    return any(
-        entry.user_id == user_id and permission_allows(entry.permission, "publish") for entry in acl
-    )
 
 
 def _fmt_bytes(n: int) -> str:
@@ -745,6 +627,7 @@ class HttpFrontend:
         self._token_store = token_store
         self._allow_unauthenticated = allow_unauthenticated
         self._bus: Bus | None = None
+        self._authz: ChannelAuthorizer | None = None
         self._app = App(max_body_size=max_body_bytes)
         # user_id → monotonic timestamp of its last presence write. Only
         # touched from the event loop, so it needs no lock.
@@ -810,6 +693,7 @@ class HttpFrontend:
         if self._bus is not None:
             raise RuntimeError("Frontend already attached to a bus")
         self._bus = bus
+        self._authz = ChannelAuthorizer(bus)
         self._setup_middleware()
         self._setup_api_routes()
         self._setup_deletion_routes()
@@ -946,6 +830,8 @@ class HttpFrontend:
         """Register REST API routes (non-SSE)."""
         bus = self._bus
         assert bus is not None
+        authz = self._authz
+        assert authz is not None
         max_query_limit = self._max_query_limit
 
         @self._app.get("/health")
@@ -969,7 +855,7 @@ class HttpFrontend:
                 data["channel"],
                 msg_type=data["msg_type"],
                 token_store=self._token_store,
-                bus=bus,
+                authz=self._authz,
             )
             if auth_error:
                 return auth_error
@@ -1012,9 +898,15 @@ class HttpFrontend:
             # channels they don't belong to.  This also prevents leaking
             # the total message count (issue #251).
             auth_result = request.state.auth_result
-            access_err = _check_channel_read_access(auth_result, channel)
-            if access_err is not None:
-                return access_err
+            if (
+                isinstance(auth_result, str)
+                and channel
+                and not authz.can_read(auth_result, channel)
+            ):
+                return {
+                    "error": "Forbidden",
+                    "message": f"Token for '{auth_result}' cannot query channel '{channel}'",
+                }, 403
 
             msgs = await asyncio.to_thread(
                 bus.query,
@@ -1051,12 +943,16 @@ class HttpFrontend:
             if want_detail:
                 all_detail = await asyncio.to_thread(bus.channels_detail)
                 if isinstance(auth_result, str):
-                    all_detail = _filter_visible_channels_detail(auth_result, all_detail)
+                    all_detail = [
+                        ch for ch in all_detail if authz.can_list_channel(auth_result, ch["name"])
+                    ]
                 return {"channels": all_detail}
 
             all_channels = cast(list[str], await asyncio.to_thread(bus.channels, detail=False))
             if isinstance(auth_result, str):
-                all_channels = _filter_visible_channels(auth_result, all_channels)
+                all_channels = [
+                    ch for ch in all_channels if authz.can_list_channel(auth_result, ch)
+                ]
             return {"channels": all_channels}
 
         self._setup_auth_check_route()
@@ -1107,6 +1003,8 @@ class HttpFrontend:
         """Register DELETE /v1/channels/<channel_name>."""
         bus = self._bus
         assert bus is not None
+        authz = self._authz
+        assert authz is not None
 
         @self._app.delete("/v1/channels/<channel_name>")
         async def delete_channel(request: Request, channel_name: str = "") -> dict | tuple:
@@ -1114,30 +1012,10 @@ class HttpFrontend:
                 return {"error": "Bad Request", "message": "Channel name required"}, 400
 
             auth_result = request.state.auth_result
-
-            # System channels: only supertoken or no-auth can delete
-            if channel_name.startswith("_system:") and isinstance(auth_result, str):
-                return {
-                    "error": "Forbidden",
-                    "message": f"Channel '{channel_name}' is a system channel; "
-                    "only admin tokens can delete system channels",
-                }, 403
-
-            # Scoped tokens: can only delete their own private channels
             if isinstance(auth_result, str):
-                if _is_private_channel(channel_name):
-                    if not _is_channel_member(auth_result, channel_name):
-                        return {
-                            "error": "Forbidden",
-                            "message": f"Token for '{auth_result}' cannot delete "
-                            f"channel '{channel_name}'",
-                        }, 403
-                else:
-                    # Public/user channels: scoped tokens cannot delete
-                    return {
-                        "error": "Forbidden",
-                        "message": "Scoped tokens cannot delete shared channels",
-                    }, 403
+                denial = authz.delete_channel_denial(auth_result, channel_name)
+                if denial:
+                    return {"error": "Forbidden", "message": denial}, 403
 
             try:
                 count = await asyncio.to_thread(bus.delete_channel, channel_name)
@@ -1159,6 +1037,8 @@ class HttpFrontend:
         """Register DELETE /v1/messages/<message_id>."""
         bus = self._bus
         assert bus is not None
+        authz = self._authz
+        assert authz is not None
 
         @self._app.delete("/v1/messages/<message_id>")
         async def delete_message(request: Request, message_id: str = "") -> dict | tuple:
@@ -1177,7 +1057,7 @@ class HttpFrontend:
                         "message": f"Message '{message_id}' not found",
                     }, 404
 
-                if found_msg.sender != auth_result:
+                if not authz.can_delete_message(auth_result, found_msg):
                     return {
                         "error": "Forbidden",
                         "message": f"Token for '{auth_result}' cannot delete messages "
@@ -1561,11 +1441,13 @@ class HttpFrontend:
         """Register GET /v1/channels/<channel>/acl."""
         bus = self._bus
         assert bus is not None
+        authz = self._authz
+        assert authz is not None
 
         @self._app.get("/v1/channels/<channel>/acl")
         async def get_acl(request: Request, channel: str = "") -> dict | tuple:
             auth_result = request.state.auth_result
-            denied = await _require_acl_admin(auth_result, bus, channel)
+            denied = await _require_acl_manage(auth_result, authz, channel)
             if denied:
                 return denied
 
@@ -1600,11 +1482,13 @@ class HttpFrontend:
         """Register PUT /v1/channels/<channel>/acl."""
         bus = self._bus
         assert bus is not None
+        authz = self._authz
+        assert authz is not None
 
         @self._app.put("/v1/channels/<channel>/acl")
         async def set_acl(request: Request, channel: str = "") -> dict | tuple:
             auth_result = request.state.auth_result
-            denied = await _require_acl_admin(auth_result, bus, channel)
+            denied = await _require_acl_manage(auth_result, authz, channel)
             if denied:
                 return denied
 
@@ -1648,11 +1532,13 @@ class HttpFrontend:
         """Register POST /v1/channels/<channel>/acl."""
         bus = self._bus
         assert bus is not None
+        authz = self._authz
+        assert authz is not None
 
         @self._app.post("/v1/channels/<channel>/acl")
         async def add_acl_entry(request: Request, channel: str = "") -> dict | tuple:
             auth_result = request.state.auth_result
-            denied = await _require_acl_admin(auth_result, bus, channel)
+            denied = await _require_acl_manage(auth_result, authz, channel)
             if denied:
                 return denied
 
@@ -1700,13 +1586,15 @@ class HttpFrontend:
         """Register DELETE /v1/channels/<channel>/acl/<user_id>."""
         bus = self._bus
         assert bus is not None
+        authz = self._authz
+        assert authz is not None
 
         @self._app.delete("/v1/channels/<channel>/acl/<user_id>")
         async def remove_acl_entry(
             request: Request, channel: str = "", user_id: str = ""
         ) -> dict | tuple:
             auth_result = request.state.auth_result
-            denied = await _require_acl_admin(auth_result, bus, channel)
+            denied = await _require_acl_manage(auth_result, authz, channel)
             if denied:
                 return denied
 
@@ -1730,6 +1618,8 @@ class HttpFrontend:
         """Register the SSE subscribe routes."""
         bus = self._bus
         assert bus is not None
+        authz = self._authz
+        assert authz is not None
         cors = self._cors_origin
 
         async def _handle_subscribe(
@@ -1743,9 +1633,15 @@ class HttpFrontend:
                 }, 400
 
             auth_result = request.state.auth_result
-            error = _check_subscribe_access(auth_result, ch_list)
-            if error:
-                return error
+            if isinstance(auth_result, str):
+                forbidden = [ch for ch in ch_list if not authz.can_read(auth_result, ch)]
+                if forbidden:
+                    return {
+                        "error": "Forbidden",
+                        "message": (
+                            f"Token for '{auth_result}' cannot subscribe to: {', '.join(forbidden)}"
+                        ),
+                    }, 403
 
             # Parse Last-Event-ID for cursor-based resume
             last_event_id = request.headers.get("last-event-id", "").strip() or None
@@ -1847,14 +1743,16 @@ def _validate_permission(permission: Any) -> tuple[dict, int] | None:
     return None
 
 
-async def _require_acl_admin(auth_result: Any, bus: Bus, channel: str) -> tuple[dict, int] | None:
+async def _require_acl_manage(
+    auth_result: Any, authz: ChannelAuthorizer, channel: str
+) -> tuple[dict, int] | None:
     """Check that the current user may manage *channel*.
 
     Returns an error tuple (dict, status) if denied, or None if allowed.
     Supertokens and no-auth mode always pass.
     """
     if isinstance(auth_result, str) and not await asyncio.to_thread(
-        bus.check_access, channel, auth_result, "manage"
+        authz.can_manage_acl, auth_result, channel
     ):
         return {
             "error": "Forbidden",
@@ -1872,60 +1770,6 @@ def _filter_visible_messages(auth_result: Any, msgs: list[Message]) -> list[Mess
     if not isinstance(auth_result, str):
         return msgs
     return [m for m in msgs if _user_involved(auth_result, m.channel, m.sender)]
-
-
-def _filter_visible_channels(user_id: str, channels: list[str]) -> list[str]:
-    """Return only channels visible to *user_id* (public + own private)."""
-    return [ch for ch in channels if not _is_private_channel(ch) or _is_channel_member(user_id, ch)]
-
-
-def _filter_visible_channels_detail(user_id: str, channels: list[dict]) -> list[dict]:
-    """Return only channel detail dicts visible to *user_id*."""
-    return [
-        ch
-        for ch in channels
-        if not _is_private_channel(ch["name"]) or _is_channel_member(user_id, ch["name"])
-    ]
-
-
-def _check_channel_read_access(auth_result: Any, channel: str | None) -> tuple[dict, int] | None:
-    """Block scoped tokens from querying private channels they don't belong to.
-
-    Returns an error tuple (dict, 403) if the access is denied, or
-    ``None`` if the request should proceed.  Supertokens and no-auth
-    mode always pass.
-    """
-    if (
-        isinstance(auth_result, str)
-        and channel
-        and _is_private_channel(channel)
-        and not _is_channel_member(auth_result, channel)
-    ):
-        return {
-            "error": "Forbidden",
-            "message": f"Token for '{auth_result}' cannot query channel '{channel}'",
-        }, 403
-    return None
-
-
-def _check_subscribe_access(auth_result: Any, ch_list: list[str]) -> tuple[dict, int] | None:
-    """Validate channel access for scoped tokens. Returns error tuple or None.
-
-    Public channels (and ``_system:`` channels) are open to all
-    authenticated agents. Private channels (DMs, notebook, memory)
-    require the agent to appear in the ``:``-delimited segments.
-    """
-    if not isinstance(auth_result, str):
-        return None
-    forbidden = [
-        ch for ch in ch_list if _is_private_channel(ch) and not _is_channel_member(auth_result, ch)
-    ]
-    if forbidden:
-        return {
-            "error": "Forbidden",
-            "message": f"Token for '{auth_result}' cannot subscribe to: {', '.join(forbidden)}",
-        }, 403
-    return None
 
 
 def _setup_sse_subscriptions(
