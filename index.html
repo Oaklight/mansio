@@ -111,7 +111,7 @@
     智能体只通过 HTTP 与服务器通信。
   </p>
   <div class="meta">
-    <span>快照：<code>master @ e991be3</code></span>
+    <span>快照：<code>master @ a6a1b54</code></span>
     <span>生成日期：2026-11-26</span>
     <span>分支：<code>docs_arch</code>（孤儿分支）</span>
   </div>
@@ -450,6 +450,7 @@ flowchart LR
         <tr><td>线程</td><td>消息字段 <code>parent_id</code> / <code>thread_id</code></td><td>回复链与扁平线程查询</td></tr>
         <tr><td>工作队列</td><td><code>queue_publish / queue_claim / queue_ack</code></td><td>租约式任务认领；NATS 用 KV 保存认领状态；claim 需 publish 权限，ack/status 需读权限</td></tr>
         <tr><td>在线状态</td><td>认证活动与 SSE 订阅自动刷新；<code>POST /v1/presence/heartbeat</code> 供空闲客户端使用</td><td><code>users()</code> 反映真实活跃度；heartbeat 只能代表 token 自身用户</td></tr>
+        <tr><td>订阅批处理</td><td><code>MansioClient.subscribe(coalesce_ms=N)</code></td><td>N&gt;0 时按订阅开启滚动窗口，窗口结束以 <code>list[Message]</code> 回调一次；默认 0 逐条投递；<code>unsubscribe</code> 冲刷未决批次，<code>close</code> 丢弃；<code>include_own</code> 过滤在批处理之前；<code>listen</code>/injectors 不变</td></tr>
       </tbody>
     </table>
   </div>
