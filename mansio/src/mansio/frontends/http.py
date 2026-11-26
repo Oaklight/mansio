@@ -1367,12 +1367,21 @@ class HttpFrontend:
 
         @self._app.post("/v1/presence/heartbeat")
         async def presence_heartbeat(request: Request) -> dict | tuple:
+            auth_result = request.state.auth_result
             body = request.json()
             if not body or not isinstance(body, dict):
                 return {"error": "JSON body required"}, 400
             user_id = body.get("user_id", "").strip()
             if not user_id:
                 return {"error": "user_id required"}, 400
+            # A scoped token may only report its own user's presence.
+            # Supertokens (auth_result is None) and no-auth mode (True)
+            # keep acting on behalf of any user, as they do elsewhere.
+            if isinstance(auth_result, str) and user_id != auth_result:
+                return {
+                    "error": "Forbidden",
+                    "message": (f"Token bound to '{auth_result}', cannot heartbeat as '{user_id}'"),
+                }, 403
             metadata = body.get("metadata")
             meta_err = _validate_metadata(metadata)
             if meta_err:
