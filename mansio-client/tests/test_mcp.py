@@ -237,6 +237,27 @@ class TestCallTool(unittest.TestCase):
             "general",
             "hello",
             msg_type="chat",
+            metadata=None,
+            parent_id=None,
+            intent=None,
+        )
+
+    def test_send_with_metadata(self) -> None:
+        self.client.channel_send.return_value = "msg-45"
+        _call_tool(
+            self.client,
+            "mansio_send",
+            {
+                "channel": "general",
+                "content": "hello",
+                "metadata": {"correlation_id": "c-1", "priority": "high"},
+            },
+        )
+        self.client.channel_send.assert_called_once_with(
+            "general",
+            "hello",
+            msg_type="chat",
+            metadata={"correlation_id": "c-1", "priority": "high"},
             parent_id=None,
             intent=None,
         )
@@ -257,6 +278,7 @@ class TestCallTool(unittest.TestCase):
             "general",
             "reply",
             msg_type="note",
+            metadata=None,
             parent_id="msg-1",
             intent=None,
         )
@@ -276,6 +298,7 @@ class TestCallTool(unittest.TestCase):
             "general",
             "ping",
             msg_type="chat",
+            metadata=None,
             parent_id=None,
             intent="REQUIRES_RESPONSE",
         )
@@ -724,6 +747,12 @@ class TestToolDefinitions(unittest.TestCase):
             "mansio_user_status",
         }
         assert expected <= names
+
+    def test_send_schema_has_optional_metadata(self) -> None:
+        tool = next(t for t in _TOOLS if t["name"] == "mansio_send")
+        schema = tool["inputSchema"]
+        assert schema["properties"]["metadata"]["type"] == "object"
+        assert "metadata" not in schema.get("required", [])
 
     def test_every_tool_is_dispatchable(self) -> None:
         assert {t["name"] for t in _TOOLS} == set(_DISPATCH)
