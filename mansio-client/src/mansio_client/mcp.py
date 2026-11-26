@@ -20,7 +20,13 @@ from collections.abc import Callable
 from typing import Any
 
 from mansio_client import MansioClient
-from mansio_client.types import ACLEntry, ALLOWED_PERMISSIONS, ClaimResult, Message
+from mansio_client.types import (
+    ACLEntry,
+    ALLOWED_PERMISSIONS,
+    ChannelMeta,
+    ClaimResult,
+    Message,
+)
 
 # ── Protocol Constants ────────────────────────────────────────────
 
@@ -448,6 +454,24 @@ _TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "mansio_channel_meta",
+        "description": (
+            "Return a channel's metadata: owner, visibility, and created_at. "
+            "A 404 means the channel does not exist or you may not read it; "
+            "the server deliberately makes those indistinguishable."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string",
+                    "description": "Channel name.",
+                },
+            },
+            "required": ["channel"],
+        },
+    },
+    {
         "name": "mansio_message_delete",
         "description": "Delete a single message by ID.",
         "inputSchema": {
@@ -800,6 +824,19 @@ def _tool_channel_delete(client: MansioClient, args: dict[str, Any]) -> Any:
     return {"deleted": count}
 
 
+def _channel_meta_to_dict(meta: ChannelMeta) -> dict[str, Any]:
+    return {
+        "name": meta.name,
+        "owner": meta.owner,
+        "visibility": meta.visibility,
+        "created_at": meta.created_at,
+    }
+
+
+def _tool_channel_meta(client: MansioClient, args: dict[str, Any]) -> Any:
+    return _channel_meta_to_dict(client.channel_meta(args["channel"]))
+
+
 def _tool_message_delete(client: MansioClient, args: dict[str, Any]) -> Any:
     client.message_delete(args["message_id"])
     return {"status": "ok"}
@@ -866,6 +903,7 @@ _DISPATCH: dict[str, Callable[[MansioClient, dict[str, Any]], Any]] = {
     "mansio_heartbeat": _tool_heartbeat,
     "mansio_channel_create": _tool_channel_create,
     "mansio_channel_delete": _tool_channel_delete,
+    "mansio_channel_meta": _tool_channel_meta,
     "mansio_message_delete": _tool_message_delete,
     "mansio_acl_get": _tool_acl_get,
     "mansio_acl_set": _tool_acl_set,

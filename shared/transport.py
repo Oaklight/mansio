@@ -17,7 +17,7 @@ from typing import Literal, NamedTuple, overload
 
 from __PKG__._vendor.httpclient import Client as HttpClient
 from __PKG__._vendor.sse import SSEClient
-from __PKG__.types import ACLEntry, ClaimResult, Message, UserPresence
+from __PKG__.types import ACLEntry, ChannelMeta, ClaimResult, Message, UserPresence
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +338,25 @@ class HttpTransport:
         resp = self._http.post(f"{self._base_url}/v1/channels", json=body)
         self._check_response(resp)
         return resp.json()["channel"]
+
+    def channel_meta(self, channel: str) -> ChannelMeta:
+        """Return a channel's metadata.
+
+        Raises:
+            MansioAPIError: if the channel does not exist or the caller may
+                not read it; the server returns 404 for both.
+        """
+        resp = self._http.get(
+            f"{self._base_url}/v1/channels/{urllib.parse.quote(channel, safe='')}/meta"
+        )
+        self._check_response(resp)
+        data = resp.json()["channel"]
+        return ChannelMeta(
+            name=data["name"],
+            owner=data["owner"],
+            visibility=data["visibility"],
+            created_at=data["created_at"],
+        )
 
     def channel_delete(self, name: str) -> int:
         """Delete a channel and all its messages.
