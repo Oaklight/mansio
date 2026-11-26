@@ -339,11 +339,28 @@ flowchart TD
     <table>
       <thead><tr><th>身份</th><th>可由谁创建</th><th>可写频道</th><th>说明</th></tr></thead>
       <tbody>
-        <tr><td>普通 token（绑定 <code>user_id</code>）</td><td>Admin API / 管理面板</td><td>自己的 <code>notebook:X</code>、<code>memory:X</code>、<code>dm:*</code>、普通频道；<code>broadcast:{topic}</code> 仅当其为频道 owner 或持有 write/admin ACL</td><td>发布时 <code>sender</code> 必须与 token 绑定用户一致；presence heartbeat 同理</td></tr>
+        <tr><td>普通 token（绑定 <code>user_id</code>）</td><td>Admin API / 管理面板</td><td>自己的 <code>notebook:X</code>、<code>memory:X</code>、<code>dm:*</code>、普通频道；<code>broadcast:{topic}</code> 仅当其为频道 owner 或持有 <code>publish</code>/<code>manage</code> ACL（<code>write</code>/<code>admin</code> 为兼容别名）</td><td>发布时 <code>sender</code> 必须与 token 绑定用户一致；presence heartbeat 同理</td></tr>
         <tr><td>supertoken（<code>user_id</code> 为空）</td><td>Admin API <code>POST /api/tokens {"supertoken": true}</code>，或 <code>TokenStore.create_token(user_id=None)</code>（#328 起管理面板也可创建）</td><td>任意用户身份；可写 <code>broadcast:*</code> 与 <code>_system:*</code>（broadcast 不再仅限 supertoken）</td><td><code>supertoken</code> 与 <code>user_id</code> 互斥；<code>supertoken</code> 必须是布尔值</td></tr>
         <tr><td>无认证模式</td><td><code>--no-auth</code> 或 <code>allow_unauthenticated=True</code></td><td>任意</td><td>仅本地开发；绑定到非回环地址时启动守卫会拒绝</td></tr>
       </tbody>
     </table>
+  </div>
+  <div class="panel">
+    <table>
+      <thead><tr><th>权限字符串</th><th>授予的动词</th><th>类型</th></tr></thead>
+      <tbody>
+        <tr><td><code>read</code></td><td>read</td><td>动词：读取频道与消息</td></tr>
+        <tr><td><code>publish</code></td><td>publish</td><td>动词：发布消息</td></tr>
+        <tr><td><code>delete</code></td><td>delete</td><td>动词：删除消息或频道</td></tr>
+        <tr><td><code>manage</code></td><td>manage</td><td>动词：管理频道 ACL 与可见性</td></tr>
+        <tr><td><code>viewer</code></td><td>read</td><td>角色预设</td></tr>
+        <tr><td><code>member</code></td><td>read, publish</td><td>角色预设；新 ACL 条目的默认值</td></tr>
+        <tr><td><code>owner</code></td><td>read, publish, delete, manage</td><td>角色预设</td></tr>
+        <tr><td><code>write</code></td><td>read, publish</td><td>旧值，按 <code>member</code> 解释</td></tr>
+        <tr><td><code>admin</code></td><td>read, publish, delete, manage</td><td>旧值，按 <code>owner</code> 解释</td></tr>
+      </tbody>
+    </table>
+    <p class="sub" style="margin:12px 0 0">执行点：<code>Bus.publish(enforce_acl=True)</code> 检查 <code>publish</code>；删除检查 <code>delete</code>；HTTP ACL 端点要求 <code>manage</code>，并接受预设、动词或旧值；<code>broadcast:*</code> 写入检查 <code>publish</code>。<code>check_access(required="write"|"admin")</code> 仍分别映射为 <code>publish</code> / <code>manage</code>。</p>
   </div>
 </section>
 
