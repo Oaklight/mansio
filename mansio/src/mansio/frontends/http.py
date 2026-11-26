@@ -1838,7 +1838,7 @@ def _validate_permission(permission: Any) -> tuple[dict, int] | None:
     """Validate an ACL permission string against the presets and verbs."""
     from mansio.types import ALLOWED_PERMISSIONS
 
-    if permission not in ALLOWED_PERMISSIONS:
+    if not isinstance(permission, str) or permission not in ALLOWED_PERMISSIONS:
         allowed = ", ".join(sorted(ALLOWED_PERMISSIONS))
         return {
             "error": "Bad Request",
