@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Literal, overload
 from mansio_client.transport import HttpTransport
 from mansio_client.types import (
     ACLEntry,
+    ChannelMeta,
     UserPresence,
     ClaimResult,
     Message,
@@ -479,6 +480,15 @@ class MansioClient:
     def channel_delete(self, name: str) -> int:
         """Delete a channel. Returns number of messages deleted."""
         return self._transport.channel_delete(name)
+
+    def channel_meta(self, channel: str) -> ChannelMeta:
+        """Return a channel's metadata (owner, visibility, created_at).
+
+        Raises:
+            MansioAPIError: if the channel does not exist or the caller may
+                not read it; the server returns 404 for both.
+        """
+        return self._transport.channel_meta(channel)
 
     def message_delete(self, message_id: str) -> bool:
         """Delete a single message by ID."""

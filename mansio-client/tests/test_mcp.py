@@ -14,6 +14,7 @@ from mansio_client import MansioAPIError, MansioClient
 from mansio_client.types import (
     ACLEntry,
     ALLOWED_PERMISSIONS,
+    ChannelMeta,
     ClaimResult,
     Message,
     UserPresence,
@@ -663,6 +664,43 @@ class TestCallTool(unittest.TestCase):
         assert result == {"deleted": 5}
         self.client.channel_delete.assert_called_once_with("old-ch")
 
+    def test_channel_meta(self) -> None:
+        self.client.channel_meta.return_value = ChannelMeta(
+            name="ops",
+            owner="alice",
+            visibility="private",
+            created_at="2026-01-01T00:00:00Z",
+        )
+        result = _call_tool(self.client, "mansio_channel_meta", {"channel": "ops"})
+        assert result == {
+            "name": "ops",
+            "owner": "alice",
+            "visibility": "private",
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        self.client.channel_meta.assert_called_once_with("ops")
+
+    def test_channel_meta_404_surfaces_as_api_error(self) -> None:
+        self.client.channel_meta.side_effect = MansioAPIError(
+            404, "Channel 'ops' not found"
+        )
+        resp = _handle_request(
+            self.client,
+            {
+                "jsonrpc": "2.0",
+                "id": 8,
+                "method": "tools/call",
+                "params": {
+                    "name": "mansio_channel_meta",
+                    "arguments": {"channel": "ops"},
+                },
+            },
+        )
+        assert resp is not None
+        assert resp["result"]["isError"] is True
+        assert "not found" in resp["result"]["content"][0]["text"]
+        self.client.channel_meta.assert_called_once_with("ops")
+
     def test_message_delete(self) -> None:
         self.client.message_delete.return_value = True
         result = _call_tool(
@@ -780,6 +818,12 @@ class TestToolDefinitions(unittest.TestCase):
         schema = tool["inputSchema"]
         assert schema["properties"]["after"]["type"] == "string"
         assert "after" not in schema.get("required", [])
+
+    def test_channel_meta_schema_requires_channel(self) -> None:
+        tool = next(t for t in _TOOLS if t["name"] == "mansio_channel_meta")
+        schema = tool["inputSchema"]
+        assert list(schema["properties"]) == ["channel"]
+        assert schema["required"] == ["channel"]
 
     def test_every_tool_is_dispatchable(self) -> None:
         assert {t["name"] for t in _TOOLS} == set(_DISPATCH)
