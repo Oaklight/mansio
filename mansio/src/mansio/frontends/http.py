@@ -1386,6 +1386,8 @@ class HttpFrontend:
         """Register channel metadata routes (create, get)."""
         bus = self._bus
         assert bus is not None
+        authz = self._authz
+        assert authz is not None
 
         @self._app.post("/v1/channels")
         async def create_channel(request: Request) -> dict | tuple:
@@ -1439,6 +1441,16 @@ class HttpFrontend:
 
         @self._app.get("/v1/channels/<channel>/meta")
         async def get_channel_meta(request: Request, channel: str = "") -> dict | tuple:
+            auth_result = request.state.auth_result
+            if isinstance(auth_result, str) and not authz.can_read(auth_result, channel):
+                # 404, not 403: a denied caller must not learn from the
+                # status code that a private channel exists.  The message is
+                # the same one an unknown channel returns.
+                return {
+                    "error": "Not Found",
+                    "message": f"Channel '{channel}' not found",
+                }, 404
+
             try:
                 meta = await asyncio.to_thread(bus.get_channel_meta, channel)
             except NotImplementedError:
