@@ -53,7 +53,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 from mansio._vendor.httpserver import App, JSONResponse, Response, StreamingResponse
 from mansio._vendor.structlog import get_logger
-from mansio.authz import ChannelAuthorizer, dm_channel_error, dm_participants
+from mansio.authz import (
+    DM_NAME_EXPECTED,
+    DM_PREFIX,
+    ChannelAuthorizer,
+    dm_channel_error,
+    dm_participants,
+)
 from mansio.authz import user_involved as _user_involved
 
 if TYPE_CHECKING:
@@ -123,13 +129,24 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _invalid_dm_name(channel: str) -> bool:
+    """True if *channel* uses the ``dm:`` prefix but is not a valid DM name.
+
+    Combines the structural rule shared with the authorization predicates
+    (``mansio.authz``) with the character rule of the generic system channel
+    pattern, so a name accepted here can always be published to later.
+    """
+    return channel.startswith(DM_PREFIX) and (
+        dm_channel_error(channel) is not None or not _SYSTEM_CHANNEL_RE.match(channel)
+    )
+
+
 def _validate_channel_name(
     channel: str, token_store: TokenStore | None = None
 ) -> tuple[dict, int] | None:
     """Validate channel name. Returns error tuple or None if OK."""
-    dm_error = dm_channel_error(channel)
-    if dm_error:
-        return {"error": "Bad Request", "message": dm_error}, 400
+    if _invalid_dm_name(channel):
+        return {"error": "Bad Request", "message": DM_NAME_EXPECTED}, 400
 
     is_reserved = any(channel.startswith(p) for p in _RESERVED_PREFIXES)
 
@@ -457,9 +474,8 @@ def _parse_query_params(request: Any, max_limit: int) -> dict:
             "_status": 400,
         }
 
-    dm_error = dm_channel_error(channel)
-    if dm_error:
-        return {"error": "Bad Request", "message": dm_error, "_status": 400}
+    if _invalid_dm_name(channel):
+        return {"error": "Bad Request", "message": DM_NAME_EXPECTED, "_status": 400}
 
     after = (request.query_params.get("after") or [None])[0]
     msg_type = (request.query_params.get("msg_type") or [None])[0]
@@ -1378,9 +1394,10 @@ class HttpFrontend:
             if not name:
                 return {"error": "Bad Request", "message": "'name' is required"}, 400
 
-            dm_error = dm_channel_error(name)
-            if dm_error:
-                return {"error": "Bad Request", "message": dm_error}, 400
+            if name.startswith(DM_PREFIX):
+                error = _validate_channel_name(name, token_store=self._token_store)
+                if error:
+                    return error
 
             auth_result = request.state.auth_result
             owner = body.get("owner", "")
@@ -1643,11 +1660,10 @@ class HttpFrontend:
                 }, 400
 
             for ch in ch_list:
-                dm_error = dm_channel_error(ch)
-                if dm_error:
+                if _invalid_dm_name(ch):
                     return {
                         "error": "Bad Request",
-                        "message": f"{dm_error} (got '{ch}')",
+                        "message": f"{DM_NAME_EXPECTED} (got '{ch}')",
                     }, 400
 
             auth_result = request.state.auth_result
