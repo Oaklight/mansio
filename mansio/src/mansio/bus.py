@@ -134,9 +134,11 @@ class Bus:
         queue: bool = False,
         parent_id: str | None = None,
         intent: str | None = None,
-        enforce_acl: bool = False,
     ) -> str:
         """Publish a message to a channel.
+
+        The Bus is auth-unaware: a frontend authorizes the sender before
+        calling this method.
 
         Args:
             channel: Target channel name.
@@ -147,7 +149,6 @@ class Bus:
             parent_id: Optional ID of the message being replied to.
                 Server auto-computes ``thread_id`` from the parent.
             intent: Optional intent label for semantic filtering.
-            enforce_acl: If True, check publish permission before storing.
 
         Returns:
             The message ID.
@@ -158,15 +159,10 @@ class Bus:
         Raises:
             ValueError: If parent_id references a non-existent message
                 or a message in a different channel.
-            PermissionError: If enforce_acl is True and sender lacks
-                publish permission.
         """
         # Auto-create channel metadata for sugar prefixes
         if isinstance(self._backend, ChannelStore):
             self._ensure_sugar_channel(channel, sender)
-
-        if enforce_acl and not self.check_access(channel, sender, "publish"):
-            raise PermissionError(f"agent '{sender}' lacks publish permission on '{channel}'")
 
         msg_id = _uuid7()
         timestamp = _now_iso()
@@ -224,10 +220,10 @@ class Bus:
         thread_id: str | None = None,
         intent: str | None = None,
         offset: int = 0,
-        *,
-        user_id: str | None = None,
     ) -> list[Message]:
         """Retrieve messages from a channel.
+
+        The Bus is auth-unaware: a frontend authorizes the reader first.
 
         Args:
             channel: Channel to read from.
@@ -239,17 +235,10 @@ class Bus:
             thread_id: If provided, only return messages in this thread.
             intent: If provided, only return messages with this intent.
             offset: Number of messages to skip before returning results.
-            user_id: If provided, enforce read ACL for this agent.
 
         Returns:
             Messages in chronological order (oldest first).
-
-        Raises:
-            PermissionError: If user_id is provided and the agent
-                lacks read permission.
         """
-        if user_id is not None and not self.check_access(channel, user_id, "read"):
-            raise PermissionError(f"agent '{user_id}' lacks read permission on '{channel}'")
         return self._backend.query(
             channel,
             after=after,
@@ -277,8 +266,6 @@ class Bus:
         self,
         channel: str,
         callback: Callable[[Message], None],
-        *,
-        user_id: str | None = None,
     ) -> str:
         """Register a callback for new messages on a channel.
 
@@ -296,17 +283,10 @@ class Bus:
         Args:
             channel: Channel to watch.
             callback: Function called with each new Message.
-            user_id: If provided, enforce read ACL for this agent.
 
         Returns:
             Subscription ID for use with unsubscribe().
-
-        Raises:
-            PermissionError: If user_id is provided and the agent
-                lacks read permission.
         """
-        if user_id is not None and not self.check_access(channel, user_id, "read"):
-            raise PermissionError(f"agent '{user_id}' lacks read permission on '{channel}'")
         sub_id = uuid.uuid4().hex[:8]
         with self._subs_lock:
             self._subs[channel][sub_id] = callback
@@ -593,26 +573,22 @@ class Bus:
             )
         return self._backend
 
-    def delete_channel(self, channel: str, *, user_id: str | None = None) -> int:
+    def delete_channel(self, channel: str) -> int:
         """Delete a channel and all its messages.
 
         Also removes any in-process subscriptions for the channel.
+        The Bus is auth-unaware: a frontend authorizes the delete first.
 
         Args:
             channel: Channel name to delete.
-            user_id: If provided, enforce the delete ACL verb for this agent.
 
         Returns:
             Number of messages deleted.
 
         Raises:
             NotImplementedError: If backend is not Deletable.
-            PermissionError: If user_id is provided and the agent
-                lacks delete permission.
         """
         dl = self._require_deletable()
-        if user_id is not None and not self.check_access(channel, user_id, "delete"):
-            raise PermissionError(f"agent '{user_id}' lacks delete permission on '{channel}'")
         count = dl.delete_channel(channel)
         # Clean up subscriptions
         with self._subs_lock:
@@ -625,33 +601,22 @@ class Bus:
             self._backend.delete_channel_meta(channel)
         return count
 
-    def delete_message(self, message_id: str, *, user_id: str | None = None) -> bool:
+    def delete_message(self, message_id: str) -> bool:
         """Delete a single message by ID.
 
-        When *user_id* is provided, the agent must either be the
-        message sender or have the delete verb on the message's channel.
+        The Bus is auth-unaware: a frontend checks sender ownership or the
+        delete verb before calling this method.
 
         Args:
             message_id: ID of the message to delete.
-            user_id: If provided, enforce ownership or the delete verb.
 
         Returns:
             True if the message was found and deleted.
 
         Raises:
             NotImplementedError: If backend is not Deletable.
-            PermissionError: If user_id is provided and the agent
-                is neither the sender nor allowed to delete on the channel.
         """
         dl = self._require_deletable()
-        if user_id is not None:
-            msg = self._backend.get_message(message_id)
-            if (
-                msg is not None
-                and msg.sender != user_id
-                and not self.check_access(msg.channel, user_id, "delete")
-            ):
-                raise PermissionError(f"agent '{user_id}' cannot delete message '{message_id}'")
         return dl.delete_message(message_id)
 
     # ── Presence (optional — Presenceable backends only) ─────

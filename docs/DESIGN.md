@@ -212,8 +212,7 @@ class Bus:
 
     # 核心操作
     def publish(self, channel, sender, msg_type, payload, metadata=None,
-                *, queue=False, parent_id=None, intent=None,
-                enforce_acl=False) -> str
+                *, queue=False, parent_id=None, intent=None) -> str
     def query(self, channel, after=None, limit=100, ...) -> list[Message]
     def subscribe(self, channel, callback) -> str
     def unsubscribe(self, subscription_id) -> None
@@ -245,7 +244,7 @@ class Bus:
 - ✅ In-process pub/sub（作为通用基线）
 - ✅ 吞吐量指标采集
 - ✅ 发布后对 system channel 执行压缩策略
-- ✅ 可选的发布期 ACL 检查（`enforce_acl=True`），委托给 backend 的 `ChannelStore`
+- ❌ 不对消息操作做授权（由 Frontend 的策略层负责；`check_access` 是策略查询，不是强制执行）
 - ❌ 不做认证（由 Frontend 通过 `TokenStore` 负责）
 - ❌ 不做 channel 命名验证（由 Frontend 负责）
 - ❌ 不管理 agent 身份（由 Client SDK 负责）
@@ -375,7 +374,7 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 
 旧等级 `read`、`write`、`admin` 仍然有效，分别映射到 `viewer`、`member`、`owner`。`check_access()` 同样接受旧参数 `write` 和 `admin`，分别视为 `publish` 和 `manage`（[#247](https://github.com/Oaklight/mansio/issues/247)）。
 
-消息路由调用 `Bus.publish` 和 `Bus.query` 时并未传入触发通用 ACL 检查的参数，因此 ACL 条目不影响普通频道上的消息访问。唯一例外是 `broadcast:*` 的写入：发布时会检查频道所有者以及任何授予 `publish` 的条目（[#298](https://github.com/Oaklight/mansio/issues/298)）。
+Bus 不暴露任何授权参数：Frontend 在调用 `Bus.publish` / `Bus.query` / 删除方法之前先完成授权，因此 ACL 条目不影响这些普通消息操作的访问。唯一例外是 `broadcast:*` 的写入：Frontend 策略层会检查频道所有者以及任何授予 `publish` 的条目（[#298](https://github.com/Oaklight/mansio/issues/298)）。
 
 ##### Notebook vs Memory（认知心理学视角）
 

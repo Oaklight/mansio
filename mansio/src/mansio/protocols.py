@@ -303,8 +303,9 @@ class ChannelStore(Protocol):
     """Optional protocol for backends that support explicit channel metadata and ACL.
 
     Backends implementing this protocol store channel ownership, visibility,
-    and per-agent access control entries. The Bus layer consults this for
-    authorization decisions.
+    and per-agent access control entries. The frontend policy layer
+    (``mansio.authz``) consults this for authorization decisions; the Bus
+    itself is auth-unaware.
     """
 
     def create_channel(self, meta: ChannelMeta, acl: list[ACLEntry] | None = None) -> None:
