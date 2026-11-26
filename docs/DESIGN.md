@@ -376,6 +376,8 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 
 Bus 不暴露任何授权参数：Frontend 在调用 `Bus.publish` / `Bus.query` / 删除方法之前先完成授权，因此 ACL 条目不影响这些普通消息操作的访问。唯一例外是 `broadcast:*` 的写入：Frontend 策略层会检查频道所有者以及任何授予 `publish` 的条目（[#298](https://github.com/Oaklight/mansio/issues/298)）。
 
+**工作队列（`/v1/queue/*`）**：claim 需要该频道的 `publish` 规则；ack 与查询 claim 状态需要读权限。被拒绝的调用方得到的响应与"ack 未成功"或"消息没有队列状态"完全相同，因此不会确认私有消息是否存在。claim 不会为调用方创建 `broadcast:*` 频道。
+
 ##### Notebook vs Memory（认知心理学视角）
 
 ```
