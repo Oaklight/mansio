@@ -3,6 +3,8 @@
 import argparse
 import json
 import os
+import select
+import signal
 import socket
 import subprocess
 import sys
@@ -10,8 +12,10 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
+from mansio_client import MansioClient
 
 from mansio import Bus, MansioServer, MemoryBackend
 from mansio.cli import (
@@ -661,6 +665,71 @@ class TestClientErrorReporting:
         assert result.returncode == 1
         assert "error: cannot reach http://127.0.0.1:1" in result.stderr
         assert "Traceback" not in result.stderr
+
+
+class TestMansioClientCliFollow:
+    """Exercises the mansio-client CLI's poll --follow over a real SSE server.
+
+    Lives in the server suite because the client-only CI job cannot start a
+    server. The subprocess runs ``python -m mansio_client.cli`` with this
+    repository on PYTHONPATH rather than an installed console script.
+    """
+
+    def test_follow_streams_new_messages_only(self, http_server_url: str) -> None:
+        repo = Path(__file__).resolve().parents[2]
+        env = dict(os.environ)
+        paths = [
+            str(repo / "mansio-client" / "src"),
+            str(repo / "mansio" / "src"),
+        ]
+        if env.get("PYTHONPATH"):
+            paths.append(env["PYTHONPATH"])
+        env["PYTHONPATH"] = os.pathsep.join(paths)
+
+        channel = "follow-ch"
+        seed = MansioClient(http_server_url, "follow-seed")
+        seed.channel_send(channel, "before")
+        seed.close()
+
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "mansio_client.cli",
+                "-s",
+                http_server_url,
+                "--user-id",
+                "follower",
+                "poll",
+                "-c",
+                channel,
+                "--follow",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        try:
+            sender = MansioClient(http_server_url, "follow-sender")
+            ready = False
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline and not ready:
+                sender.channel_send(channel, "live")
+                ready, _, _ = select.select([proc.stdout], [], [], 0.5)
+            sender.close()
+
+            assert ready, "poll --follow produced no output within 15s"
+            msg = json.loads(proc.stdout.readline())
+            assert msg["payload"] == "live"
+            assert msg["sender"] == "follow-sender"
+
+            proc.send_signal(signal.SIGINT)
+            assert proc.wait(timeout=5) == 0
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
 
 
 # ── Serve Startup and Network Exposure Guard ──────────────────────
