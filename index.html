@@ -313,6 +313,7 @@ flowchart LR
     认证在 Frontend 中间件完成；授权分两层：结构化的频道命名规则，以及频道元数据中的 ACL 条目。
     <code>/health</code> 与 <code>/v1/auth/check</code> 是公开路径。
     <code>broadcast:*</code> 的写入同时检查频道 owner 与 ACL；频道尚不存在时，首个发布者成为 owner。
+    授权策略集中在 <code>mansio/authz.py</code> 的 <code>ChannelAuthorizer</code>；Frontend 认证后把发布、查询、订阅、频道列表、删除与 ACL 判定交给它。内置频道类型在创建时写入预设 ACL：<code>dm:*</code> 写入 <code>member</code>，<code>notebook:*</code> / <code>memory:*</code> 写入 <code>owner</code>。supertoken 与 no-auth 在 Frontend 直接放行，不进入该策略。
   </p>
   <div class="panel">
     <div class="mermaid">
@@ -328,18 +329,18 @@ flowchart TD
   VAL -->|False| E401
   VAL -->|"str user_id"| SCOPED["auth_result = user_id"]
   VAL -->|"None (supertoken)"| SUPER["auth_result = None"]
-  SCOPED --> RULES["结构规则: _system:* / notebook:X / memory:X / broadcast:*"]
-  SUPER --> RULES
-  OPEN --> RULES
-  RULES --> ACL["ACL 端点: 频道元数据 + 条目"]
-  ACL --> HANDLER["业务处理器"]
+  SCOPED --> AUTHZ["authz.ChannelAuthorizer: 结构规则 + 频道类型预设 + ACL"]
+  AUTHZ --> HANDLER["业务处理器"]
+  SUPER --> BYPASS["Frontend 直接放行"]
+  OPEN --> BYPASS
+  BYPASS --> HANDLER
     </div>
   </div>
   <div class="panel">
     <table>
       <thead><tr><th>身份</th><th>可由谁创建</th><th>可写频道</th><th>说明</th></tr></thead>
       <tbody>
-        <tr><td>普通 token（绑定 <code>user_id</code>）</td><td>Admin API / 管理面板</td><td>自己的 <code>notebook:X</code>、<code>memory:X</code>、<code>dm:*</code>、普通频道；<code>broadcast:{topic}</code> 仅当其为频道 owner 或持有 <code>publish</code>/<code>manage</code> ACL（<code>write</code>/<code>admin</code> 为兼容别名）</td><td>发布时 <code>sender</code> 必须与 token 绑定用户一致；presence heartbeat 同理</td></tr>
+        <tr><td>普通 token（绑定 <code>user_id</code>）</td><td>Admin API / 管理面板</td><td>自己的 <code>notebook:X</code> / <code>memory:X</code>、作为成员的 <code>dm:{a}:{b}</code>、普通频道；<code>broadcast:{topic}</code> 仅当其为频道 owner 或持有 <code>publish</code>/<code>manage</code> ACL（<code>write</code>/<code>admin</code> 为兼容别名）</td><td>发布时 <code>sender</code> 必须与 token 绑定用户一致；presence heartbeat 同理</td></tr>
         <tr><td>supertoken（<code>user_id</code> 为空）</td><td>Admin API <code>POST /api/tokens {"supertoken": true}</code>，或 <code>TokenStore.create_token(user_id=None)</code>（#328 起管理面板也可创建）</td><td>任意用户身份；可写 <code>broadcast:*</code> 与 <code>_system:*</code>（broadcast 不再仅限 supertoken）</td><td><code>supertoken</code> 与 <code>user_id</code> 互斥；<code>supertoken</code> 必须是布尔值</td></tr>
         <tr><td>无认证模式</td><td><code>--no-auth</code> 或 <code>allow_unauthenticated=True</code></td><td>任意</td><td>仅本地开发；绑定到非回环地址时启动守卫会拒绝</td></tr>
       </tbody>
@@ -520,6 +521,7 @@ flowchart TB
       <thead><tr><th>路径</th><th>职责</th><th>关键符号</th></tr></thead>
       <tbody>
         <tr><td><code>mansio/src/mansio/bus.py</code></td><td>路由与编排：消息 ID、订阅分发、压缩、能力检查</td><td><code>Bus</code>, <code>SQLiteBus</code></td></tr>
+        <tr><td><code>mansio/src/mansio/authz.py</code></td><td>频道授权策略：结构规则、频道类型预设、ACL 判定；Frontend 共用</td><td><code>ChannelAuthorizer</code>, <code>is_private_channel</code>, <code>is_channel_member</code>, <code>user_involved</code>, <code>broadcast_write_allowed</code></td></tr>
         <tr><td><code>mansio/src/mansio/protocols.py</code></td><td>接口契约</td><td><code>Backend</code>, <code>ChannelStore</code>, <code>Watchable</code>, <code>Deletable</code>, <code>Presenceable</code>, <code>Compactable</code></td></tr>
         <tr><td><code>mansio/src/mansio/types.py</code></td><td>不可变数据模型</td><td><code>Message</code>, <code>UserPresence</code>, <code>ACLEntry</code>, <code>ChannelMeta</code>, <code>ClaimResult</code></td></tr>
         <tr><td><code>mansio/src/mansio/server.py</code></td><td>Bus 与 Frontend 的编排器</td><td><code>MansioServer</code></td></tr>
