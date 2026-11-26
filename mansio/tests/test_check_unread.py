@@ -80,9 +80,12 @@ class TestCheckUnread:
             assert unread["general"] == 1
 
     def test_excludes_system_channels(self, server_url: str) -> None:
+        with MansioClient(server_url, "sender-agent") as sender:
+            sender.channel_send("general", "visible")
+
         with MansioClient(server_url, "test-agent") as client:
-            client.channel_send("general", "visible")
             unread = client.check_unread()
+            assert unread.get("general") == 1
             assert not any(ch.startswith("_system:") for ch in unread)
 
 
