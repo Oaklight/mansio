@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Literal, overload
+import threading
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Literal, cast, overload
 
 from mansio_client.transport import HttpTransport
 from mansio_client.types import (
@@ -21,17 +23,86 @@ from mansio_client.types import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from mansio_client.injectors import Injector
 
 _log = logging.getLogger(__name__)
+
+_TIMER_FACTORY = threading.Timer
+"""Timer factory used by coalesced subscriptions; tests inject a fake."""
 
 
 def _tags_match(msg_tags: list[str] | None, filter_tags: list[str]) -> bool:
     if not msg_tags:
         return False
     return all(t in msg_tags for t in filter_tags)
+
+
+class _Coalescer:
+    """Tumbling-window batch delivery for one subscription.
+
+    The window starts with the first buffered message and flushes once, when
+    the timer fires. Messages arriving after a flush start a new window.
+    Own-message filtering happens in the transport before this class sees a
+    message, so own messages never enter a batch.
+    """
+
+    def __init__(
+        self,
+        window_seconds: float,
+        deliver: Callable[[list[Message]], None],
+        on_error: Callable[[Message, Exception], None] | None,
+        channel: str,
+    ) -> None:
+        self._window = window_seconds
+        self._deliver = deliver
+        self._on_error = on_error
+        self._channel = channel
+        self._lock = threading.Lock()
+        self._batch: list[Message] = []
+        self._timer: threading.Timer | None = None
+        self._closed = False
+
+    def add(self, msg: Message) -> None:
+        """Buffer *msg*; start the window timer if this is the first one."""
+        with self._lock:
+            if self._closed:
+                return
+            self._batch.append(msg)
+            if self._timer is None:
+                timer = _TIMER_FACTORY(self._window, self.flush)
+                timer.daemon = True
+                self._timer = timer
+                timer.start()
+
+    def flush(self) -> None:
+        """Deliver the buffered batch, if any."""
+        with self._lock:
+            batch = self._batch
+            self._batch = []
+            self._timer = None
+        if not batch:
+            return
+        try:
+            self._deliver(batch)
+        except Exception as exc:
+            if self._on_error is not None:
+                self._on_error(batch[-1], exc)
+            else:
+                _log.warning("coalesced callback failed for %s: %s", self._channel, exc)
+
+    def close(self, *, flush: bool) -> None:
+        """Stop the timer; deliver the pending batch only if *flush* is true."""
+        with self._lock:
+            self._closed = True
+            timer = self._timer
+            self._timer = None
+            if timer is not None:
+                timer.cancel()
+        if flush:
+            self.flush()
+        else:
+            with self._lock:
+                self._batch.clear()
 
 
 class MansioClient:
@@ -64,6 +135,7 @@ class MansioClient:
         self._transport = HttpTransport(url, user_id=user_id, token=token)
         self._cursors: dict[str, str] = {}
         self._persisted: dict[str, str] = {}
+        self._coalescers: dict[str, _Coalescer] = {}
 
         self._announce()
         self._restore_cursors()
@@ -523,29 +595,59 @@ class MansioClient:
     def subscribe(
         self,
         channel: str,
-        callback: Callable[[Message], None],
+        callback: Callable[[Message], None] | Callable[[list[Message]], None],
         on_error: Callable[[Message, Exception], None] | None = None,
         *,
         include_own: bool = False,
+        coalesce_ms: int = 0,
     ) -> str:
         """Subscribe to real-time notifications on a channel.
 
         Args:
             channel: Channel to subscribe to.
-            callback: Called with each new Message.
+            callback: Called with each new Message. When *coalesce_ms* is
+                positive it is called once per batch with a
+                ``list[Message]`` instead.
             on_error: Called with ``(message, exception)`` when *callback*
                 raises, so the subscriber can retry or record the failure.
-                When omitted, the exception is logged with its traceback.
+                With coalescing, the message is the last one in the batch.
+                When omitted, the exception is logged.
             include_own: Deliver messages this user sent (default False).
+                Filtering happens before coalescing, so own messages never
+                enter a batch.
+            coalesce_ms: Opt-in batch window in milliseconds (default 0 =
+                deliver each message immediately). Messages arriving in the
+                same window are delivered in one callback.
 
         Returns:
             Subscription ID for unsubscribe().
         """
-        return self._transport.subscribe(
-            channel, callback, on_error=on_error, include_own=include_own
+        if coalesce_ms < 0:
+            raise ValueError("coalesce_ms must be >= 0")
+        if coalesce_ms == 0:
+            return self._transport.subscribe(
+                channel,
+                cast(Callable[[Message], None], callback),
+                on_error=on_error,
+                include_own=include_own,
+            )
+        coalescer = _Coalescer(
+            coalesce_ms / 1000.0,
+            cast(Callable[[list[Message]], None], callback),
+            on_error,
+            channel,
         )
+        sub_id = self._transport.subscribe(
+            channel, coalescer.add, on_error=on_error, include_own=include_own
+        )
+        self._coalescers[sub_id] = coalescer
+        return sub_id
 
     def unsubscribe(self, subscription_id: str) -> None:
+        """Cancel a subscription, delivering any pending coalesced batch first."""
+        coalescer = self._coalescers.pop(subscription_id, None)
+        if coalescer is not None:
+            coalescer.close(flush=True)
         self._transport.unsubscribe(subscription_id)
 
     def listen(
