@@ -374,7 +374,16 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "mansio_check_unread",
         "description": "Count unread messages per channel without advancing cursors.",
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "include_own": {
+                    "type": "boolean",
+                    "description": "Count messages this agent sent (default: false).",
+                    "default": False,
+                },
+            },
+        },
     },
     {
         "name": "mansio_notifications",
@@ -416,7 +425,12 @@ _TOOLS: list[dict[str, Any]] = [
         "description": "Send a heartbeat to indicate this agent is alive.",
         "inputSchema": {
             "type": "object",
-            "properties": {},
+            "properties": {
+                "metadata": {
+                    "type": "object",
+                    "description": "Optional presence metadata (default: none).",
+                },
+            },
         },
     },
     {
@@ -759,7 +773,7 @@ def _tool_broadcast_read(client: MansioClient, args: dict[str, Any]) -> Any:
 
 
 def _tool_check_unread(client: MansioClient, args: dict[str, Any]) -> Any:
-    unread = client.check_unread()
+    unread = client.check_unread(include_own=args.get("include_own", False))
     return {"unread": unread, "total_unread": sum(unread.values())}
 
 
@@ -795,7 +809,7 @@ def _tool_agents(client: MansioClient, args: dict[str, Any]) -> Any:
 
 
 def _tool_heartbeat(client: MansioClient, args: dict[str, Any]) -> Any:
-    client.heartbeat()
+    client.heartbeat(metadata=args.get("metadata"))
     return {"status": "ok"}
 
 
