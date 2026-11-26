@@ -16,7 +16,7 @@ import pytest
 
 from mansio import Bus, MemoryBackend
 from mansio._vendor.httpclient import Client as HttpClient
-from mansio.frontends.http import _broadcast_write_allowed
+from mansio.authz import broadcast_write_allowed as _broadcast_write_allowed
 
 CHANNEL = "broadcast:news"
 RACE_CHANNEL = "broadcast:race"

@@ -11,55 +11,56 @@ import threading
 import time
 
 from mansio import Bus, MansioServer, MemoryBackend
-from mansio.frontends.http import HttpFrontend, _is_channel_member
+from mansio.authz import is_channel_member
+from mansio.frontends.http import HttpFrontend
 
 # ──────────────────────────────────────────────
-# Unit tests for _is_channel_member (#249)
+# Unit tests for is_channel_member (#249)
 # ──────────────────────────────────────────────
 
 
 class TestIsChannelMember:
-    """_is_channel_member must use structural parsing, not substring match."""
+    """is_channel_member must use structural parsing, not substring match."""
 
     def test_notebook_owner_matches(self) -> None:
-        assert _is_channel_member("alice", "notebook:alice") is True
+        assert is_channel_member("alice", "notebook:alice") is True
 
     def test_memory_owner_matches(self) -> None:
-        assert _is_channel_member("bob", "memory:bob") is True
+        assert is_channel_member("bob", "memory:bob") is True
 
     def test_dm_participant_a_matches(self) -> None:
-        assert _is_channel_member("alice", "dm:alice:bob") is True
+        assert is_channel_member("alice", "dm:alice:bob") is True
 
     def test_dm_participant_b_matches(self) -> None:
-        assert _is_channel_member("bob", "dm:alice:bob") is True
+        assert is_channel_member("bob", "dm:alice:bob") is True
 
     # --- False-positive regressions (#249) ---
 
     def test_notebook_prefix_does_not_match_as_user(self) -> None:
         """User 'notebook' must NOT match channel 'notebook:alice'."""
-        assert _is_channel_member("notebook", "notebook:alice") is False
+        assert is_channel_member("notebook", "notebook:alice") is False
 
     def test_memory_prefix_does_not_match_as_user(self) -> None:
         """User 'memory' must NOT match channel 'memory:bob'."""
-        assert _is_channel_member("memory", "memory:bob") is False
+        assert is_channel_member("memory", "memory:bob") is False
 
     def test_dm_prefix_does_not_match_as_user(self) -> None:
         """User 'dm' must NOT match channel 'dm:alice:bob'."""
-        assert _is_channel_member("dm", "dm:alice:bob") is False
+        assert is_channel_member("dm", "dm:alice:bob") is False
 
     def test_unrelated_user_does_not_match_notebook(self) -> None:
-        assert _is_channel_member("eve", "notebook:alice") is False
+        assert is_channel_member("eve", "notebook:alice") is False
 
     def test_unrelated_user_does_not_match_dm(self) -> None:
-        assert _is_channel_member("eve", "dm:alice:bob") is False
+        assert is_channel_member("eve", "dm:alice:bob") is False
 
     def test_substring_user_does_not_match_notebook(self) -> None:
         """User 'ali' must NOT match channel 'notebook:alice'."""
-        assert _is_channel_member("ali", "notebook:alice") is False
+        assert is_channel_member("ali", "notebook:alice") is False
 
     def test_public_channel_returns_false(self) -> None:
         """Non-private channels always return False (not a member concept)."""
-        assert _is_channel_member("alice", "general") is False
+        assert is_channel_member("alice", "general") is False
 
 
 # ──────────────────────────────────────────────

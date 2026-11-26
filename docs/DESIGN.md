@@ -329,10 +329,10 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 | Channel 类型 | 命名模式 | 用途 | 访问控制 |
 |-------------|----------|------|----------|
 | 普通频道 | `general`、`build-status` 等 | 公开群聊，默认情形 | 任意已认证 agent 可读写 |
-| Notebook | `notebook:{user_id}` | 思考过程、临时笔记（含 Thought） | **私有 — 仅所属 agent 可写入**，跨 agent 写入返回 403 |
-| Memory | `memory:{user_id}` | 长期记忆（语义记忆） | **私有 — 仅所属 agent 可写入**，跨 agent 写入返回 403 |
+| Notebook | `notebook:{user_id}` | 思考过程、临时笔记（含 Thought） | **私有 — 仅所属 agent 可写入**（`owner`），跨 agent 写入返回 403 |
+| Memory | `memory:{user_id}` | 长期记忆（语义记忆） | **私有 — 仅所属 agent 可写入**（`owner`），跨 agent 写入返回 403 |
 | Broadcast | `broadcast:{topic}` | 公告、任务列表、成员列表 | **supertoken、频道所有者或持有 write/admin ACL 的 agent 可写入**，其他 agent 只读 |
-| DM | `dm:{user_a}:{user_b}` | 私聊（双方 ID 按字典序排列） | 双方可读写 |
+| DM | `dm:{user_a}:{user_b}` | 私聊（双方 ID 按字典序排列） | 双方可读写（`member`） |
 | System | `_system:{purpose}` | 内部管理（在线状态、cursor、通知） | **受限写入**（见下文） |
 | 自定义前缀 | `{prefix}:{name}` | 应用自定义命名空间，如 `group:` | 与普通频道相同，但该前缀须先在管理面板注册（`/api/prefixes`） |
 
@@ -362,7 +362,7 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 
 ##### 通道 ACL 条目
 
-通过 `/v1/channels/<channel>/acl` 管理的按通道 ACL 条目由 backend 的 `ChannelStore` 存储。读取或修改某个通道的 ACL 需要该通道上的 `manage` 动词（旧名 `admin`）。
+通过 `/v1/channels/<channel>/acl` 管理的按通道 ACL 条目由 backend 的 `ChannelStore` 存储。读取或修改某个通道的 ACL 需要该通道上的 `manage` 动词（旧名 `admin`）。上述结构性规则位于 `mansio/authz.py`（`ChannelAuthorizer`），供各 frontend 共用；HTTP frontend 只负责认证调用方并把拒绝映射为 403。
 
 存储的权限值可以是：
 

@@ -412,6 +412,7 @@ class TestSugarAutoCreation:
         acl = bus.get_acl("dm:alice:bob")
         user_ids = {e.user_id for e in acl}
         assert user_ids == {"alice", "bob"}
+        assert {e.permission for e in acl} == {"member"}
 
     def test_notebook_auto_create(self, bus):
         bus.publish("notebook:alice", "alice", "text", "note")
@@ -422,7 +423,7 @@ class TestSugarAutoCreation:
         acl = bus.get_acl("notebook:alice")
         assert len(acl) == 1
         assert acl[0].user_id == "alice"
-        assert acl[0].permission == "admin"
+        assert acl[0].permission == "owner"
 
     def test_memory_auto_create(self, bus):
         bus.publish("memory:alice", "alice", "text", "mem")
