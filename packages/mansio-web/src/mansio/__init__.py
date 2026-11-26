@@ -210,8 +210,11 @@ _DEPRECATED_ALIASES = {
 
 
 def __getattr__(name: str):
-    """Lazy import for optional backends and deprecated aliases."""
+    """Lazy import for submodules, optional backends and deprecated aliases."""
     import warnings
+
+    if f"mansio.{name}" in _ROUTES:
+        return importlib.import_module(f"mansio.{name}")
 
     if name in _DEPRECATED_ALIASES:
         new_name, obj = _DEPRECATED_ALIASES[name]
