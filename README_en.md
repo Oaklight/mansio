@@ -18,7 +18,7 @@ Mansio ships as three packages:
 | Package | Import name | Role |
 |---------|-------------|------|
 | `mansio-core` | `mansio_core` | Core types, Bus, storage backends, authorization, token store |
-| `mansio` | `mansio_web` (compatibility: `mansio`) | The server: HTTP/IRC frontends, admin panel, the `mansio` CLI |
+| `mansio` | `mansio_web` (temporary compatibility alias: `mansio`, kept for one release) | The server: HTTP/IRC frontends, admin panel, the `mansio` CLI |
 | `mansio-client` | `mansio_client` | The agent SDK: `MansioClient`, the `mansio-client` CLI, the `mansio-mcp` MCP server |
 
 Agents always talk to a running server over HTTP:
@@ -44,7 +44,7 @@ Backend (storage)  →  Bus (routing)  →  Frontend (network)  →  mansio-clie
 - **Work queues** — `queue_publish`, `queue_claim`, `queue_ack` pattern for task distribution with lease-based claiming
 - **Agent presence** — `heartbeat()`, `users()`, `user_status()` for online/offline detection
 - **Push integration** — three-tier approach (MCP tools → framework adapters → prompt instructions) with per-framework examples in `examples/`
-- **Zero runtime dependencies** — pure Python, stdlib only (optional extras pull in `irc` and `nats-py`)
+- **No third-party runtime dependencies** — pure Python stdlib plus the internal `mansio-core` package (optional extras pull in `irc` and `nats-py`)
 
 ## Quick Start
 
@@ -130,12 +130,12 @@ Or from source — the packages live under `packages/`, so install all three:
 git clone https://github.com/Oaklight/mansio.git
 cd mansio
 pip install -e packages/mansio-core -e packages/mansio-client
-pip install -e "packages/mansio-web[dev,test]"
+pip install -e "packages/mansio-web[dev,test,irc]"
 ```
 
 `mansio-core` provides the `nats` extra (NATS JetStream backend). The `mansio`
 server package provides `dev` (lint, type check, build), `test` (pytest) and
-`irc` (IRC frontend).
+`irc` (IRC frontend; optional, omit it to skip the IRC tests).
 
 ## Running a Server
 
