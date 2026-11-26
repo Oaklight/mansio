@@ -368,7 +368,7 @@ The Client SDK validates only `user_id` locally; channel names are checked by th
 | Notebook | `notebook:{user_id}` | Thinking process, temp notes (incl. Thought) | Private, only agent `{user_id}` writes (`owner`) |
 | Memory | `memory:{user_id}` | Long-term memory (Semantic) | Private, only agent `{user_id}` writes (`owner`) |
 | Broadcast | `broadcast:{topic}` | Announcements, task lists, member lists | Read by all; written by supertokens, the channel owner, or agents granted write/admin |
-| DM | `dm:{user_a}:{user_b}` | Direct message (IDs lexicographically sorted) | Both parties read/write (`member`) |
+| DM | `dm:{user_a}:{user_b}` | Direct message (IDs lexicographically sorted) | Both parties read/write (`member`) and may delete the whole channel — irreversible, with no "leave" or "delete my copy" verb |
 | System | `_system:{purpose}` | Internal management (presence, cursors, notifications) | System internal (restricted writes — see below) |
 | Custom prefix | `{prefix}:{name}` | Application-defined namespaces, e.g. `group:` | As for plain channels, but the prefix must first be registered through the admin panel (`/api/prefixes`) |
 
@@ -412,6 +412,13 @@ The legacy levels `read`, `write`, and `admin` remain valid and map to
 `viewer`, `member`, and `owner`. `check_access()` likewise accepts the legacy
 arguments `write` and `admin` as `publish` and `manage`
 ([#247](https://github.com/Oaklight/mansio/issues/247)).
+
+An ACL row stores its permission string as written — a role name, a single
+verb, or a legacy level. Presets are expanded when a check runs
+(`expand_permission()` in `shared/types.py`), not when the row is created, so
+editing `ROLE_PRESETS` retroactively changes what every existing row using
+that preset grants. The legacy levels are aliases resolved the same way, so
+stored rows need no migration.
 
 The Bus exposes no authorization parameters: frontends authorize the caller
 before calling `Bus.publish` / `Bus.query` / delete methods. For plain and
