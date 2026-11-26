@@ -112,8 +112,26 @@ def _target_for(fullname: str) -> str | None:
     return None
 
 
+_MODULE_METADATA = {
+    "__name__",
+    "__loader__",
+    "__package__",
+    "__spec__",
+    "__path__",
+    "__file__",
+    "__cached__",
+    "__builtins__",
+}
+
+
 class _AliasFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-    """Resolve ``mansio.*`` to the same module objects as the new packages."""
+    """Resolve ``mansio.*`` through non-mutating proxy modules.
+
+    The proxy copies the target's attributes so class and function identity
+    is preserved, but it never hands the target module object to the import
+    machinery.  That keeps ``target.__spec__`` intact for reload,
+    introspection and pickling.
+    """
 
     def find_spec(
         self,
@@ -133,13 +151,22 @@ class _AliasFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         )
 
     def create_module(self, spec: importlib.machinery.ModuleSpec) -> Any:
-        target = _target_for(spec.name)
-        if target is None:  # pragma: no cover - find_spec already checked
-            raise ImportError(spec.name)
-        return importlib.import_module(target)
+        """Return None so importlib creates a fresh, ordinary module."""
+        return None
 
     def exec_module(self, module: Any) -> None:
-        """The aliased module is already executed."""
+        target_name = _target_for(module.__name__)
+        if target_name is None:  # pragma: no cover - find_spec already checked
+            raise ImportError(module.__name__)
+        target = importlib.import_module(target_name)
+        for name, value in vars(target).items():
+            if name not in _MODULE_METADATA:
+                setattr(module, name, value)
+
+        def __getattr__(name: str) -> Any:
+            return getattr(target, name)
+
+        module.__getattr__ = __getattr__
 
     def get_code(self, fullname: str) -> Any:
         """Return the aliased module's code object (needed by ``python -m``)."""
