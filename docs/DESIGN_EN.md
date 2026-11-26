@@ -434,6 +434,12 @@ access. A denied caller receives the same answer as an unsuccessful ack or a
 message without queue state, so the response does not confirm that a private
 message exists. A claim never creates a `broadcast:*` channel for the caller.
 
+**Deleting channels**: a scoped token may delete a `dm:`/`notebook:`/`memory:`
+channel it belongs to, and a plain or registered-prefix channel whose stored
+row grants it the `delete` verb (the owner, or an ACL entry granting
+`delete`/`manage`). Unregistered plain channels, `broadcast:*`, and
+`_system:*` remain supertoken-only.
+
 ##### Input Validation
 
 The Frontend layer validates message payloads on publish:

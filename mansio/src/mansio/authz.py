@@ -273,7 +273,15 @@ class ChannelAuthorizer:
     # ── delete ───────────────────────────────────────────────
 
     def delete_channel_denial(self, user_id: str, channel: str) -> str | None:
-        """Return a denial message if *user_id* may not delete, else None."""
+        """Return a denial message if *user_id* may not delete, else None.
+
+        Name-private channels keep their membership rule and ``_system:*``
+        stays closed.  Plain and registered-prefix channels need a stored
+        row and the ``delete`` verb on it: that is the owner, or an ACL entry
+        granting ``delete``/``manage``.  An unregistered channel has no owner
+        and stays under the shared-channel denial.  ``broadcast:*`` keeps its
+        own rule and is not part of this path.
+        """
         if channel.startswith("_system:"):
             return (
                 f"Channel '{channel}' is a system channel; "
@@ -282,6 +290,14 @@ class ChannelAuthorizer:
         if is_private_channel(channel):
             if not is_channel_member(user_id, channel):
                 return f"Token for '{user_id}' cannot delete channel '{channel}'"
+            return None
+        if channel.startswith("broadcast:"):
+            return "Scoped tokens cannot delete shared channels"
+        try:
+            registered = self._bus.get_channel_meta(channel) is not None
+        except NotImplementedError:
+            registered = False
+        if registered and self._check_access(user_id, channel, "delete"):
             return None
         return "Scoped tokens cannot delete shared channels"
 
