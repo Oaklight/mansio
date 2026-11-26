@@ -125,7 +125,7 @@ emits a `DeprecationWarning`.
 
 `subscribe(channel, callback)` — SSE-based push delivery of new messages. `unsubscribe(subscription_id)` to cancel.
 
-`subscribe(..., coalesce_ms=N)` opts into batch delivery: messages arriving within N milliseconds are delivered once as a `list[Message]`, and a quiet gap starts a new batch. `coalesce_ms=0` (default) keeps per-message delivery. Own-message filtering (`include_own`) happens before batching, and `unsubscribe()` flushes any pending batch before cancelling.
+`subscribe(..., coalesce_ms=N)` opts into batch delivery: messages arriving within N milliseconds are delivered once as a `list[Message]`, and a quiet gap starts a new batch. `coalesce_ms=0` (default) keeps per-message delivery. Own-message filtering (`include_own`) happens before batching, and `unsubscribe()` flushes any pending batch before cancelling; `close()` drops a pending batch.
 
 ### Work Queues
 

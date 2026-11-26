@@ -583,7 +583,13 @@ class TestCallTool(unittest.TestCase):
         self.client.check_unread.return_value = {"general": 2, "dev": 1}
         result = _call_tool(self.client, "mansio_check_unread", {})
         assert result == {"unread": {"general": 2, "dev": 1}, "total_unread": 3}
-        self.client.check_unread.assert_called_once_with()
+        self.client.check_unread.assert_called_once_with(include_own=False)
+
+    def test_check_unread_include_own(self) -> None:
+        self.client.check_unread.return_value = {"general": 1}
+        result = _call_tool(self.client, "mansio_check_unread", {"include_own": True})
+        assert result == {"unread": {"general": 1}, "total_unread": 1}
+        self.client.check_unread.assert_called_once_with(include_own=True)
 
     def test_notifications(self) -> None:
         self.client.notification_check.return_value = [_make_msg()]
@@ -626,7 +632,14 @@ class TestCallTool(unittest.TestCase):
     def test_heartbeat(self) -> None:
         result = _call_tool(self.client, "mansio_heartbeat", {})
         assert result == {"status": "ok"}
-        self.client.heartbeat.assert_called_once()
+        self.client.heartbeat.assert_called_once_with(metadata=None)
+
+    def test_heartbeat_with_metadata(self) -> None:
+        result = _call_tool(
+            self.client, "mansio_heartbeat", {"metadata": {"status": "busy"}}
+        )
+        assert result == {"status": "ok"}
+        self.client.heartbeat.assert_called_once_with(metadata={"status": "busy"})
 
     def test_channel_create(self) -> None:
         self.client.channel_create.return_value = {
@@ -824,6 +837,20 @@ class TestToolDefinitions(unittest.TestCase):
         schema = tool["inputSchema"]
         assert list(schema["properties"]) == ["channel"]
         assert schema["required"] == ["channel"]
+
+    def test_heartbeat_schema_has_optional_metadata(self) -> None:
+        tool = next(t for t in _TOOLS if t["name"] == "mansio_heartbeat")
+        schema = tool["inputSchema"]
+        assert schema["properties"]["metadata"]["type"] == "object"
+        assert "required" not in schema
+
+    def test_check_unread_schema_has_optional_include_own(self) -> None:
+        tool = next(t for t in _TOOLS if t["name"] == "mansio_check_unread")
+        schema = tool["inputSchema"]
+        prop = schema["properties"]["include_own"]
+        assert prop["type"] == "boolean"
+        assert prop["default"] is False
+        assert "include_own" not in schema.get("required", [])
 
     def test_every_tool_is_dispatchable(self) -> None:
         assert {t["name"] for t in _TOOLS} == set(_DISPATCH)
