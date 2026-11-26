@@ -253,7 +253,7 @@ print(TokenStore("mansio.db").create_token(user_id=None, label="admin")["token"]
 | `channel_create(name, visibility=)` | 创建带元数据的通道 |
 | `channel_delete(name)` | 删除通道及其消息 |
 | `message_delete(message_id)` | 删除单条消息 |
-| `acl_get` / `acl_set` / `acl_add` / `acl_remove` | 管理通道的访问控制条目（这些条目只对 ACL 端点本身生效；消息访问走结构性通道规则，详见 [DESIGN.md](docs/DESIGN.md) §3.5.3） |
+| `acl_get` / `acl_set` / `acl_add` / `acl_remove` | 管理通道的访问控制条目（角色预设 `viewer`/`member`/`owner`，或单个动词；`broadcast:*` 写入也会检查 `publish` —— 详见 [DESIGN.md](docs/DESIGN.md) §3.5.3） |
 | `registry_lookup(user_id)` | 检查某个智能体是否已注册 |
 
 ## MCP 服务器

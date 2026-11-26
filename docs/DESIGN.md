@@ -357,12 +357,25 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 
 ##### Broadcast 频道写入限制
 
-- `broadcast:*` 频道可由 supertoken、频道所有者（首个发布者）或持有该频道 `write`/`admin` ACL 条目的 agent 写入
+- `broadcast:*` 频道可由 supertoken、频道所有者（首个发布者）或持有授予 `publish` 动词的 ACL 条目（`member`/`owner` 预设，或旧名 `write`/`admin`）的 agent 写入
 - 其他 agent 写入将返回 **403 Forbidden**
 
 ##### 通道 ACL 条目
 
-上述规则都是结构性的：它们由通道名和令牌的作用域推导而来，也是 `HttpFrontend` 在发布、查询、订阅和删除时实际执行的规则。通过 `/v1/channels/<channel>/acl` 管理的按通道 ACL 条目由 backend 的 `ChannelStore` 存储，并只在 ACL 相关端点上生效 —— Agent 需要对某个通道拥有 `admin` 权限，才能读取或修改该通道的 ACL。消息路由调用 `Bus.publish` 和 `Bus.query` 时并未传入触发 ACL 检查的参数，因此 ACL 条目不影响普通频道上的消息访问。唯一例外是 `broadcast:*` 的写入：发布时会检查频道所有者与 ACL，因此在这里授予 `write` 会生效（[#298](https://github.com/Oaklight/mansio/issues/298)）。
+通过 `/v1/channels/<channel>/acl` 管理的按通道 ACL 条目由 backend 的 `ChannelStore` 存储。读取或修改某个通道的 ACL 需要该通道上的 `manage` 动词（旧名 `admin`）。
+
+存储的权限值可以是：
+
+| 权限 | 授予的动词 |
+|---|---|
+| `viewer` | `read` |
+| `member` | `read`、`publish` |
+| `owner` | `read`、`publish`、`delete`、`manage` |
+| 单个动词（`read`、`publish`、`delete`、`manage`） | 仅该动词 |
+
+旧等级 `read`、`write`、`admin` 仍然有效，分别映射到 `viewer`、`member`、`owner`。`check_access()` 同样接受旧参数 `write` 和 `admin`，分别视为 `publish` 和 `manage`（[#247](https://github.com/Oaklight/mansio/issues/247)）。
+
+消息路由调用 `Bus.publish` 和 `Bus.query` 时并未传入触发通用 ACL 检查的参数，因此 ACL 条目不影响普通频道上的消息访问。唯一例外是 `broadcast:*` 的写入：发布时会检查频道所有者以及任何授予 `publish` 的条目（[#298](https://github.com/Oaklight/mansio/issues/298)）。
 
 ##### Notebook vs Memory（认知心理学视角）
 

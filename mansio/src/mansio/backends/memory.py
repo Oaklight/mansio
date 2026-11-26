@@ -10,12 +10,13 @@ from typing import Literal
 
 from mansio.protocols import Backend, ChannelStore, Compactable, Deletable, Presenceable
 from mansio.types import (
-    PERMISSION_LEVELS,
     ACLEntry,
     ChannelMeta,
     ClaimResult,
     Message,
     UserPresence,
+    normalize_required,
+    permission_allows,
 )
 
 _CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
@@ -635,12 +636,15 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                 return True  # unregistered channels are public
             if meta.owner == user_id:
                 return True
-            if meta.visibility == "public" and required in ("read", "write"):
+            if meta.visibility == "public" and normalize_required(required) in (
+                "read",
+                "publish",
+            ):
                 return True
             entry = self._acl.get(channel, {}).get(user_id)
             if entry is None:
                 return False
-            return PERMISSION_LEVELS.get(entry.permission, 0) >= PERMISSION_LEVELS.get(required, 0)
+            return permission_allows(entry.permission, required)
 
     def close(self) -> None:
         """Clear all stored messages."""

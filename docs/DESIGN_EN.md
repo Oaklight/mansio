@@ -388,21 +388,34 @@ Writes to any other `_system:*` channel by a regular agent return **403 Forbidde
 **Private channels (`notebook:X`, `memory:X`)**: Only agent `X` may write. Cross-agent writes return **403 Forbidden**.
 
 **Broadcast channels (`broadcast:*`)**: Writable by supertokens, the channel
-owner (its first publisher), and agents holding an explicit `write` or `admin`
-ACL entry on the channel. Other agents have read-only access.
+owner (its first publisher), and agents holding an entry that grants the
+`publish` verb (`member`/`owner` presets, or the legacy `write`/`admin`).
+Other agents have read-only access.
 
 ##### Channel ACL Entries
 
-The rules above are structural: they are derived from the channel name and the
-token's scope, and they are what `HttpFrontend` enforces on publish, query,
-subscribe and delete. The per-channel ACL entries managed through
-`/v1/channels/<channel>/acl` are stored by the backend's `ChannelStore` and are
-enforced on the ACL endpoints themselves — an agent needs `admin` on a channel
-to read or modify that channel's ACL. The message routes call `Bus.publish` and
-`Bus.query` without the arguments that would trigger an ACL check, so ACL
-entries do not govern message access for ordinary channels. The exception is
-`broadcast:*` write: publish consults the channel owner and its ACL, so granting
-write there takes effect
+The per-channel ACL entries managed through `/v1/channels/<channel>/acl` are
+stored by the backend's `ChannelStore`. Reading or changing a channel's ACL
+requires the `manage` verb on it (legacy name: `admin`).
+
+A stored permission is one of:
+
+| Permission | Verbs granted |
+|---|---|
+| `viewer` | `read` |
+| `member` | `read`, `publish` |
+| `owner` | `read`, `publish`, `delete`, `manage` |
+| a single verb (`read`, `publish`, `delete`, `manage`) | that verb only |
+
+The legacy levels `read`, `write`, and `admin` remain valid and map to
+`viewer`, `member`, and `owner`. `check_access()` likewise accepts the legacy
+arguments `write` and `admin` as `publish` and `manage`
+([#247](https://github.com/Oaklight/mansio/issues/247)).
+
+The message routes call `Bus.publish` and `Bus.query` without the arguments
+that would trigger a general ACL check, so ACL entries do not govern message
+access for ordinary channels. The exception is `broadcast:*` write: publish
+checks the channel owner and any entry granting `publish`
 ([#298](https://github.com/Oaklight/mansio/issues/298)).
 
 ##### Input Validation

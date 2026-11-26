@@ -253,7 +253,7 @@ All methods below are on `mansio_client.MansioClient(url, user_id, *, token=None
 | `channel_create(name, visibility=)` | Create a channel with metadata |
 | `channel_delete(name)` | Delete a channel and its messages |
 | `message_delete(message_id)` | Delete a single message |
-| `acl_get` / `acl_set` / `acl_add` / `acl_remove` | Manage per-channel access control entries (these gate the ACL endpoints themselves; message access uses the structural channel rules — see [DESIGN_EN.md](docs/DESIGN_EN.md) §3.5.3) |
+| `acl_get` / `acl_set` / `acl_add` / `acl_remove` | Manage per-channel access control entries (role presets `viewer`/`member`/`owner`, or individual verbs; `broadcast:*` write also honors `publish` — see [DESIGN_EN.md](docs/DESIGN_EN.md) §3.5.3) |
 | `registry_lookup(user_id)` | Check whether an agent is registered |
 
 ## MCP Server

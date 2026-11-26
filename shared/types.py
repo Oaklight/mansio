@@ -85,21 +85,82 @@ class ACLEntry:
     Attributes:
         channel: Channel name this entry applies to.
         user_id: Agent granted access.
-        permission: Access level — ``"read"``, ``"write"``, or ``"admin"``.
-            ``admin`` implies ``write`` implies ``read``.
+        permission: Access granted — a role preset (``"viewer"``,
+            ``"member"``, ``"owner"``), a single verb (``"read"``,
+            ``"publish"``, ``"delete"``, ``"manage"``), or a legacy
+            level (``"read"``, ``"write"``, ``"admin"``). Legacy levels
+            map onto presets. See :func:`permission_allows`.
         granted_at: ISO 8601 timestamp.
         granted_by: Agent that created this entry (optional).
     """
 
     channel: str
     user_id: str
-    permission: str = field(default="write")  # "read" | "write" | "admin"
+    permission: str = field(default="member")
     granted_at: str = field(default="")
     granted_by: str | None = field(default=None)
 
 
+VERBS: frozenset[str] = frozenset({"read", "publish", "delete", "manage"})
+"""Authorization verbs. ``manage`` controls a channel's ACL and visibility."""
+
+ROLE_PRESETS: dict[str, frozenset[str]] = {
+    "viewer": frozenset({"read"}),
+    "member": frozenset({"read", "publish"}),
+    "owner": frozenset({"read", "publish", "delete", "manage"}),
+}
+"""Named verb sets for common roles."""
+
+PERMISSION_ALIASES: dict[str, str] = {
+    "read": "viewer",
+    "write": "member",
+    "admin": "owner",
+}
+"""Legacy level names accepted in stored ACL entries, mapped to presets."""
+
+REQUIRED_ALIASES: dict[str, str] = {
+    "read": "read",
+    "write": "publish",
+    "admin": "manage",
+}
+"""Legacy ``check_access`` arguments mapped to verbs."""
+
+ALLOWED_PERMISSIONS: frozenset[str] = (
+    frozenset(ROLE_PRESETS) | VERBS | frozenset(PERMISSION_ALIASES)
+)
+"""Every permission string a stored ACL entry may use."""
+
+
+def expand_permission(permission: str) -> frozenset[str]:
+    """Expand a stored permission to the set of verbs it grants.
+
+    Accepts a role preset, a single verb, or a legacy level. Unknown
+    strings grant nothing.
+    """
+    name = PERMISSION_ALIASES.get(permission, permission)
+    if name in ROLE_PRESETS:
+        return ROLE_PRESETS[name]
+    if name in VERBS:
+        return frozenset({name})
+    return frozenset()
+
+
+def normalize_required(required: str) -> str:
+    """Map a legacy ``check_access`` argument to its verb."""
+    return REQUIRED_ALIASES.get(required, required)
+
+
+def permission_allows(permission: str, required: str) -> bool:
+    """Return True if *permission* grants the *required* verb.
+
+    *required* may also be a legacy level (``"write"`` → ``"publish"``,
+    ``"admin"`` → ``"manage"``).
+    """
+    return normalize_required(required) in expand_permission(permission)
+
+
 PERMISSION_LEVELS: dict[str, int] = {"read": 0, "write": 1, "admin": 2}
-"""Permission hierarchy — admin > write > read."""
+"""Deprecated legacy hierarchy. Use :func:`permission_allows` instead."""
 
 
 @dataclass(frozen=True, slots=True)

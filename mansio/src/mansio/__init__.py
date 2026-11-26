@@ -10,21 +10,28 @@ from mansio.server import MansioServer
 from mansio.system_policy import CompactionPolicy, system_channel_policy
 from mansio.transport_http import HttpTransport, MansioAPIError
 from mansio.types import (
+    ALLOWED_PERMISSIONS,
     PERMISSION_LEVELS,
+    ROLE_PRESETS,
+    VERBS,
     ACLEntry,
     ChannelMeta,
     ClaimResult,
     Message,
     UserPresence,
+    permission_allows,
 )
 
 # Backward compatibility aliases — access triggers DeprecationWarning.
 # Direct assignments removed; __getattr__ handles lazy warning on first use.
 
 __all__ = [
+    "ALLOWED_PERMISSIONS",
     "ACLEntry",
     "PERMISSION_LEVELS",
+    "ROLE_PRESETS",
     "UserPresence",
+    "VERBS",
     "Backend",
     "ChannelMeta",
     "ChannelStore",
@@ -49,6 +56,7 @@ __all__ = [
     "SchemaVersionError",
     "StorageBackend",
     "backup_database",
+    "permission_allows",
     "system_channel_policy",
 ]
 
