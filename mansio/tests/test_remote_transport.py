@@ -45,6 +45,25 @@ def server_url():
     server.shutdown()
 
 
+@pytest.fixture()
+def closed_server_url():
+    """Frontend with neither a token store nor the unauthenticated opt-out."""
+    bus = Bus(backend=MemoryBackend())
+    frontend = HttpFrontend(host="127.0.0.1", port=0)
+    server = MansioServer(bus)
+    server.add_frontend(frontend)
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    time.sleep(0.3)
+    host, port = frontend.address
+
+    yield f"http://{host}:{port}"
+
+    server.shutdown()
+    bus.close()
+
+
 # ── Transport Protocol Tests ─────────────────────────────────────
 
 
@@ -347,6 +366,29 @@ class TestRequireAuth:
         assert call_count == 1
 
         transport.close()
+
+    def test_required_server_reports_true(self, mansio_server) -> None:
+        url, _store, _bus, _server = mansio_server
+        transport = HttpTransport(url, user_id="test-agent")
+        try:
+            assert transport.require_auth is True
+        finally:
+            transport.close()
+
+    def test_required_without_token_store_reports_true(self, closed_server_url: str) -> None:
+        """A frontend that lacks a token store still requires auth."""
+        transport = HttpTransport(closed_server_url, user_id="test-agent")
+        try:
+            assert transport.require_auth is True
+        finally:
+            transport.close()
+
+    def test_disabled_server_reports_false(self, server_url: str) -> None:
+        transport = HttpTransport(server_url, user_id="test-agent")
+        try:
+            assert transport.require_auth is False
+        finally:
+            transport.close()
 
 
 # ── Server Lifecycle Tests ────────────────────────────────────────

@@ -254,11 +254,16 @@ class HttpTransport:
 
     @property
     def require_auth(self) -> bool:
-        """Whether the remote bus requires authentication."""
+        """Whether the remote bus requires authentication.
+
+        The server reports ``auth_mode`` as ``"required"`` or ``"disabled"``.
+        A server that requires auth but has no tokens yet still reports
+        ``"required"``, which is the correct closed default.
+        """
         if self._require_auth is None:
             resp = self._http.get(f"{self._base_url}/v1/auth/check")
             self._check_response(resp)
-            self._require_auth = resp.json().get("require_auth", False)
+            self._require_auth = resp.json().get("auth_mode") == "required"
         return self._require_auth
 
     # ── Presence ──────────────────────────────────────────────────
