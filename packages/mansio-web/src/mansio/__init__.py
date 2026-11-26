@@ -164,6 +164,9 @@ class _AliasFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
                 setattr(module, name, value)
 
         def __getattr__(name: str) -> Any:
+            nested = f"{module.__name__}.{name}"
+            if nested in _ROUTES:
+                return importlib.import_module(nested)
             return getattr(target, name)
 
         module.__getattr__ = __getattr__

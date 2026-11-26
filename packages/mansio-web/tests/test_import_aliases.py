@@ -78,6 +78,25 @@ def test_bare_import_exposes_submodule_attributes() -> None:
     assert "attributes OK" in result.stdout
 
 
+def test_nested_routed_attribute_paths() -> None:
+    """Nested routes such as mansio.admin.metrics resolve as attributes."""
+    code = (
+        "import mansio, mansio_core, mansio_web; "
+        "assert mansio.admin.metrics.MetricsCollector "
+        "is mansio_core.metrics.MetricsCollector; "
+        "assert mansio.admin.AdminServer is mansio_web.admin.AdminServer; "
+        "print('nested OK')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "nested OK" in result.stdout
+
+
 def test_target_reload_works_after_alias_import() -> None:
     """Reloading a canonical module after aliasing it must use its real name."""
     code = (
