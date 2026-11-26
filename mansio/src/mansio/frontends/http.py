@@ -53,7 +53,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from mansio._vendor.httpserver import App, JSONResponse, Response, StreamingResponse
 from mansio._vendor.structlog import get_logger
-from mansio.authz import ChannelAuthorizer
+from mansio.authz import ChannelAuthorizer, dm_channel_error, dm_participants
 from mansio.authz import user_involved as _user_involved
 
 if TYPE_CHECKING:
@@ -127,6 +127,10 @@ def _validate_channel_name(
     channel: str, token_store: TokenStore | None = None
 ) -> tuple[dict, int] | None:
     """Validate channel name. Returns error tuple or None if OK."""
+    dm_error = dm_channel_error(channel)
+    if dm_error:
+        return {"error": "Bad Request", "message": dm_error}, 400
+
     is_reserved = any(channel.startswith(p) for p in _RESERVED_PREFIXES)
 
     if is_reserved:
@@ -453,6 +457,10 @@ def _parse_query_params(request: Any, max_limit: int) -> dict:
             "_status": 400,
         }
 
+    dm_error = dm_channel_error(channel)
+    if dm_error:
+        return {"error": "Bad Request", "message": dm_error, "_status": 400}
+
     after = (request.query_params.get("after") or [None])[0]
     msg_type = (request.query_params.get("msg_type") or [None])[0]
     limit = _parse_query_limit(
@@ -493,12 +501,10 @@ def _parse_query_params(request: Any, max_limit: int) -> dict:
 
 async def _dm_unregistered_warning(bus: Any, channel: str, sender: str) -> str | None:
     """Return a warning string if a DM targets an unregistered agent."""
-    if not channel.startswith("dm:"):
+    participants = dm_participants(channel)
+    if participants is None:
         return None
-    parts = channel.split(":")
-    if len(parts) != 3:
-        return None
-    other = parts[1] if parts[2] == sender else parts[2]
+    other = participants[0] if participants[1] == sender else participants[1]
     try:
         status = await asyncio.to_thread(bus.user_status, other)
     except NotImplementedError:
@@ -1372,6 +1378,10 @@ class HttpFrontend:
             if not name:
                 return {"error": "Bad Request", "message": "'name' is required"}, 400
 
+            dm_error = dm_channel_error(name)
+            if dm_error:
+                return {"error": "Bad Request", "message": dm_error}, 400
+
             auth_result = request.state.auth_result
             owner = body.get("owner", "")
             if isinstance(auth_result, str):
@@ -1631,6 +1641,14 @@ class HttpFrontend:
                     "error": "Bad Request",
                     "message": "At least one channel required",
                 }, 400
+
+            for ch in ch_list:
+                dm_error = dm_channel_error(ch)
+                if dm_error:
+                    return {
+                        "error": "Bad Request",
+                        "message": f"{dm_error} (got '{ch}')",
+                    }, 400
 
             auth_result = request.state.auth_result
             if isinstance(auth_result, str):

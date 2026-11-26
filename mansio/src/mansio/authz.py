@@ -19,6 +19,40 @@ if TYPE_CHECKING:
     from mansio.types import Message
 
 PRIVATE_CHANNEL_PREFIXES = ("notebook:", "memory:")
+DM_PREFIX = "dm:"
+
+
+def dm_participants(channel: str) -> tuple[str, str] | None:
+    """Return the two participants of a well-formed DM channel.
+
+    A DM channel name is exactly ``dm:<a>:<b>``: three colon-separated
+    segments with a non-empty user id in each participant slot.  Any other
+    name that starts with ``dm:`` is malformed and returns ``None``.
+
+    This is the single parser for DM names.  Callers that must reject a
+    malformed name on input use :func:`dm_channel_error`; authorization
+    predicates use this function and treat ``None`` as "no participants".
+    """
+    if not channel.startswith(DM_PREFIX):
+        return None
+    parts = channel.split(":")
+    if len(parts) != 3:
+        return None
+    _, first, second = parts
+    if not first or not second:
+        return None
+    return first, second
+
+
+def dm_channel_error(channel: str) -> str | None:
+    """Return a client error message for a malformed ``dm:`` channel name.
+
+    Returns ``None`` for well-formed DM names and for names that do not use
+    the ``dm:`` prefix at all.
+    """
+    if channel.startswith(DM_PREFIX) and dm_participants(channel) is None:
+        return "Invalid dm channel name; expected 'dm:<user_a>:<user_b>'"
+    return None
 
 
 def is_private_channel(channel: str) -> bool:
@@ -27,8 +61,12 @@ def is_private_channel(channel: str) -> bool:
     Private channels are ``dm:*``, ``notebook:*``, and ``memory:*``.
     Everything else (plain channels, ``_system:``, ``broadcast:``, and
     registered prefixes) is public.
+
+    Any name starting with ``dm:`` is private, including a malformed one.
+    Failing closed keeps pre-existing malformed DM rows readable only by
+    their sender, even though new malformed names are rejected on input.
     """
-    if channel.startswith("dm:"):
+    if channel.startswith(DM_PREFIX):
         return True
     return any(channel.startswith(p) for p in PRIVATE_CHANNEL_PREFIXES)
 
@@ -43,9 +81,9 @@ def is_channel_member(user_id: str, channel: str) -> bool:
     - ``notebook:<owner>`` / ``memory:<owner>`` → the owner segment
     - ``dm:<A>:<B>`` → exactly A and B
     """
-    if channel.startswith("dm:"):
-        parts = channel.split(":", 2)
-        return len(parts) == 3 and user_id in (parts[1], parts[2])
+    if channel.startswith(DM_PREFIX):
+        participants = dm_participants(channel)
+        return participants is not None and user_id in participants
 
     for prefix in PRIVATE_CHANNEL_PREFIXES:
         if channel.startswith(prefix):
