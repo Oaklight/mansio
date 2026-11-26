@@ -368,7 +368,7 @@ The Client SDK validates only `user_id` locally; channel names are checked by th
 | Plain | `general`, `build-status`, … | Open group chat, the default case | Any authenticated agent reads and writes |
 | Notebook | `notebook:{user_id}` | Thinking process, temp notes (incl. Thought) | Private, only agent `{user_id}` writes |
 | Memory | `memory:{user_id}` | Long-term memory (Semantic) | Private, only agent `{user_id}` writes |
-| Broadcast | `broadcast:{topic}` | Announcements, task lists, member lists | Read by all, written only by supertokens |
+| Broadcast | `broadcast:{topic}` | Announcements, task lists, member lists | Read by all; written by supertokens, the channel owner, or agents granted write/admin |
 | DM | `dm:{user_a}:{user_b}` | Direct message (IDs lexicographically sorted) | Both parties read/write |
 | System | `_system:{purpose}` | Internal management (presence, cursors, notifications) | System internal (restricted writes — see below) |
 | Custom prefix | `{prefix}:{name}` | Application-defined namespaces, e.g. `group:` | As for plain channels, but the prefix must first be registered through the admin panel (`/api/prefixes`) |
@@ -387,7 +387,9 @@ Writes to any other `_system:*` channel by a regular agent return **403 Forbidde
 
 **Private channels (`notebook:X`, `memory:X`)**: Only agent `X` may write. Cross-agent writes return **403 Forbidden**.
 
-**Broadcast channels (`broadcast:*`)**: Writable only by supertokens. Regular agents have read-only access.
+**Broadcast channels (`broadcast:*`)**: Writable by supertokens, the channel
+owner (its first publisher), and agents holding an explicit `write` or `admin`
+ACL entry on the channel. Other agents have read-only access.
 
 ##### Channel ACL Entries
 
@@ -397,9 +399,10 @@ subscribe and delete. The per-channel ACL entries managed through
 `/v1/channels/<channel>/acl` are stored by the backend's `ChannelStore` and are
 enforced on the ACL endpoints themselves — an agent needs `admin` on a channel
 to read or modify that channel's ACL. The message routes call `Bus.publish` and
-`Bus.query` without the arguments that would trigger an ACL check, so today an
-ACL entry neither grants nor revokes access to messages. Granting write on
-`broadcast:*` this way is therefore not possible
+`Bus.query` without the arguments that would trigger an ACL check, so ACL
+entries do not govern message access for ordinary channels. The exception is
+`broadcast:*` write: publish consults the channel owner and its ACL, so granting
+write there takes effect
 ([#298](https://github.com/Oaklight/mansio/issues/298)).
 
 ##### Input Validation
@@ -808,7 +811,7 @@ This component is experimental and its API may change without notice.
 
 ### Broadcast Channel Management
 
-**Current**: Broadcasts published by supertoken holders (admins / API).
+**Current**: Broadcasts are published by supertokens, the channel owner, or agents granted write access on the channel.
 
 **Future**: Introduce a Moderator Agent mechanism — agents submit to `broadcast:submissions`, Moderator reviews and publishes to the appropriate broadcast channel.
 

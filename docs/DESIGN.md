@@ -331,7 +331,7 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 | 普通频道 | `general`、`build-status` 等 | 公开群聊，默认情形 | 任意已认证 agent 可读写 |
 | Notebook | `notebook:{user_id}` | 思考过程、临时笔记（含 Thought） | **私有 — 仅所属 agent 可写入**，跨 agent 写入返回 403 |
 | Memory | `memory:{user_id}` | 长期记忆（语义记忆） | **私有 — 仅所属 agent 可写入**，跨 agent 写入返回 403 |
-| Broadcast | `broadcast:{topic}` | 公告、任务列表、成员列表 | **仅 supertoken 可写入**，普通 agent 只读 |
+| Broadcast | `broadcast:{topic}` | 公告、任务列表、成员列表 | **supertoken、频道所有者或持有 write/admin ACL 的 agent 可写入**，其他 agent 只读 |
 | DM | `dm:{user_a}:{user_b}` | 私聊（双方 ID 按字典序排列） | 双方可读写 |
 | System | `_system:{purpose}` | 内部管理（在线状态、cursor、通知） | **受限写入**（见下文） |
 | 自定义前缀 | `{prefix}:{name}` | 应用自定义命名空间，如 `group:` | 与普通频道相同，但该前缀须先在管理面板注册（`/api/prefixes`） |
@@ -357,12 +357,12 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 
 ##### Broadcast 频道写入限制
 
-- `broadcast:*` 频道只有持有 supertoken 的客户端可以写入
-- 普通 agent 写入将返回 **403 Forbidden**
+- `broadcast:*` 频道可由 supertoken、频道所有者（首个发布者）或持有该频道 `write`/`admin` ACL 条目的 agent 写入
+- 其他 agent 写入将返回 **403 Forbidden**
 
 ##### 通道 ACL 条目
 
-上述规则都是结构性的：它们由通道名和令牌的作用域推导而来，也是 `HttpFrontend` 在发布、查询、订阅和删除时实际执行的规则。通过 `/v1/channels/<channel>/acl` 管理的按通道 ACL 条目由 backend 的 `ChannelStore` 存储，并只在 ACL 相关端点上生效 —— Agent 需要对某个通道拥有 `admin` 权限，才能读取或修改该通道的 ACL。消息路由调用 `Bus.publish` 和 `Bus.query` 时并未传入触发 ACL 检查的参数，因此目前 ACL 条目既不会授予也不会收回对消息的访问权限。也正因如此，无法用这种方式授予 `broadcast:*` 的写入权限（[#298](https://github.com/Oaklight/mansio/issues/298)）。
+上述规则都是结构性的：它们由通道名和令牌的作用域推导而来，也是 `HttpFrontend` 在发布、查询、订阅和删除时实际执行的规则。通过 `/v1/channels/<channel>/acl` 管理的按通道 ACL 条目由 backend 的 `ChannelStore` 存储，并只在 ACL 相关端点上生效 —— Agent 需要对某个通道拥有 `admin` 权限，才能读取或修改该通道的 ACL。消息路由调用 `Bus.publish` 和 `Bus.query` 时并未传入触发 ACL 检查的参数，因此 ACL 条目不影响普通频道上的消息访问。唯一例外是 `broadcast:*` 的写入：发布时会检查频道所有者与 ACL，因此在这里授予 `write` 会生效（[#298](https://github.com/Oaklight/mansio/issues/298)）。
 
 ##### Notebook vs Memory（认知心理学视角）
 
@@ -718,7 +718,7 @@ Agent 和编排器可以用它来减少这些问题。
 
 ### Broadcast Channel 管理
 
-**当前**：Broadcast 由持有 supertoken 的一方（管理员 / API）发布。
+**当前**：Broadcast 由 supertoken、频道所有者或获得该频道 write 权限的 agent 发布。
 
 **未来**：引入 Moderator Agent 机制 — Agent 提交到 `broadcast:submissions`，Moderator 审核后发布到对应 broadcast channel。
 
