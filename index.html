@@ -361,7 +361,7 @@ flowchart TD
         <tr><td><code>admin</code></td><td>read, publish, delete, manage</td><td>旧值，按 <code>owner</code> 解释</td></tr>
       </tbody>
     </table>
-    <p class="sub" style="margin:12px 0 0">执行点：<code>Bus.publish(enforce_acl=True)</code> 检查 <code>publish</code>；删除检查 <code>delete</code>；HTTP ACL 端点要求 <code>manage</code>，并接受预设、动词或旧值；<code>broadcast:*</code> 写入检查 <code>publish</code>。<code>check_access(required="write"|"admin")</code> 仍分别映射为 <code>publish</code> / <code>manage</code>。</p>
+    <p class="sub" style="margin:12px 0 0">执行点：授权全部发生在 Frontend 的策略层（<code>ChannelAuthorizer</code>）；<code>Bus</code> 不对消息操作做授权，<code>check_access</code> 只是策略查询。HTTP ACL 端点要求 <code>manage</code>，并接受预设、动词或旧值；<code>broadcast:*</code> 写入检查 <code>publish</code>。<code>check_access(required="write"|"admin")</code> 仍分别映射为 <code>publish</code> / <code>manage</code>。</p>
   </div>
 </section>
 
@@ -506,7 +506,7 @@ flowchart TB
       <tbody>
         <tr><td>本地开发</td><td>单进程，SQLite 或 Memory，<code>--no-auth</code></td><td>本机多智能体试验</td><td>仅绑定回环地址</td></tr>
         <tr><td>共享服务</td><td><code>mansio serve</code> + SQLite，HTTP 前端 + 管理面板</td><td>团队内多个智能体共享一个总线</td><td>需要 TokenStore 与管理员密码</td></tr>
-        <tr><td>嵌入式服务器</td><td>宿主进程内创建 <code>Bus</code> 与 <code>MansioServer</code></td><td>同一进程内的服务端逻辑，不经过网络</td><td>进程内客户端已移除；跨进程仍需 HTTP</td></tr>
+        <tr><td>嵌入式服务器</td><td>宿主进程内创建 <code>Bus</code> 与 <code>MansioServer</code></td><td>同一进程内的服务端逻辑，不经过网络</td><td>进程内客户端已移除；跨进程仍需 HTTP；<code>Bus</code> 不承担授权，嵌入者必须在调用前自行检查</td></tr>
         <tr><td>分布式后端</td><td>多个 <code>mansio serve</code> 共享 NATS JetStream</td><td>跨主机、需要持久化与跨服务器投递</td><td>NATS 无频道元数据/删除能力；认证需显式 <code>--token-db</code></td></tr>
       </tbody>
     </table>
@@ -520,7 +520,7 @@ flowchart TB
     <table>
       <thead><tr><th>路径</th><th>职责</th><th>关键符号</th></tr></thead>
       <tbody>
-        <tr><td><code>mansio/src/mansio/bus.py</code></td><td>路由与编排：消息 ID、订阅分发、压缩、能力检查</td><td><code>Bus</code>, <code>SQLiteBus</code></td></tr>
+        <tr><td><code>mansio/src/mansio/bus.py</code></td><td>路由与编排：消息 ID、订阅分发、压缩、能力检查；不承担授权</td><td><code>Bus</code>, <code>SQLiteBus</code></td></tr>
         <tr><td><code>mansio/src/mansio/authz.py</code></td><td>频道授权策略：结构规则、频道类型预设、ACL 判定；Frontend 共用</td><td><code>ChannelAuthorizer</code>, <code>is_private_channel</code>, <code>is_channel_member</code>, <code>user_involved</code>, <code>broadcast_write_allowed</code></td></tr>
         <tr><td><code>mansio/src/mansio/protocols.py</code></td><td>接口契约</td><td><code>Backend</code>, <code>ChannelStore</code>, <code>Watchable</code>, <code>Deletable</code>, <code>Presenceable</code>, <code>Compactable</code></td></tr>
         <tr><td><code>mansio/src/mansio/types.py</code></td><td>不可变数据模型</td><td><code>Message</code>, <code>UserPresence</code>, <code>ACLEntry</code>, <code>ChannelMeta</code>, <code>ClaimResult</code></td></tr>
