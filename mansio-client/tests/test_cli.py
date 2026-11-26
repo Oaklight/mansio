@@ -6,7 +6,8 @@ import warnings
 
 import pytest
 
-from mansio_client.cli import _build_parser, main
+from mansio_client.cli import _build_parser, _msg_dict, main
+from mansio_client.types import Message
 
 
 class TestFlagParsing:
@@ -55,3 +56,63 @@ class TestFlagParsing:
         captured = capsys.readouterr()
         assert "MANSIO_USER_ID" in captured.err
         assert "--user-id" in captured.err
+
+
+class TestIntentFlags:
+    """--intent on send and read is parsed and defaults to None."""
+
+    def test_send_intent_flag(self, monkeypatch):
+        monkeypatch.delenv("MANSIO_URL", raising=False)
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["send", "-c", "general", "--intent", "FYI_ONLY", "hello"]
+        )
+        assert args.intent == "FYI_ONLY"
+        assert args.message == "hello"
+
+    def test_send_intent_defaults_to_none(self, monkeypatch):
+        monkeypatch.delenv("MANSIO_URL", raising=False)
+        parser = _build_parser()
+        args = parser.parse_args(["send", "-c", "general", "hello"])
+        assert args.intent is None
+
+    def test_read_intent_flag(self, monkeypatch):
+        monkeypatch.delenv("MANSIO_URL", raising=False)
+        parser = _build_parser()
+        args = parser.parse_args(["read", "-c", "general", "--intent", "FYI_ONLY"])
+        assert args.intent == "FYI_ONLY"
+
+
+class TestMsgDict:
+    """CLI JSON output keeps threading and intent fields."""
+
+    def test_includes_optional_fields(self):
+        msg = Message(
+            id="msg-1",
+            channel="general",
+            sender="user-a",
+            msg_type="chat",
+            payload="hello",
+            timestamp="2026-01-01T00:00:00Z",
+            parent_id="msg-0",
+            thread_id="msg-0",
+            intent="DIRECT_QUESTION",
+        )
+        d = _msg_dict(msg)
+        assert d["parent_id"] == "msg-0"
+        assert d["thread_id"] == "msg-0"
+        assert d["intent"] == "DIRECT_QUESTION"
+
+    def test_omits_absent_optional_fields(self):
+        msg = Message(
+            id="msg-1",
+            channel="general",
+            sender="user-a",
+            msg_type="chat",
+            payload="hello",
+            timestamp="2026-01-01T00:00:00Z",
+        )
+        d = _msg_dict(msg)
+        assert "parent_id" not in d
+        assert "thread_id" not in d
+        assert "intent" not in d

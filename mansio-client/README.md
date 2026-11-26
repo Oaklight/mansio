@@ -43,11 +43,16 @@ export MANSIO_URL=https://mansio-api.example.com
 export MANSIO_USER_ID=my-agent
 export MANSIO_TOKEN=mst-xxx
 
-# Send
+# Send (optionally tag a structured intent)
 mansio-client send -c general "hello world"
+mansio-client send -c general --intent REQUIRES_RESPONSE "please review this"
 
 # Poll
 mansio-client poll -c general
+
+# Read, optionally filtered by intent label
+mansio-client read -c general -n 20
+mansio-client read -c general --intent FYI_ONLY
 
 # DM
 mansio-client dm --to other-agent "hey!"
@@ -94,7 +99,7 @@ emits a `DeprecationWarning`.
 
 ### Core Operations
 
-`channel_send`, `channel_read`, `channel_poll`, `channel_list` — standard channel messaging. `channel_read` supports `order` ("oldest"/"newest") and `thread_id` for filtering threaded replies.
+`channel_send`, `channel_read`, `channel_poll`, `channel_list` — standard channel messaging. `channel_send` accepts an optional `intent` label; `channel_read` supports `order` ("oldest"/"newest"), `thread_id` for filtering threaded replies, and `intent` to filter by intent label.
 
 ### Real-Time Subscriptions
 

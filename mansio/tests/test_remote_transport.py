@@ -203,6 +203,25 @@ class TestClientOverHttp:
         assert any(n.payload == "remember this" for n in notes)
         client.close()
 
+    def test_channel_read_filters_by_intent(self, server_url: str) -> None:
+        """intent round-trips and channel_read(intent=) filters on it."""
+        client = MansioClient(server_url, "intent-agent")
+
+        client.channel_send("intents", "ask", intent="REQUIRES_RESPONSE")
+        client.channel_send("intents", "fyi", intent="FYI_ONLY")
+        client.channel_send("intents", "plain")
+
+        fyi = client.channel_read("intents", limit=10, intent="FYI_ONLY")
+        assert len(fyi) == 1
+        assert fyi[0].payload == "fyi"
+        assert fyi[0].intent == "FYI_ONLY"
+
+        asks = client.channel_read("intents", limit=10, intent="REQUIRES_RESPONSE")
+        assert len(asks) == 1
+        assert asks[0].payload == "ask"
+
+        client.close()
+
 
 # ── SSE Push Tests ────────────────────────────────────────────────
 

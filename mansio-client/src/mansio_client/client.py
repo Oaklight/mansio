@@ -237,13 +237,28 @@ class MansioClient:
         after: str | None = None,
         order: Literal["oldest", "newest"] = "newest",
         thread_id: str | None = None,
+        intent: str | None = None,
     ) -> list[Message]:
+        """Read messages from *channel*.
+
+        Args:
+            channel: Channel name.
+            limit: Maximum number of messages to return.
+            after: Return only messages newer than this message ID.
+            order: ``"oldest"`` or ``"newest"`` first.
+            thread_id: Restrict to one conversation thread.
+            intent: Restrict to messages carrying this intent label.
+
+        Returns:
+            Matching messages in the requested order.
+        """
         return self._transport.query(
             channel,
             after=after,
             limit=limit,
             order=order,
             thread_id=thread_id,
+            intent=intent,
         )
 
     def channel_poll(self, channel: str) -> list[Message]:

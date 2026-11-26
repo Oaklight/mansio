@@ -71,6 +71,13 @@ _TOOLS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "ID of the message being replied to (threading).",
                 },
+                "intent": {
+                    "type": "string",
+                    "description": (
+                        "Application intent label, e.g. REQUIRES_RESPONSE, "
+                        "DIRECT_QUESTION, FYI_ONLY, PASS_FLOOR."
+                    ),
+                },
             },
             "required": ["channel", "content"],
         },
@@ -96,6 +103,10 @@ _TOOLS: list[dict[str, Any]] = [
                 "thread_id": {
                     "type": "string",
                     "description": "Filter to messages in this thread.",
+                },
+                "intent": {
+                    "type": "string",
+                    "description": "Filter to messages carrying this intent label.",
                 },
             },
             "required": ["channel"],
@@ -402,6 +413,8 @@ def _msg_to_dict(msg: Message) -> dict[str, Any]:
         d["parent_id"] = msg.parent_id
     if msg.thread_id is not None:
         d["thread_id"] = msg.thread_id
+    if msg.intent is not None:
+        d["intent"] = msg.intent
     return d
 
 
@@ -421,6 +434,7 @@ def _tool_send(client: MansioClient, args: dict[str, Any]) -> Any:
         args["content"],
         msg_type=args.get("msg_type", "chat"),
         parent_id=args.get("parent_id"),
+        intent=args.get("intent"),
     )
     return {"message_id": msg_id}
 
@@ -431,6 +445,7 @@ def _tool_read(client: MansioClient, args: dict[str, Any]) -> Any:
         limit=args.get("limit", 10),
         order=args.get("order", "newest"),
         thread_id=args.get("thread_id"),
+        intent=args.get("intent"),
     )
     return [_msg_to_dict(m) for m in msgs]
 
