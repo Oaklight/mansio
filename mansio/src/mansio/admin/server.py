@@ -333,6 +333,7 @@ class AdminServer:
                     "GET /api/users/{user_id}/tokens",
                     "POST /api/users/{user_id}/tokens",
                     "GET /api/tokens",
+                    "POST /api/tokens",
                 ],
             }
 
@@ -692,7 +693,21 @@ class AdminServer:
                     "message": "Token store not configured",
                 }, 503
             data = request.json() if request.body else {}
+            supertoken = data.get("supertoken", False)
+            if not isinstance(supertoken, bool):
+                return {
+                    "error": "Bad Request",
+                    "message": "supertoken must be a boolean",
+                }, 400
             user_id = data.get("user_id")
+            if supertoken:
+                if user_id is not None:
+                    return {
+                        "error": "Bad Request",
+                        "message": "user_id must be omitted when supertoken is true",
+                    }, 400
+                entry = token_store.create_token(user_id=None, label=data.get("label", ""))
+                return {"ok": True, "supertoken": True, "token": entry}, 201
             if not isinstance(user_id, str) or not user_id.strip():
                 return {
                     "error": "Bad Request",
