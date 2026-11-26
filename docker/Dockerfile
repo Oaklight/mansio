@@ -43,11 +43,9 @@ RUN PIP_ARGS="--no-cache-dir"; \
         echo "Installing from local wheel: $LOCAL_WHEEL"; \
         pip install $PIP_ARGS "/tmp/dist/${LOCAL_WHEEL}"; \
     elif [ -n "$EXTRA_INDEX_URL" ] && [ -n "$PACKAGE_VERSION" ]; then \
-        echo "Installing mansio==$PACKAGE_VERSION from $EXTRA_INDEX_URL (no-deps)"; \
-        pip install $PIP_ARGS --extra-index-url "$EXTRA_INDEX_URL" --no-deps \
+        echo "Installing mansio==$PACKAGE_VERSION from $EXTRA_INDEX_URL"; \
+        pip install $PIP_ARGS --extra-index-url "$EXTRA_INDEX_URL" \
             "mansio==$PACKAGE_VERSION"; \
-        echo "Installing dependencies from PyPI"; \
-        pip install $PIP_ARGS "mansio==$PACKAGE_VERSION"; \
     elif [ -n "$PACKAGE_VERSION" ]; then \
         echo "Installing mansio version: $PACKAGE_VERSION"; \
         pip install $PIP_ARGS "mansio==$PACKAGE_VERSION"; \
