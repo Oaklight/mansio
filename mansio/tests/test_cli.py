@@ -609,6 +609,60 @@ class TestClientIntegration:
         assert result.stdout.strip()
 
 
+class TestClientErrorReporting:
+    """Client failures print one error line and exit 1, like mansio-client."""
+
+    def test_invalid_user_id_exits_cleanly(self, monkeypatch, capsys):
+        monkeypatch.setenv("MANSIO_URL", "http://127.0.0.1:1")
+        with pytest.raises(SystemExit) as exc:
+            main(["client", "channels", "--user-id", "INVALID"])
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "error: Invalid user_id" in err
+        assert "Traceback" not in err
+
+    def test_api_error_prints_one_line(self, mansio_server):
+        url, _store, _bus, _server = mansio_server
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "mansio.cli",
+                "client",
+                "channels",
+                "-s",
+                url,
+                "-u",
+                "test-agent",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        assert result.stderr.startswith("error: HTTP 403")
+        assert "Traceback" not in result.stderr
+
+    def test_connection_error_prints_one_line(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "mansio.cli",
+                "client",
+                "channels",
+                "-s",
+                "http://127.0.0.1:1",
+                "-u",
+                "test-agent",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        assert "error: cannot reach http://127.0.0.1:1" in result.stderr
+        assert "Traceback" not in result.stderr
+
+
 # ── Serve Startup and Network Exposure Guard ──────────────────────
 
 
