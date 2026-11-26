@@ -339,7 +339,7 @@ flowchart TD
       <thead><tr><th>身份</th><th>可由谁创建</th><th>可写频道</th><th>说明</th></tr></thead>
       <tbody>
         <tr><td>普通 token（绑定 <code>user_id</code>）</td><td>Admin API / 管理面板</td><td>自己的 <code>notebook:X</code>、<code>memory:X</code>、<code>dm:*</code>、普通频道</td><td>发布时 <code>sender</code> 必须与 token 绑定用户一致；presence heartbeat 同理</td></tr>
-        <tr><td>supertoken（<code>user_id</code> 为空）</td><td>仅能通过 <code>TokenStore.create_token(user_id=None)</code> 创建（#299）</td><td>任意用户身份；<code>broadcast:*</code> 与 <code>_system:*</code></td><td>目前 Admin API 不接受创建 supertoken</td></tr>
+        <tr><td>supertoken（<code>user_id</code> 为空）</td><td>Admin API <code>POST /api/tokens {"supertoken": true}</code>，或 <code>TokenStore.create_token(user_id=None)</code>（#328 起管理面板也可创建）</td><td>任意用户身份；<code>broadcast:*</code> 与 <code>_system:*</code></td><td><code>supertoken</code> 与 <code>user_id</code> 互斥；<code>supertoken</code> 必须是布尔值</td></tr>
         <tr><td>无认证模式</td><td><code>--no-auth</code> 或 <code>allow_unauthenticated=True</code></td><td>任意</td><td>仅本地开发；绑定到非回环地址时启动守卫会拒绝</td></tr>
       </tbody>
     </table>
