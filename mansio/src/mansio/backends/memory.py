@@ -233,7 +233,9 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
         """
         with self._lock:
             all_msgs = [m for ch_msgs in self._messages.values() for m in ch_msgs]
-            n_channels = len(self._messages)
+            # Count only channels that still hold messages, matching
+            # list_channels() and SQLite's COUNT(DISTINCT channel).
+            n_channels = sum(1 for msgs in self._messages.values() if msgs)
 
         senders: set[str] = set()
         types: dict[str, int] = {}
@@ -382,8 +384,14 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
         deleted = 0
         for ch in list(self._messages):
             before = len(self._messages[ch])
-            self._messages[ch] = [m for m in self._messages[ch] if m.id not in to_remove]
-            deleted += before - len(self._messages[ch])
+            kept = [m for m in self._messages[ch] if m.id not in to_remove]
+            deleted += before - len(kept)
+            if kept:
+                self._messages[ch] = kept
+            else:
+                # Drop the key so an emptied channel disappears from
+                # stats()/info(), matching list_channels() and SQLite.
+                del self._messages[ch]
         for mid in to_remove:
             self._queue_status_map.pop(mid, None)
             self._messages_by_id.pop(mid, None)
@@ -501,7 +509,7 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
 
         with self._lock:
             total_msgs = sum(len(msgs) for msgs in self._messages.values())
-            n_channels = len(self._messages)
+            n_channels = sum(1 for msgs in self._messages.values() if msgs)
             size_bytes = sys.getsizeof(self._messages)
             for msgs in self._messages.values():
                 size_bytes += sys.getsizeof(msgs)
