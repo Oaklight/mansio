@@ -74,6 +74,10 @@ _TOOLS: list[dict[str, Any]] = [
                     "description": "Message type (default: chat).",
                     "default": "chat",
                 },
+                "metadata": {
+                    "type": "object",
+                    "description": "Optional structured metadata attached to the message.",
+                },
                 "parent_id": {
                     "type": "string",
                     "description": "ID of the message being replied to (threading).",
@@ -604,6 +608,7 @@ def _tool_send(client: MansioClient, args: dict[str, Any]) -> Any:
         args["channel"],
         args["content"],
         msg_type=args.get("msg_type", "chat"),
+        metadata=args.get("metadata"),
         parent_id=args.get("parent_id"),
         intent=args.get("intent"),
     )
