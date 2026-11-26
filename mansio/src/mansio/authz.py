@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 PRIVATE_CHANNEL_PREFIXES = ("notebook:", "memory:")
 DM_PREFIX = "dm:"
+DM_NAME_EXPECTED = "Invalid dm channel name; expected 'dm:<user_a>:<user_b>'"
 
 
 def dm_participants(channel: str) -> tuple[str, str] | None:
@@ -51,7 +52,7 @@ def dm_channel_error(channel: str) -> str | None:
     the ``dm:`` prefix at all.
     """
     if channel.startswith(DM_PREFIX) and dm_participants(channel) is None:
-        return "Invalid dm channel name; expected 'dm:<user_a>:<user_b>'"
+        return DM_NAME_EXPECTED
     return None
 
 
@@ -63,8 +64,9 @@ def is_private_channel(channel: str) -> bool:
     registered prefixes) is public.
 
     Any name starting with ``dm:`` is private, including a malformed one.
-    Failing closed keeps pre-existing malformed DM rows readable only by
-    their sender, even though new malformed names are rejected on input.
+    Failing closed keeps pre-existing malformed DM rows hidden from scoped
+    tokens other than their sender, even though new malformed names are
+    rejected on input.
     """
     if channel.startswith(DM_PREFIX):
         return True
