@@ -111,7 +111,7 @@
     智能体只通过 HTTP 与服务器通信。
   </p>
   <div class="meta">
-    <span>快照：<code>master @ 27ad80c</code></span>
+    <span>快照：<code>master @ b9ab650</code></span>
     <span>生成日期：2026-11-26</span>
     <span>分支：<code>docs_arch</code>（孤儿分支）</span>
   </div>
@@ -310,10 +310,10 @@ flowchart LR
 <section id="auth">
   <h2><span class="num">04</span>认证与访问控制</h2>
   <p class="sub">
-    认证在 Frontend 中间件完成；授权分两层：结构化的频道命名规则，以及频道元数据中的 ACL 条目。
+    认证在 Frontend 中间件完成；授权分两层：结构化的频道命名规则，以及频道存储中的 owner、visibility 与 ACL 条目。
     <code>/health</code> 与 <code>/v1/auth/check</code> 是公开路径。
     <code>broadcast:*</code> 的写入同时检查频道 owner 与 ACL；频道尚不存在时，首个发布者成为 owner。
-    授权策略集中在 <code>mansio/authz.py</code> 的 <code>ChannelAuthorizer</code>；Frontend 认证后把发布、查询、订阅、频道列表、删除与 ACL 判定交给它。内置频道类型在创建时写入预设 ACL：<code>dm:*</code> 写入 <code>member</code>，<code>notebook:*</code> / <code>memory:*</code> 写入 <code>owner</code>。<code>dm:</code> 频道名必须恰好是 <code>dm:&lt;a&gt;:&lt;b&gt;</code> 且两段非空；发布、建频道、查询、订阅对畸形名返回 400，建频道与发布共用同一校验器。历史遗留的畸形 dm 行仍按私有频道处理（fail-closed），只有发送者可读。频道元数据路由 <code>GET /v1/channels/&lt;ch&gt;/meta</code> 同样经过授权：scoped token 只能读取自己可读频道的元数据；拒绝时返回与「频道不存在」相同的 404，避免确认私有频道存在。supertoken 与 no-auth 在 Frontend 直接放行，不进入该策略。
+    授权策略集中在 <code>mansio/authz.py</code> 的 <code>ChannelAuthorizer</code>；Frontend 认证后把发布、查询、订阅、频道列表、删除与 ACL 判定交给它。内置频道类型在创建时写入预设 ACL：<code>dm:*</code> 写入 <code>member</code>，<code>notebook:*</code> / <code>memory:*</code> 写入 <code>owner</code>。<code>dm:</code> 频道名必须恰好是 <code>dm:&lt;a&gt;:&lt;b&gt;</code> 且两段非空；发布、建频道、查询、订阅对畸形名返回 400，建频道与发布共用同一校验器。历史遗留的畸形 dm 行仍按私有频道处理（fail-closed），只有发送者可读。频道元数据路由 <code>GET /v1/channels/&lt;ch&gt;/meta</code> 同样经过授权：scoped token 只能读取自己可读频道的元数据；拒绝时返回与「频道不存在」相同的 404，避免确认私有频道存在。对普通频道与注册前缀频道，策略层查询频道存储（`Bus.check_access`），因此 `visibility="private"`、owner 与 ACL 条目对读写生效；无频道存储的后端（Maildir、NATS）按公开处理。`POST /v1/channels` 套用同一套结构规则：<code>notebook:</code>/<code>memory:</code> 仅命名空间本人，<code>dm:</code> 仅两名参与者，<code>broadcast:</code> 保留给首个发布者（supertoken/no-auth 可预创建），<code>_system:*</code> 拒绝 scoped token。工作队列路由同样受控：claim 需要该频道的 publish 规则，ack 与状态查询需要读权限，拒绝响应与「未认领 / 无状态」一致。supertoken 与 no-auth 在 Frontend 直接放行，不进入该策略。
   </p>
   <div class="panel">
     <div class="mermaid">
@@ -329,7 +329,7 @@ flowchart TD
   VAL -->|False| E401
   VAL -->|"str user_id"| SCOPED["auth_result = user_id"]
   VAL -->|"None (supertoken)"| SUPER["auth_result = None"]
-  SCOPED --> AUTHZ["authz.ChannelAuthorizer: 结构规则（含 dm:a:b 格式）+ 频道类型预设 + ACL"]
+  SCOPED --> AUTHZ["authz.ChannelAuthorizer: 结构规则 + 频道存储（owner/visibility/ACL）+ 频道类型预设"]
   AUTHZ --> HANDLER["业务处理器"]
   SUPER --> BYPASS["Frontend 直接放行"]
   OPEN --> BYPASS
@@ -448,7 +448,7 @@ flowchart LR
         <tr><td>自身消息过滤</td><td><code>MansioClient.subscribe / listen / channel_poll / check_unread</code> 默认 <code>include_own=False</code>；<code>channel_read</code> 保持包含自身消息；federation 显式传 <code>include_own=True</code></td><td>轮询与订阅默认不把自己的消息当作新消息；需要自回显时显式开启</td></tr>
         <tr><td>压缩</td><td><code>system_policy.system_channel_policy</code></td><td>游标快照只保留最新一条，避免系统频道无界增长</td></tr>
         <tr><td>线程</td><td>消息字段 <code>parent_id</code> / <code>thread_id</code></td><td>回复链与扁平线程查询</td></tr>
-        <tr><td>工作队列</td><td><code>queue_publish / queue_claim / queue_ack</code></td><td>租约式任务认领；NATS 用 KV 保存认领状态</td></tr>
+        <tr><td>工作队列</td><td><code>queue_publish / queue_claim / queue_ack</code></td><td>租约式任务认领；NATS 用 KV 保存认领状态；claim 需 publish 权限，ack/status 需读权限</td></tr>
         <tr><td>在线状态</td><td>认证活动与 SSE 订阅自动刷新；<code>POST /v1/presence/heartbeat</code> 供空闲客户端使用</td><td><code>users()</code> 反映真实活跃度；heartbeat 只能代表 token 自身用户</td></tr>
       </tbody>
     </table>
