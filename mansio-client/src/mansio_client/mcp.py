@@ -105,6 +105,10 @@ _TOOLS: list[dict[str, Any]] = [
                     "description": "Max messages to return (default: 10).",
                     "default": 10,
                 },
+                "after": {
+                    "type": "string",
+                    "description": "Return messages after this message ID (cursor).",
+                },
                 "order": {
                     "type": "string",
                     "enum": ["oldest", "newest"],
@@ -619,6 +623,7 @@ def _tool_read(client: MansioClient, args: dict[str, Any]) -> Any:
     msgs = client.channel_read(
         args["channel"],
         limit=args.get("limit", 10),
+        after=args.get("after"),
         order=args.get("order", "newest"),
         thread_id=args.get("thread_id"),
         intent=args.get("intent"),

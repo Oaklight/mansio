@@ -311,6 +311,24 @@ class TestCallTool(unittest.TestCase):
         self.client.channel_read.assert_called_once_with(
             "general",
             limit=10,
+            after=None,
+            order="newest",
+            thread_id=None,
+            intent=None,
+            include_own=False,
+        )
+
+    def test_read_after_cursor(self) -> None:
+        self.client.channel_read.return_value = []
+        _call_tool(
+            self.client,
+            "mansio_read",
+            {"channel": "general", "after": "msg-100"},
+        )
+        self.client.channel_read.assert_called_once_with(
+            "general",
+            limit=10,
+            after="msg-100",
             order="newest",
             thread_id=None,
             intent=None,
@@ -332,6 +350,7 @@ class TestCallTool(unittest.TestCase):
         self.client.channel_read.assert_called_once_with(
             "dev",
             limit=5,
+            after=None,
             order="oldest",
             thread_id="msg-0",
             intent=None,
@@ -351,6 +370,7 @@ class TestCallTool(unittest.TestCase):
         self.client.channel_read.assert_called_once_with(
             "dev",
             limit=10,
+            after=None,
             order="newest",
             thread_id=None,
             intent="FYI_ONLY",
@@ -367,6 +387,7 @@ class TestCallTool(unittest.TestCase):
         self.client.channel_read.assert_called_once_with(
             "dev",
             limit=10,
+            after=None,
             order="newest",
             thread_id=None,
             intent=None,
@@ -753,6 +774,12 @@ class TestToolDefinitions(unittest.TestCase):
         schema = tool["inputSchema"]
         assert schema["properties"]["metadata"]["type"] == "object"
         assert "metadata" not in schema.get("required", [])
+
+    def test_read_schema_has_optional_after(self) -> None:
+        tool = next(t for t in _TOOLS if t["name"] == "mansio_read")
+        schema = tool["inputSchema"]
+        assert schema["properties"]["after"]["type"] == "string"
+        assert "after" not in schema.get("required", [])
 
     def test_every_tool_is_dispatchable(self) -> None:
         assert {t["name"] for t in _TOOLS} == set(_DISPATCH)
