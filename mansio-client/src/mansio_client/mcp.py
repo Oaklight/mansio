@@ -222,6 +222,86 @@ _TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "mansio_thought",
+        "description": "Record a thought in the agent's private notebook.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "Thought content."},
+                "thinking_mode": {
+                    "type": "string",
+                    "description": "Mode, e.g. reasoning, planning, reflection.",
+                },
+                "focus_area": {
+                    "type": "string",
+                    "description": "What the thought is about.",
+                },
+            },
+            "required": ["content"],
+        },
+    },
+    {
+        "name": "mansio_thought_read",
+        "description": "Read recent thoughts from the agent's private notebook.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Max thoughts to return (default: 10).",
+                    "default": 10,
+                },
+            },
+        },
+    },
+    {
+        "name": "mansio_broadcast_list",
+        "description": "List broadcast topics available on the server.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "mansio_broadcast_read",
+        "description": "Read messages from a broadcast topic.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string", "description": "Broadcast topic name."},
+                "limit": {
+                    "type": "integer",
+                    "description": "Max messages to return (default: 10).",
+                    "default": 10,
+                },
+            },
+            "required": ["topic"],
+        },
+    },
+    {
+        "name": "mansio_check_unread",
+        "description": "Count unread messages per channel without advancing cursors.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "mansio_notifications",
+        "description": "Poll for new notifications addressed to this agent.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "mansio_user_status",
+        "description": "Get presence for a single agent.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string", "description": "Agent to look up."},
+                "timeout_seconds": {
+                    "type": "integer",
+                    "description": "Active within this window (default: 120).",
+                    "default": 120,
+                },
+            },
+            "required": ["user_id"],
+        },
+    },
+    {
         "name": "mansio_agents",
         "description": "List agents with recent presence on the server.",
         "inputSchema": {
@@ -484,6 +564,52 @@ def _tool_memory_recall(client: MansioClient, args: dict[str, Any]) -> Any:
     return [_msg_to_dict(m) for m in msgs]
 
 
+def _tool_thought(client: MansioClient, args: dict[str, Any]) -> Any:
+    msg_id = client.thought_record(
+        args["content"],
+        thinking_mode=args.get("thinking_mode"),
+        focus_area=args.get("focus_area"),
+    )
+    return {"message_id": msg_id}
+
+
+def _tool_thought_read(client: MansioClient, args: dict[str, Any]) -> Any:
+    msgs = client.thought_read(limit=args.get("limit", 10))
+    return [_msg_to_dict(m) for m in msgs]
+
+
+def _tool_broadcast_list(client: MansioClient, args: dict[str, Any]) -> Any:
+    return client.broadcast_list()
+
+
+def _tool_broadcast_read(client: MansioClient, args: dict[str, Any]) -> Any:
+    msgs = client.broadcast_read(args["topic"], limit=args.get("limit", 10))
+    return [_msg_to_dict(m) for m in msgs]
+
+
+def _tool_check_unread(client: MansioClient, args: dict[str, Any]) -> Any:
+    unread = client.check_unread()
+    return {"unread": unread, "total_unread": sum(unread.values())}
+
+
+def _tool_notifications(client: MansioClient, args: dict[str, Any]) -> Any:
+    return [_msg_to_dict(m) for m in client.notification_check()]
+
+
+def _tool_user_status(client: MansioClient, args: dict[str, Any]) -> Any:
+    presence = client.user_status(
+        args["user_id"], timeout_seconds=args.get("timeout_seconds", 120)
+    )
+    if presence is None:
+        return None
+    return {
+        "user_id": presence.user_id,
+        "status": presence.status,
+        "last_seen": presence.last_seen,
+        "metadata": presence.metadata,
+    }
+
+
 def _tool_agents(client: MansioClient, args: dict[str, Any]) -> Any:
     agents = client.users(timeout_seconds=args.get("timeout_seconds", 120))
     return [
@@ -578,6 +704,13 @@ _DISPATCH: dict[str, Callable[[MansioClient, dict[str, Any]], Any]] = {
     "mansio_note_read": _tool_note_read,
     "mansio_memory_store": _tool_memory_store,
     "mansio_memory_recall": _tool_memory_recall,
+    "mansio_thought": _tool_thought,
+    "mansio_thought_read": _tool_thought_read,
+    "mansio_broadcast_list": _tool_broadcast_list,
+    "mansio_broadcast_read": _tool_broadcast_read,
+    "mansio_check_unread": _tool_check_unread,
+    "mansio_notifications": _tool_notifications,
+    "mansio_user_status": _tool_user_status,
     "mansio_agents": _tool_agents,
     "mansio_heartbeat": _tool_heartbeat,
     "mansio_channel_create": _tool_channel_create,
