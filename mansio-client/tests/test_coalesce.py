@@ -25,6 +25,7 @@ class _FakeTransport:
     def __init__(self) -> None:
         self.subs: dict[str, dict] = {}
         self.unsubscribed: list[str] = []
+        self.closed = False
         self._count = 0
 
     def subscribe(self, channel, callback, on_error=None, *, include_own=True):
@@ -40,6 +41,9 @@ class _FakeTransport:
 
     def unsubscribe(self, sub_id: str) -> None:
         self.unsubscribed.append(sub_id)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def _client(transport: _FakeTransport) -> MansioClient:
@@ -214,3 +218,20 @@ class TestClientSubscribe:
         client.unsubscribe("missing")
 
         assert transport.unsubscribed == ["missing"]
+
+    def test_close_drops_pending_batches(self, fake_timer) -> None:
+        transport = _FakeTransport()
+        client = _client(transport)
+        client._cursors = {}
+        client._persisted = {}
+        got: list[list[Message]] = []
+
+        sub_id = client.subscribe("ch", got.append, coalesce_ms=50)
+        transport.subs[sub_id]["callback"](_msg("1"))
+
+        client.close()
+
+        assert got == []
+        assert transport.closed is True
+        fake_timer.instances[0].fire()  # a late timer delivers nothing
+        assert got == []
