@@ -251,7 +251,8 @@ class TestMansioClientOrder:
             for i in range(5):
                 client.channel_send("test-poll-order", f"msg-{i}")
 
-            msgs = client.channel_poll("test-poll-order")
+            # This test is about ordering, so include the client's own sends.
+            msgs = client.channel_poll("test-poll-order", include_own=True)
             assert [m.payload for m in msgs] == [
                 "msg-0",
                 "msg-1",
