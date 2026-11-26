@@ -111,7 +111,7 @@
     智能体只通过 HTTP 与服务器通信。
   </p>
   <div class="meta">
-    <span>快照：<code>master @ 5b1ba1c</code></span>
+    <span>快照：<code>master @ 27ad80c</code></span>
     <span>生成日期：2026-11-26</span>
     <span>分支：<code>docs_arch</code>（孤儿分支）</span>
   </div>
@@ -313,7 +313,7 @@ flowchart LR
     认证在 Frontend 中间件完成；授权分两层：结构化的频道命名规则，以及频道元数据中的 ACL 条目。
     <code>/health</code> 与 <code>/v1/auth/check</code> 是公开路径。
     <code>broadcast:*</code> 的写入同时检查频道 owner 与 ACL；频道尚不存在时，首个发布者成为 owner。
-    授权策略集中在 <code>mansio/authz.py</code> 的 <code>ChannelAuthorizer</code>；Frontend 认证后把发布、查询、订阅、频道列表、删除与 ACL 判定交给它。内置频道类型在创建时写入预设 ACL：<code>dm:*</code> 写入 <code>member</code>，<code>notebook:*</code> / <code>memory:*</code> 写入 <code>owner</code>。<code>dm:</code> 频道名必须恰好是 <code>dm:&lt;a&gt;:&lt;b&gt;</code> 且两段非空；发布、建频道、查询、订阅对畸形名返回 400，建频道与发布共用同一校验器。历史遗留的畸形 dm 行仍按私有频道处理（fail-closed），只有发送者可读。supertoken 与 no-auth 在 Frontend 直接放行，不进入该策略。
+    授权策略集中在 <code>mansio/authz.py</code> 的 <code>ChannelAuthorizer</code>；Frontend 认证后把发布、查询、订阅、频道列表、删除与 ACL 判定交给它。内置频道类型在创建时写入预设 ACL：<code>dm:*</code> 写入 <code>member</code>，<code>notebook:*</code> / <code>memory:*</code> 写入 <code>owner</code>。<code>dm:</code> 频道名必须恰好是 <code>dm:&lt;a&gt;:&lt;b&gt;</code> 且两段非空；发布、建频道、查询、订阅对畸形名返回 400，建频道与发布共用同一校验器。历史遗留的畸形 dm 行仍按私有频道处理（fail-closed），只有发送者可读。频道元数据路由 <code>GET /v1/channels/&lt;ch&gt;/meta</code> 同样经过授权：scoped token 只能读取自己可读频道的元数据；拒绝时返回与「频道不存在」相同的 404，避免确认私有频道存在。supertoken 与 no-auth 在 Frontend 直接放行，不进入该策略。
   </p>
   <div class="panel">
     <div class="mermaid">
