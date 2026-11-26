@@ -378,7 +378,7 @@ Bus 不暴露任何授权参数：Frontend 在调用 `Bus.publish` / `Bus.query`
 
 **工作队列（`/v1/queue/*`）**：claim 需要该频道的 `publish` 规则；ack 与查询 claim 状态需要读权限。被拒绝的调用方得到的响应与"ack 未成功"或"消息没有队列状态"完全相同，因此不会确认私有消息是否存在。claim 不会为调用方创建 `broadcast:*` 频道。
 
-**删除频道**：具有作用域的令牌可删除自己所属的 `dm:`/`notebook:`/`memory:` 频道，以及存储记录授予其 `delete` 动词的普通频道或注册前缀频道（所有者，或持有 `delete`/`manage` 的 ACL 条目）。未注册的普通频道、`broadcast:*` 与 `_system:*` 仍仅限 supertoken。
+**删除频道**：具有作用域的令牌可删除自己所属的 `dm:`/`notebook:`/`memory:` 频道，以及存储记录授予其 `delete` 动词的普通频道或注册前缀频道（所有者，或持有 `delete` 的 ACL 条目；`manage` 动词只控制 ACL，不包含删除权限）。未注册的普通频道、`broadcast:*` 与 `_system:*` 仍仅限 supertoken。
 
 ##### Notebook vs Memory（认知心理学视角）
 

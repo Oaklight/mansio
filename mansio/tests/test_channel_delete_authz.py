@@ -115,6 +115,25 @@ class TestOwnerCanDelete:
 
 
 class TestNonOwnerIsDenied:
+    def test_manage_verb_alone_cannot_delete(self, mansio_server) -> None:
+        """``manage`` controls the ACL; deletion needs ``delete``/``owner``."""
+        url, store, bus, _server = mansio_server
+        tok = _tokens(store)
+        _create(url, tok["alice"], "team")
+        _publish(url, tok["alice"], "alice", "team")
+        status, data = _req(
+            f"{url}/v1/channels/team/acl",
+            "POST",
+            tok["alice"],
+            {"user_id": "bob", "permission": "manage"},
+        )
+        assert status == 201, data
+
+        status, data = _delete(url, tok["bob"], "team")
+        assert status == 403, data
+        assert data["message"] == SHARED_DENIAL
+        assert bus.get_channel_meta("team") is not None
+
     def test_member_and_stranger_keep_the_existing_denial(self, mansio_server) -> None:
         url, store, bus, _server = mansio_server
         tok = _tokens(store)
