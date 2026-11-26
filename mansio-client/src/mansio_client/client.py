@@ -159,7 +159,14 @@ class MansioClient:
         return self._display_name
 
     def close(self) -> None:
-        """Release resources, retrying any cursor write that failed."""
+        """Release resources, retrying any cursor write that failed.
+
+        Pending coalesced batches are dropped: the client is closing, so
+        no callback is delivered after ``close()`` returns.
+        """
+        for coalescer in self._coalescers.values():
+            coalescer.close(flush=False)
+        self._coalescers.clear()
         self._save_cursors()
         self._transport.close()
 
