@@ -10,20 +10,27 @@ public.
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
+from mansio import Bus, MemoryBackend
 from mansio._vendor.httpclient import Client as HttpClient
+from mansio.frontends.http import _broadcast_write_allowed
 
 CHANNEL = "broadcast:news"
+RACE_CHANNEL = "broadcast:race"
 
 
-def _post_publish(url: str, token: str, sender: str, payload: str = "hello"):
+def _post_publish(
+    url: str, token: str, sender: str, payload: str = "hello", channel: str = CHANNEL
+):
     http = HttpClient(headers={"Authorization": f"Bearer {token}"})
     try:
         return http.post(
             f"{url}/v1/publish",
             json={
-                "channel": CHANNEL,
+                "channel": channel,
                 "sender": sender,
                 "msg_type": "announcement",
                 "payload": payload,
@@ -117,3 +124,39 @@ class TestBroadcastReadStaysPublic:
         assert resp.status_code == 200, resp.json()
         payloads = [m["payload"] for m in resp.json()["messages"]]
         assert "release note" in payloads
+
+
+class TestFirstPublisherRace:
+    """#333: concurrent first publishers must not both be authorized."""
+
+    def test_concurrent_first_publishers_only_one_wins(self) -> None:
+        bus = Bus(backend=MemoryBackend())
+        results: dict[str, bool] = {}
+        barrier = threading.Barrier(2)
+
+        def attempt(user_id: str) -> None:
+            barrier.wait()
+            results[user_id] = _broadcast_write_allowed(bus, RACE_CHANNEL, user_id)
+
+        threads = [
+            threading.Thread(target=attempt, args=(user,)) for user in ("agent-a", "agent-b")
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert sorted(results.values()) == [False, True]
+        winner = next(user for user, allowed in results.items() if allowed)
+        meta = bus.get_channel_meta(RACE_CHANNEL)
+        assert meta is not None
+        assert meta.owner == winner
+
+    def test_loser_cannot_publish_over_http(self, mansio_server) -> None:
+        url, token_store, bus, server = mansio_server
+        winner, loser = "agent-a", "agent-b"
+        bus.ensure_channel(RACE_CHANNEL, owner=winner)
+        tokens = {user: token_store.create_token(user, "race")["token"] for user in (winner, loser)}
+
+        assert _post_publish(url, tokens[loser], loser, channel=RACE_CHANNEL).status_code == 403
+        assert _post_publish(url, tokens[winner], winner, channel=RACE_CHANNEL).status_code == 200
