@@ -64,9 +64,9 @@ def is_private_channel(channel: str) -> bool:
     registered prefixes) is public.
 
     Any name starting with ``dm:`` is private, including a malformed one.
-    Failing closed keeps pre-existing malformed DM rows hidden from scoped
-    tokens other than their sender, even though new malformed names are
-    rejected on input.
+    The input paths reject malformed names, but a row that already exists
+    (or a caller that does not go through those paths) must not become
+    public: no scoped token is a member, so only the sender is involved.
     """
     if channel.startswith(DM_PREFIX):
         return True
