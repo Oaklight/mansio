@@ -20,12 +20,19 @@ from collections.abc import Callable
 from typing import Any
 
 from mansio_client import MansioClient
-from mansio_client.types import ACLEntry, Message
+from mansio_client.types import ACLEntry, ALLOWED_PERMISSIONS, Message
 
 # ── Protocol Constants ────────────────────────────────────────────
 
 _JSONRPC = "2.0"
 _MCP_PROTOCOL_VERSION = "2024-11-05"
+
+_PERMISSION_VALUES: list[str] = sorted(ALLOWED_PERMISSIONS)
+_PERMISSION_DESCRIPTION = (
+    "Permission: the presets viewer/member/owner expand to the verbs "
+    "read/publish/delete/manage; the legacy levels write and admin map to "
+    "member and owner (default: read)."
+)
 
 _SERVER_INFO = {
     "name": "mansio-mcp",
@@ -397,7 +404,11 @@ _TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "mansio_acl_set",
-        "description": "Replace all ACL entries for a channel.",
+        "description": (
+            "Replace all ACL entries for a channel. Permissions accept the "
+            "presets viewer/member/owner, the verbs read/publish/delete/manage, "
+            "or the legacy levels write/admin."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -414,7 +425,8 @@ _TOOLS: list[dict[str, Any]] = [
                             "user_id": {"type": "string"},
                             "permission": {
                                 "type": "string",
-                                "enum": ["read", "write", "admin"],
+                                "description": _PERMISSION_DESCRIPTION,
+                                "enum": _PERMISSION_VALUES,
                                 "default": "read",
                             },
                         },
@@ -427,7 +439,11 @@ _TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "mansio_acl_add",
-        "description": "Add an ACL entry for a user on a channel.",
+        "description": (
+            "Add an ACL entry for a user on a channel. Permissions accept the "
+            "presets viewer/member/owner, the verbs read/publish/delete/manage, "
+            "or the legacy levels write/admin."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -441,8 +457,8 @@ _TOOLS: list[dict[str, Any]] = [
                 },
                 "permission": {
                     "type": "string",
-                    "description": "Permission level (default: read).",
-                    "enum": ["read", "write", "admin"],
+                    "description": _PERMISSION_DESCRIPTION,
+                    "enum": _PERMISSION_VALUES,
                     "default": "read",
                 },
             },

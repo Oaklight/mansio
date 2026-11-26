@@ -13,6 +13,14 @@ from typing import NoReturn
 from mansio_client import MansioAPIError, MansioClient, __version__
 from mansio_client._vendor.httpclient import HttpClientError
 from mansio_client.env import env_or as _env_or
+from mansio_client.types import ALLOWED_PERMISSIONS
+
+_PERMISSION_CHOICES: list[str] = sorted(ALLOWED_PERMISSIONS)
+_PERMISSION_HELP = (
+    "ACL permission: the presets viewer/member/owner expand to the verbs "
+    "read/publish/delete/manage; the legacy levels write and admin map to "
+    "member and owner (default: read)"
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -127,12 +135,21 @@ def _build_parser() -> argparse.ArgumentParser:
     acl_get.add_argument("channel")
     acl_set = acl_sub.add_parser("set", help="Replace ACL entries (JSON)")
     acl_set.add_argument("channel")
-    acl_set.add_argument("entries_json", help="JSON array of {user_id, permission}")
+    acl_set.add_argument(
+        "entries_json",
+        help=(
+            "JSON array of {user_id, permission}; permission accepts a preset, "
+            "a verb, or a legacy write/admin level"
+        ),
+    )
     acl_add_p = acl_sub.add_parser("add", help="Add an ACL entry")
     acl_add_p.add_argument("channel")
     acl_add_p.add_argument("user_id")
     acl_add_p.add_argument(
-        "--permission", default="read", choices=["read", "write", "admin"]
+        "--permission",
+        default="read",
+        choices=_PERMISSION_CHOICES,
+        help=_PERMISSION_HELP,
     )
     acl_rm = acl_sub.add_parser("remove", help="Remove an ACL entry")
     acl_rm.add_argument("channel")
