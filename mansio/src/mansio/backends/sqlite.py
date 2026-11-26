@@ -17,12 +17,13 @@ from mansio._vendor.retry import retry
 from mansio._vendor.structlog import get_logger
 from mansio.protocols import Backend, ChannelStore, Compactable, Deletable, Presenceable
 from mansio.types import (
-    PERMISSION_LEVELS,
     ACLEntry,
     ChannelMeta,
     ClaimResult,
     Message,
     UserPresence,
+    normalize_required,
+    permission_allows,
 )
 
 _CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
@@ -1003,7 +1004,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             ch_owner, ch_vis = row[0], row[1]
             if ch_owner == user_id:
                 return True
-            if ch_vis == "public" and required in ("read", "write"):
+            if ch_vis == "public" and normalize_required(required) in ("read", "publish"):
                 return True
             acl_row = self._conn.execute(
                 "SELECT permission FROM channel_acl WHERE channel = ? AND user_id = ?",
@@ -1011,7 +1012,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             ).fetchone()
             if acl_row is None:
                 return False
-            return PERMISSION_LEVELS.get(acl_row[0], 0) >= PERMISSION_LEVELS.get(required, 0)
+            return permission_allows(acl_row[0], required)
 
     # ── Presence ──────────────────────────────────────────────
 

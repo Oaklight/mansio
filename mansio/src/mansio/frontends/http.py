@@ -313,12 +313,10 @@ def _broadcast_write_allowed(bus: Bus | None, channel: str, user_id: str) -> boo
     if meta.owner == user_id:
         return True
 
-    from mansio.types import PERMISSION_LEVELS
+    from mansio.types import permission_allows
 
-    required = PERMISSION_LEVELS["write"]
     return any(
-        entry.user_id == user_id and PERMISSION_LEVELS.get(entry.permission, 0) >= required
-        for entry in acl
+        entry.user_id == user_id and permission_allows(entry.permission, "publish") for entry in acl
     )
 
 
@@ -1620,16 +1618,21 @@ class HttpFrontend:
             auth_result = request.state.auth_result
             now = _now_iso()
             granted_by = auth_result if isinstance(auth_result, str) else None
-            entries = [
-                ACLEntry(
-                    channel=channel,
-                    user_id=raw["user_id"],
-                    permission=raw.get("permission", "read"),
-                    granted_at=now,
-                    granted_by=granted_by,
+            entries = []
+            for raw in raw_entries:
+                permission = raw.get("permission", "read")
+                permission_err = _validate_permission(permission)
+                if permission_err:
+                    return permission_err
+                entries.append(
+                    ACLEntry(
+                        channel=channel,
+                        user_id=raw["user_id"],
+                        permission=permission,
+                        granted_at=now,
+                        granted_by=granted_by,
+                    )
                 )
-                for raw in raw_entries
-            ]
 
             try:
                 await asyncio.to_thread(bus.set_acl, channel, entries)
@@ -1659,11 +1662,9 @@ class HttpFrontend:
                 return {"error": "Bad Request", "message": "'user_id' is required"}, 400
 
             permission = body.get("permission", "read")
-            if permission not in ("read", "write", "admin"):
-                return {
-                    "error": "Bad Request",
-                    "message": "permission must be 'read', 'write', or 'admin'",
-                }, 400
+            permission_err = _validate_permission(permission)
+            if permission_err:
+                return permission_err
 
             from mansio.types import ACLEntry
 
@@ -1833,18 +1834,31 @@ def _match_channels(channels: list[str], pattern: str) -> list[str]:
     return [ch for ch in channels if fnmatch.fnmatch(ch, pattern)]
 
 
+def _validate_permission(permission: Any) -> tuple[dict, int] | None:
+    """Validate an ACL permission string against the presets and verbs."""
+    from mansio.types import ALLOWED_PERMISSIONS
+
+    if permission not in ALLOWED_PERMISSIONS:
+        allowed = ", ".join(sorted(ALLOWED_PERMISSIONS))
+        return {
+            "error": "Bad Request",
+            "message": f"permission must be one of: {allowed}",
+        }, 400
+    return None
+
+
 async def _require_acl_admin(auth_result: Any, bus: Bus, channel: str) -> tuple[dict, int] | None:
-    """Check that the current user has admin access on *channel*.
+    """Check that the current user may manage *channel*.
 
     Returns an error tuple (dict, status) if denied, or None if allowed.
     Supertokens and no-auth mode always pass.
     """
     if isinstance(auth_result, str) and not await asyncio.to_thread(
-        bus.check_access, channel, auth_result, "admin"
+        bus.check_access, channel, auth_result, "manage"
     ):
         return {
             "error": "Forbidden",
-            "message": f"Agent '{auth_result}' lacks admin permission on '{channel}'",
+            "message": f"Agent '{auth_result}' lacks manage permission on '{channel}'",
         }, 403
     return None
 

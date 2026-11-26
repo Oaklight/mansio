@@ -60,7 +60,7 @@ class TestTypes:
 
     def test_acl_entry_defaults(self):
         e = ACLEntry(channel="ch", user_id="bob")
-        assert e.permission == "write"
+        assert e.permission == "member"
         assert e.granted_at == ""
         assert e.granted_by is None
 
@@ -508,7 +508,7 @@ class TestACLEnforcement:
 
     def test_publish_write_denied(self, bus):
         bus.create_channel("ch", "alice", visibility="private")
-        with pytest.raises(PermissionError, match="write permission"):
+        with pytest.raises(PermissionError, match="publish permission"):
             bus.publish("ch", "bob", "text", "hi", enforce_acl=True)
 
     def test_publish_owner_always_allowed(self, bus):
@@ -576,7 +576,7 @@ class TestACLEnforcement:
         bus.create_channel("ch", "alice", visibility="private")
         entry = ACLEntry(channel="ch", user_id="bob", permission="write", granted_at=_now())
         bus.add_acl_entry(entry)
-        with pytest.raises(PermissionError, match="admin permission"):
+        with pytest.raises(PermissionError, match="delete permission"):
             bus.delete_channel("ch", user_id="bob")
 
     def test_delete_channel_no_agent_skips_check(self, bus):
@@ -648,7 +648,7 @@ class TestACLEnforcement:
         bus.create_channel("ch", "alice", visibility="private")
         entry = ACLEntry(channel="ch", user_id="bob", permission="read", granted_at=_now())
         bus.add_acl_entry(entry)
-        with pytest.raises(PermissionError, match="write permission"):
+        with pytest.raises(PermissionError, match="publish permission"):
             bus.publish("ch", "bob", "text", "hi", enforce_acl=True)
 
 

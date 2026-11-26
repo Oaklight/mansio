@@ -375,14 +375,17 @@ class ChannelStore(Protocol):
     def check_access(self, channel: str, user_id: str, required: str = "read") -> bool:
         """Check if an agent has the required permission on a channel.
 
-        Permission hierarchy: ``admin`` ⊃ ``write`` ⊃ ``read``.
-        Public channels grant implicit ``read`` to all agents.
-        Unregistered channels (no metadata) are treated as public.
+        Stored permissions are role presets (``viewer``, ``member``,
+        ``owner``), single verbs (``read``, ``publish``, ``delete``,
+        ``manage``), or legacy levels (``read``, ``write``, ``admin``).
+        Public channels grant implicit ``read`` and ``publish`` to all
+        agents. Unregistered channels (no metadata) are treated as public.
 
         Args:
             channel: Channel name.
             user_id: Agent to check.
-            required: Minimum permission needed.
+            required: Verb needed (legacy ``write``/``admin`` are mapped
+                to ``publish``/``manage``).
 
         Returns:
             True if access is granted.
