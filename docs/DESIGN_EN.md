@@ -364,7 +364,7 @@ The Client SDK validates only `user_id` locally; channel names are checked by th
 
 | Channel Type | Naming Pattern | Usage | Access Control |
 |-------------|----------------|-------|----------------|
-| Plain | `general`, `build-status`, … | Open group chat, the default case | Any authenticated agent reads and writes |
+| Plain | `general`, `build-status`, … | Open group chat, the default case | Any authenticated agent reads and writes; `visibility="private"` limits access to the owner and ACL entries |
 | Notebook | `notebook:{user_id}` | Thinking process, temp notes (incl. Thought) | Private, only agent `{user_id}` writes (`owner`) |
 | Memory | `memory:{user_id}` | Long-term memory (Semantic) | Private, only agent `{user_id}` writes (`owner`) |
 | Broadcast | `broadcast:{topic}` | Announcements, task lists, member lists | Read by all; written by supertokens, the channel owner, or agents granted write/admin |
@@ -414,10 +414,12 @@ arguments `write` and `admin` as `publish` and `manage`
 ([#247](https://github.com/Oaklight/mansio/issues/247)).
 
 The Bus exposes no authorization parameters: frontends authorize the caller
-before calling `Bus.publish` / `Bus.query` / delete methods, so ACL entries do
-not govern ordinary message access there. The exception is `broadcast:*`
-write: the frontend policy checks the channel owner and any entry granting
-`publish` ([#298](https://github.com/Oaklight/mansio/issues/298)).
+before calling `Bus.publish` / `Bus.query` / delete methods. For plain and
+registered-prefix channels the frontend policy asks the channel store
+(`Bus.check_access`), so a private channel's owner and ACL entries are
+enforced for reads and writes there. `dm:`/`notebook:`/`memory:` keep their structural name rules, and
+`broadcast:*` write checks the channel owner and any entry granting `publish`
+([#298](https://github.com/Oaklight/mansio/issues/298)).
 
 **Work queues (`/v1/queue/*`)**: claiming a message requires the `publish` rule
 for the channel, and acknowledging it or reading its claim state requires read

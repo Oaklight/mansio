@@ -327,7 +327,7 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 
 | Channel 类型 | 命名模式 | 用途 | 访问控制 |
 |-------------|----------|------|----------|
-| 普通频道 | `general`、`build-status` 等 | 公开群聊，默认情形 | 任意已认证 agent 可读写 |
+| 普通频道 | `general`、`build-status` 等 | 公开群聊，默认情形 | 任意已认证 agent 可读写；`visibility="private"` 时仅所有者与 ACL 条目可访问 |
 | Notebook | `notebook:{user_id}` | 思考过程、临时笔记（含 Thought） | **私有 — 仅所属 agent 可写入**（`owner`），跨 agent 写入返回 403 |
 | Memory | `memory:{user_id}` | 长期记忆（语义记忆） | **私有 — 仅所属 agent 可写入**（`owner`），跨 agent 写入返回 403 |
 | Broadcast | `broadcast:{topic}` | 公告、任务列表、成员列表 | **supertoken、频道所有者或持有 write/admin ACL 的 agent 可写入**，其他 agent 只读 |
@@ -374,7 +374,7 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 
 旧等级 `read`、`write`、`admin` 仍然有效，分别映射到 `viewer`、`member`、`owner`。`check_access()` 同样接受旧参数 `write` 和 `admin`，分别视为 `publish` 和 `manage`（[#247](https://github.com/Oaklight/mansio/issues/247)）。
 
-Bus 不暴露任何授权参数：Frontend 在调用 `Bus.publish` / `Bus.query` / 删除方法之前先完成授权，因此 ACL 条目不影响这些普通消息操作的访问。唯一例外是 `broadcast:*` 的写入：Frontend 策略层会检查频道所有者以及任何授予 `publish` 的条目（[#298](https://github.com/Oaklight/mansio/issues/298)）。
+Bus 不暴露任何授权参数：Frontend 在调用 `Bus.publish` / `Bus.query` / 删除方法之前先完成授权。对于普通频道与注册前缀频道，Frontend 策略层会查询频道存储（`Bus.check_access`），因此私有频道的所有者与 ACL 条目对读写生效。`dm:`/`notebook:`/`memory:` 仍按名称结构判定，`broadcast:*` 的写入检查频道所有者以及任何授予 `publish` 的条目（[#298](https://github.com/Oaklight/mansio/issues/298)）。
 
 **工作队列（`/v1/queue/*`）**：claim 需要该频道的 `publish` 规则；ack 与查询 claim 状态需要读权限。被拒绝的调用方得到的响应与"ack 未成功"或"消息没有队列状态"完全相同，因此不会确认私有消息是否存在。claim 不会为调用方创建 `broadcast:*` 频道。
 
