@@ -52,14 +52,18 @@
   .compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
   @media (max-width: 980px) { .compare { grid-template-columns: minmax(0, 1fr); } }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-    padding: 14px; box-shadow: var(--shadow); min-width: 0; }
+    padding: 14px; box-shadow: var(--shadow); min-width: 0; overflow-x: auto; }
   .panel + .panel { margin-top: 14px; }
   .tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .08em;
     text-transform: uppercase; padding: 2px 8px; border-radius: 999px; margin-bottom: 8px; }
   .tag.now { background: var(--hot-bg); color: var(--hot); border: 1px solid var(--hot); }
   .tag.target { background: var(--good-bg); color: var(--good); border: 1px solid var(--good); }
   .scroll { overflow: auto; max-height: 78vh; }
-  .mermaid { text-align: center; min-width: 420px; }
+  .stage { width: max-content; }
+  .zoom { margin: 0 0 6px; }
+  .zoom label { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 8px; }
+  .zoom input[type="range"] { width: 160px; accent-color: var(--accent); }
+  .mermaid { text-align: center; }
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
@@ -596,6 +600,56 @@ flowchart LR
       });
     }
 
+    var zoomItems = [];
+
+    function setupZoom() {
+      document.querySelectorAll(".mermaid").forEach(function (el) {
+        if (el.dataset.zoomReady) return;
+        el.dataset.zoomReady = "1";
+        var stage = document.createElement("div");
+        stage.className = "stage";
+        el.parentNode.insertBefore(stage, el);
+        stage.appendChild(el);
+        var bar = document.createElement("div");
+        bar.className = "zoom";
+        bar.innerHTML = '<label>缩放 <input type="range" min="40" max="200" value="100" step="5"> <span>100%</span></label>';
+        stage.parentNode.insertBefore(bar, stage);
+        var input = bar.querySelector("input");
+        var out = bar.querySelector("span");
+        var item = {
+          el: el,
+          input: input,
+          manual: false,
+          apply: function () {
+            var v = Number(input.value);
+            el.style.zoom = v / 100;
+            out.textContent = v + "%";
+          }
+        };
+        input.addEventListener("input", function () {
+          item.manual = true;
+          item.apply();
+        });
+        zoomItems.push(item);
+      });
+    }
+
+    function fitAll() {
+      zoomItems.forEach(function (item) {
+        if (item.manual) return;
+        var svg = item.el.querySelector("svg");
+        if (!svg) return;
+        var box = item.el.closest(".scroll") || item.el.parentElement;
+        var zoom = Number(item.el.style.zoom) || 1;
+        var natural = svg.getBoundingClientRect().width / zoom;
+        if (!natural) return;
+        var avail = box.clientWidth - 28;
+        var fit = Math.max(40, Math.min(100, Math.floor((avail / natural) * 20) * 5));
+        item.input.value = fit;
+        item.apply();
+      });
+    }
+
     function render(theme) {
       if (!window.mermaid) return;
       window.mermaid.initialize({
@@ -610,10 +664,14 @@ flowchart LR
         el.removeAttribute("data-processed");
         el.innerHTML = sources[i];
       });
-      window.mermaid.run({ nodes: Array.prototype.slice.call(document.querySelectorAll(".mermaid")) });
+      window.mermaid
+        .run({ nodes: Array.prototype.slice.call(document.querySelectorAll(".mermaid")) })
+        .then(fitAll)
+        .catch(function () {});
     }
 
     collectSources();
+    setupZoom();
     var theme = preferredTheme();
     applyTheme(theme);
     render(theme);
