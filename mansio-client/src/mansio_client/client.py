@@ -171,15 +171,19 @@ class _LoopGuard:
 
     The guard only knows parents that the client has read through
     :meth:`MansioClient.channel_read` or :meth:`MansioClient.channel_poll`.
-    An unknown parent (or a non-DM channel without one) yields no peer and
-    is not counted: a missed hint is better than a wrong one.
+    An unknown parent, a parent this client sent, or a non-DM channel
+    without a peer yields no peer and is not counted: a missed hint is
+    better than a wrong one.
 
-    All methods are called from the sending/reading thread; no locking is
-    needed because a client is used from one logical task at a time.
+    ``observe`` and ``record`` take a lock because subscribe callbacks can
+    call :meth:`MansioClient.channel_send` from the SSE thread while
+    ``channel_read`` / ``channel_poll`` run on the caller's thread.  The
+    advisory callback is invoked by the client outside this lock.
     """
 
     def __init__(self, user_id: str) -> None:
         self._user_id = user_id
+        self._lock = threading.Lock()
         # (timestamp, channel, thread_id, peer, is_threaded_reply)
         self._records: deque[tuple[float, str, str | None, str, bool]] = deque(
             maxlen=256
@@ -190,60 +194,65 @@ class _LoopGuard:
 
     def observe(self, msg: Message) -> None:
         """Remember who sent *msg* so a reply can be attributed to a peer."""
-        self._seen[msg.id] = (msg.sender, msg.thread_id)
-        if len(self._seen) > 2048:
-            for old in list(self._seen)[:1024]:
-                del self._seen[old]
+        with self._lock:
+            self._seen[msg.id] = (msg.sender, msg.thread_id)
+            if len(self._seen) > 2048:
+                for old in list(self._seen)[:1024]:
+                    del self._seen[old]
 
     def record(
         self, now: float, channel: str, parent_id: str | None
     ) -> LoopSuspected | None:
         """Record one successful send; return a hint when a loop is suspected."""
-        peer: str | None = None
-        thread_id: str | None = None
-        is_reply = False
+        with self._lock:
+            peer: str | None = None
+            thread_id: str | None = None
+            is_reply = False
 
-        if parent_id is not None:
-            parent = self._seen.get(parent_id)
-            if parent is not None:
-                peer = parent[0]
-                # A root message has no thread_id; its id is the thread root.
-                thread_id = parent[1] or parent_id
-                is_reply = True
+            if parent_id is not None:
+                parent = self._seen.get(parent_id)
+                # A thread under the client's own message is not a loop.
+                if parent is not None and parent[0] != self._user_id:
+                    peer = parent[0]
+                    # A root message has no thread_id; its id is the root.
+                    thread_id = parent[1] or parent_id
+                    is_reply = True
 
-        if peer is None and channel.startswith("dm:"):
-            parts = channel.split(":")
-            if len(parts) == 3:
-                peer = parts[2] if parts[1] == self._user_id else parts[1]
+            if peer is None and channel.startswith("dm:"):
+                parts = channel.split(":")
+                if len(parts) == 3:
+                    others = [p for p in parts[1:] if p != self._user_id]
+                    if len(others) == 1:
+                        peer = others[0]
 
-        if peer is None:
-            return None
+            if peer is None:
+                return None
 
-        self._records.append((now, channel, thread_id, peer, is_reply))
-        while self._records and now - self._records[0][0] > _LOOP_WINDOW_SECONDS:
-            self._records.popleft()
+            self._records.append((now, channel, thread_id, peer, is_reply))
+            while self._records and now - self._records[0][0] > _LOOP_WINDOW_SECONDS:
+                self._records.popleft()
 
-        group = [
-            r
-            for r in self._records
-            if r[1] == channel and r[2] == thread_id and r[3] == peer
-        ]
-        if len(group) < _LOOP_MIN_SENDS:
-            return None
-        if not all(r[4] for r in group[-_LOOP_MIN_REPLIES:]):
-            return None
-        if now < self._quiet_until:
-            return None
+            group = [
+                r
+                for r in self._records
+                if r[1] == channel and r[2] == thread_id and r[3] == peer
+            ]
+            if len(group) < _LOOP_MIN_SENDS:
+                return None
+            if not all(r[4] for r in group[-_LOOP_MIN_REPLIES:]):
+                return None
+            if now < self._quiet_until:
+                return None
 
-        self._quiet_until = now + _LOOP_QUIET_SECONDS
-        self._records.clear()
-        return LoopSuspected(
-            channel=channel,
-            thread_id=thread_id,
-            peer=peer,
-            send_count=len(group),
-            window_seconds=_LOOP_WINDOW_SECONDS,
-        )
+            self._quiet_until = now + _LOOP_QUIET_SECONDS
+            self._records.clear()
+            return LoopSuspected(
+                channel=channel,
+                thread_id=thread_id,
+                peer=peer,
+                send_count=len(group),
+                window_seconds=_LOOP_WINDOW_SECONDS,
+            )
 
 
 class MansioClient:
@@ -460,6 +469,32 @@ class MansioClient:
         parent_id: str | None = None,
         intent: str | None = None,
     ) -> str:
+        return self._send_message(
+            channel,
+            content,
+            msg_type,
+            metadata,
+            parent_id,
+            intent,
+            note_loop=True,
+        )
+
+    def _send_message(
+        self,
+        channel: str,
+        content: str,
+        msg_type: str,
+        metadata: dict | None,
+        parent_id: str | None,
+        intent: str | None,
+        *,
+        note_loop: bool,
+    ) -> str:
+        """Publish one message; *note_loop* feeds the advisory loop guard.
+
+        Bursts pass ``note_loop=False``: their shared ``parent_id`` makes one
+        intentional batch look like a run of replies.
+        """
         message_id = self._transport.publish(
             channel,
             self._user_id,
@@ -469,7 +504,8 @@ class MansioClient:
             parent_id=parent_id,
             intent=intent,
         )
-        self._note_send(channel, parent_id)
+        if note_loop:
+            self._note_send(channel, parent_id)
         return message_id
 
     def _note_send(self, channel: str, parent_id: str | None) -> None:
@@ -560,13 +596,14 @@ class MansioClient:
             }
             try:
                 sent.append(
-                    self.channel_send(
+                    self._send_message(
                         channel,
                         content,
-                        msg_type=msg_type,
-                        metadata=burst_metadata,
-                        parent_id=parent_id,
-                        intent=intent,
+                        msg_type,
+                        burst_metadata,
+                        parent_id,
+                        intent,
+                        note_loop=False,
                     )
                 )
             except Exception as exc:
