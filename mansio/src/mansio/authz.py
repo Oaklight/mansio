@@ -201,6 +201,29 @@ class ChannelAuthorizer:
         """True if *user_id* may create *channel*'s metadata row."""
         return self.create_denial(user_id, channel) is None
 
+    # ── claim ────────────────────────────────────────────────
+
+    def claim_denial(self, user_id: str, channel: str) -> str | None:
+        """Return a denial message if *user_id* may not claim from *channel*.
+
+        Claiming takes work out of a queue, so the publish rule applies.
+        One exception: a ``broadcast:`` channel that does not exist yet is
+        denied instead of being auto-created.  ``publish_denial`` creates it
+        for the first publisher (``broadcast_write_allowed``), and an
+        attempted claim must not make the caller the channel owner.
+        """
+        if channel.startswith("broadcast:"):
+            try:
+                exists = self._bus.get_channel_meta(channel) is not None
+            except NotImplementedError:
+                exists = False
+            if not exists:
+                return (
+                    f"Channel '{channel}' is reserved for the channel owner "
+                    "and agents granted write access"
+                )
+        return self.publish_denial(user_id, channel)
+
     # ── read ─────────────────────────────────────────────────
 
     def can_read(self, user_id: str, channel: str) -> bool:

@@ -530,7 +530,7 @@ async def _dm_unregistered_warning(bus: Any, channel: str, sender: str) -> str |
     return None
 
 
-async def _handle_queue_status(request: Any, bus: Any) -> dict | tuple:
+async def _handle_queue_status(request: Any, bus: Any, authz: ChannelAuthorizer) -> dict | tuple:
     """Handle /v1/queue/status requests."""
     message_id = (request.query_params.get("message_id") or [None])[0]
     if not message_id:
@@ -538,6 +538,15 @@ async def _handle_queue_status(request: Any, bus: Any) -> dict | tuple:
             "error": "Bad Request",
             "message": "Query param 'message_id' required",
         }, 400
+
+    auth_result = request.state.auth_result
+    if isinstance(auth_result, str):
+        message = await asyncio.to_thread(bus.get_message, message_id)
+        if message is not None and not authz.can_read(auth_result, message.channel):
+            # Same body as a message without queue state, so the answer does
+            # not confirm that a private message exists.
+            return {"error": "Not Found", "message": "No queue status for this message"}, 404
+
     result = await asyncio.to_thread(bus.queue_status, message_id)
     if result is None:
         return {"error": "Not Found", "message": "No queue status for this message"}, 404
@@ -1247,6 +1256,8 @@ class HttpFrontend:
         """Register queue (claim/ack/status) routes."""
         bus = self._bus
         assert bus is not None
+        authz = self._authz
+        assert authz is not None
 
         # ── Shared handlers ───────────────────────────────────────
 
@@ -1258,6 +1269,11 @@ class HttpFrontend:
             claimed_by, err = _resolve_claimed_by(auth_result, data)
             if err:
                 return err
+
+            if isinstance(auth_result, str):
+                denial = await asyncio.to_thread(authz.claim_denial, auth_result, data["channel"])
+                if denial:
+                    return {"error": "Forbidden", "message": denial}, 403
 
             lease = int(data.get("lease_seconds", 300))
             result = await asyncio.to_thread(
@@ -1276,6 +1292,13 @@ class HttpFrontend:
             if err:
                 return err
 
+            if isinstance(auth_result, str):
+                message = await asyncio.to_thread(bus.get_message, data["message_id"])
+                if message is not None and not authz.can_read(auth_result, message.channel):
+                    # Same answer as "not claimed by you": an unauthorized
+                    # caller learns nothing about the message's existence.
+                    return {"acked": False}
+
             result = await asyncio.to_thread(bus.queue_ack, data["message_id"], claimed_by)
             if result is None:
                 return {"acked": False}
@@ -1293,7 +1316,7 @@ class HttpFrontend:
 
         @self._app.get("/v1/queue/status")
         async def queue_status(request: Request) -> dict | tuple:
-            return await _handle_queue_status(request, bus)
+            return await _handle_queue_status(request, bus, authz)
 
     def _setup_presence_routes(self) -> None:
         """Register presence (heartbeat / roster) routes."""

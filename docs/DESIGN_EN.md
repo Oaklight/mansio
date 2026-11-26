@@ -419,6 +419,12 @@ not govern ordinary message access there. The exception is `broadcast:*`
 write: the frontend policy checks the channel owner and any entry granting
 `publish` ([#298](https://github.com/Oaklight/mansio/issues/298)).
 
+**Work queues (`/v1/queue/*`)**: claiming a message requires the `publish` rule
+for the channel, and acknowledging it or reading its claim state requires read
+access. A denied caller receives the same answer as an unsuccessful ack or a
+message without queue state, so the response does not confirm that a private
+message exists. A claim never creates a `broadcast:*` channel for the caller.
+
 ##### Input Validation
 
 The Frontend layer validates message payloads on publish:
