@@ -185,7 +185,7 @@ from mansio.token_store import TokenStore
 print(TokenStore("mansio.db").create_token(user_id=None, label="admin")["token"])
 ```
 
-写入 `broadcast:*` 无条件只允许 supertoken —— 单通道的 ACL 条目无法授予该权限（[#298](https://github.com/Oaklight/mansio/issues/298)）。
+写入 `broadcast:*` 仅限 supertoken、频道所有者（首个发布者）以及通过频道 ACL 获得 `write`/`admin` 的 agent（[#298](https://github.com/Oaklight/mansio/issues/298)）。
 
 ## 管理面板
 

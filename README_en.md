@@ -185,7 +185,7 @@ from mansio.token_store import TokenStore
 print(TokenStore("mansio.db").create_token(user_id=None, label="admin")["token"])
 ```
 
-Writing to `broadcast:*` is restricted to supertokens unconditionally; per-channel ACL entries do not grant it ([#298](https://github.com/Oaklight/mansio/issues/298)).
+Writing to `broadcast:*` is allowed for supertokens, the channel owner (its first publisher), and agents granted `write`/`admin` through the channel ACL ([#298](https://github.com/Oaklight/mansio/issues/298)).
 
 ## Admin Panel
 

@@ -234,6 +234,7 @@ def _validate_and_auth_publish(
     channel: str,
     msg_type: str = "",
     token_store: TokenStore | None = None,
+    bus: Bus | None = None,
 ) -> tuple[dict, int] | None:
     """Validate channel name and enforce publish auth.
 
@@ -268,11 +269,15 @@ def _validate_and_auth_publish(
                 "message": f"Channel '{channel}' is reserved for system use",
             }, 403
 
-    # Broadcast channels: only supertokens can write
-    if channel.startswith("broadcast:"):
+    # Broadcast channels: the owner and agents granted write/admin may post.
+    # Supertokens were already allowed above (auth_result is not a str).
+    if channel.startswith("broadcast:") and not _broadcast_write_allowed(bus, channel, auth_result):
         return {
             "error": "Forbidden",
-            "message": f"Channel '{channel}' is reserved for admin use",
+            "message": (
+                f"Channel '{channel}' is reserved for the channel owner "
+                "and agents granted write access"
+            ),
         }, 403
 
     # Channel ownership: notebook:X and memory:X are private to agent X
@@ -286,6 +291,35 @@ def _validate_and_auth_publish(
                 }, 403
 
     return None
+
+
+def _broadcast_write_allowed(bus: Bus | None, channel: str, user_id: str) -> bool:
+    """Return True if *user_id* may write to broadcast channel *channel*.
+
+    The channel owner (its first publisher) and agents holding an explicit
+    write/admin ACL entry may post.  A channel that does not exist yet is
+    open, so its first publisher becomes the owner.  Backends without
+    ChannelStore keep the old supertoken-only rule.
+    """
+    if bus is None:
+        return False
+    try:
+        meta = bus.get_channel_meta(channel)
+        acl = bus.get_acl(channel)
+    except NotImplementedError:
+        return False
+    if meta is None:
+        return True
+    if meta.owner == user_id:
+        return True
+
+    from mansio.types import PERMISSION_LEVELS
+
+    required = PERMISSION_LEVELS["write"]
+    return any(
+        entry.user_id == user_id and PERMISSION_LEVELS.get(entry.permission, 0) >= required
+        for entry in acl
+    )
 
 
 def _fmt_bytes(n: int) -> str:
@@ -937,6 +971,7 @@ class HttpFrontend:
                 data["channel"],
                 msg_type=data["msg_type"],
                 token_store=self._token_store,
+                bus=bus,
             )
             if auth_error:
                 return auth_error
