@@ -111,7 +111,7 @@
     智能体只通过 HTTP 与服务器通信。
   </p>
   <div class="meta">
-    <span>快照：<code>master @ cf06016</code></span>
+    <span>快照：<code>master @ 5b1ba1c</code></span>
     <span>生成日期：2026-11-26</span>
     <span>分支：<code>docs_arch</code>（孤儿分支）</span>
   </div>
@@ -313,7 +313,7 @@ flowchart LR
     认证在 Frontend 中间件完成；授权分两层：结构化的频道命名规则，以及频道元数据中的 ACL 条目。
     <code>/health</code> 与 <code>/v1/auth/check</code> 是公开路径。
     <code>broadcast:*</code> 的写入同时检查频道 owner 与 ACL；频道尚不存在时，首个发布者成为 owner。
-    授权策略集中在 <code>mansio/authz.py</code> 的 <code>ChannelAuthorizer</code>；Frontend 认证后把发布、查询、订阅、频道列表、删除与 ACL 判定交给它。内置频道类型在创建时写入预设 ACL：<code>dm:*</code> 写入 <code>member</code>，<code>notebook:*</code> / <code>memory:*</code> 写入 <code>owner</code>。supertoken 与 no-auth 在 Frontend 直接放行，不进入该策略。
+    授权策略集中在 <code>mansio/authz.py</code> 的 <code>ChannelAuthorizer</code>；Frontend 认证后把发布、查询、订阅、频道列表、删除与 ACL 判定交给它。内置频道类型在创建时写入预设 ACL：<code>dm:*</code> 写入 <code>member</code>，<code>notebook:*</code> / <code>memory:*</code> 写入 <code>owner</code>。<code>dm:</code> 频道名必须恰好是 <code>dm:&lt;a&gt;:&lt;b&gt;</code> 且两段非空；发布、建频道、查询、订阅对畸形名返回 400，建频道与发布共用同一校验器。历史遗留的畸形 dm 行仍按私有频道处理（fail-closed），只有发送者可读。supertoken 与 no-auth 在 Frontend 直接放行，不进入该策略。
   </p>
   <div class="panel">
     <div class="mermaid">
@@ -329,7 +329,7 @@ flowchart TD
   VAL -->|False| E401
   VAL -->|"str user_id"| SCOPED["auth_result = user_id"]
   VAL -->|"None (supertoken)"| SUPER["auth_result = None"]
-  SCOPED --> AUTHZ["authz.ChannelAuthorizer: 结构规则 + 频道类型预设 + ACL"]
+  SCOPED --> AUTHZ["authz.ChannelAuthorizer: 结构规则（含 dm:a:b 格式）+ 频道类型预设 + ACL"]
   AUTHZ --> HANDLER["业务处理器"]
   SUPER --> BYPASS["Frontend 直接放行"]
   OPEN --> BYPASS
@@ -430,7 +430,7 @@ flowchart LR
 flowchart LR
   MC["MansioClient"]
   MC -->|"channel_send / read / poll"| CH["任意频道"]
-  MC -->|"dm_send / dm_read"| DM["dm:[a]:[b] (按字典序)"]
+  MC -->|"dm_send / dm_read"| DM["dm:[a]:[b] (按字典序；畸形名 400)"]
   MC -->|"note_write / note_read"| NB["notebook:[user_id]"]
   MC -->|"thought_record / thought_read"| TH["notebook:[user_id], msg_type=thought"]
   MC -->|"memory_store / memory_recall"| MM["memory:[user_id]"]
@@ -521,7 +521,7 @@ flowchart TB
       <thead><tr><th>路径</th><th>职责</th><th>关键符号</th></tr></thead>
       <tbody>
         <tr><td><code>mansio/src/mansio/bus.py</code></td><td>路由与编排：消息 ID、订阅分发、压缩、能力检查；不承担授权</td><td><code>Bus</code>, <code>SQLiteBus</code></td></tr>
-        <tr><td><code>mansio/src/mansio/authz.py</code></td><td>频道授权策略：结构规则、频道类型预设、ACL 判定；Frontend 共用</td><td><code>ChannelAuthorizer</code>, <code>is_private_channel</code>, <code>is_channel_member</code>, <code>user_involved</code>, <code>broadcast_write_allowed</code></td></tr>
+        <tr><td><code>mansio/src/mansio/authz.py</code></td><td>频道授权策略：结构规则（含 dm 名解析）、频道类型预设、ACL 判定；Frontend 共用</td><td><code>ChannelAuthorizer</code>, <code>dm_participants</code>, <code>dm_channel_error</code>, <code>is_private_channel</code>, <code>is_channel_member</code>, <code>user_involved</code>, <code>broadcast_write_allowed</code></td></tr>
         <tr><td><code>mansio/src/mansio/protocols.py</code></td><td>接口契约</td><td><code>Backend</code>, <code>ChannelStore</code>, <code>Watchable</code>, <code>Deletable</code>, <code>Presenceable</code>, <code>Compactable</code></td></tr>
         <tr><td><code>mansio/src/mansio/types.py</code></td><td>不可变数据模型</td><td><code>Message</code>, <code>UserPresence</code>, <code>ACLEntry</code>, <code>ChannelMeta</code>, <code>ClaimResult</code></td></tr>
         <tr><td><code>mansio/src/mansio/server.py</code></td><td>Bus 与 Frontend 的编排器</td><td><code>MansioServer</code></td></tr>
