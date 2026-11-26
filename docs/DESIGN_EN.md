@@ -62,9 +62,12 @@ Each layer depends only on the interface of the layer below, never on concrete i
 
 ### 2.2 Component Relationships
 
-The two packages are separated along the network boundary. `mansio` (server) holds
-the Backend, Bus and Frontends; `mansio-client` (agent SDK) holds `MansioClient`
-and its HTTP transport. Nothing in `mansio-client` imports `mansio`.
+The three packages are separated along the network boundary and the dependency
+direction. `mansio-core` holds the types, protocols, Backend, Bus, authorization
+and token store; `mansio-web` (distribution name `mansio`) holds the Frontends,
+the admin panel and the server; `mansio-client` (agent SDK) holds `MansioClient`
+and its HTTP transport. `mansio-web` and `mansio-client` import `mansio-core`;
+`mansio-core` imports neither. `mansio-web` never imports `mansio-client`.
 
 ```
 mansio_client.MansioClient("http://host:8742", user_id, token=…)
@@ -415,7 +418,7 @@ arguments `write` and `admin` as `publish` and `manage`
 
 An ACL row stores its permission string as written — a role name, a single
 verb, or a legacy level. Presets are expanded when a check runs
-(`expand_permission()` in `shared/types.py`), not when the row is created, so
+(`expand_permission()` in `mansio_core/types.py`), not when the row is created, so
 editing `ROLE_PRESETS` retroactively changes what every existing row using
 that preset grants. The legacy levels are aliases resolved the same way, so
 stored rows need no migration.

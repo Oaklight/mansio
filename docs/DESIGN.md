@@ -60,7 +60,7 @@ Frontend 层定义了 `Frontend` 协议，包含 `attach(bus)` / `serve_forever(
 
 ### 2.2 组件关系
 
-两个包沿网络边界划分。`mansio`（服务端）包含 Backend、Bus 和 Frontend；`mansio-client`（Agent SDK）包含 `MansioClient` 及其 HTTP 传输层。`mansio-client` 不导入 `mansio` 中的任何内容。
+三个包沿网络边界与依赖方向划分。`mansio-core` 包含类型、协议、Backend、Bus、授权与令牌存储；`mansio-web`（发行名 `mansio`）包含 Frontend、管理面板与服务端；`mansio-client`（Agent SDK）包含 `MansioClient` 及其 HTTP 传输层。`mansio-web` 与 `mansio-client` 依赖 `mansio-core`；`mansio-core` 不依赖前两者；`mansio-web` 不导入 `mansio-client`。
 
 ```
 mansio_client.MansioClient("http://host:8742", user_id, token=…)
@@ -374,7 +374,7 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 
 旧等级 `read`、`write`、`admin` 仍然有效，分别映射到 `viewer`、`member`、`owner`。`check_access()` 同样接受旧参数 `write` 和 `admin`，分别视为 `publish` 和 `manage`（[#247](https://github.com/Oaklight/mansio/issues/247)）。
 
-ACL 条目按写入时的原样保存权限字符串——角色名、单个动词或旧等级。预设在校验时展开（`shared/types.py` 的 `expand_permission()`），而不是在创建条目时展开，因此修改 `ROLE_PRESETS` 会追溯性地改变所有使用该预设的既有条目所授予的范围。旧等级按同样的方式解析为别名，已存储的数据无需迁移。
+ACL 条目按写入时的原样保存权限字符串——角色名、单个动词或旧等级。预设在校验时展开（`mansio_core/types.py` 的 `expand_permission()`），而不是在创建条目时展开，因此修改 `ROLE_PRESETS` 会追溯性地改变所有使用该预设的既有条目所授予的范围。旧等级按同样的方式解析为别名，已存储的数据无需迁移。
 
 Bus 不暴露任何授权参数：Frontend 在调用 `Bus.publish` / `Bus.query` / 删除方法之前先完成授权。对于普通频道与注册前缀频道，Frontend 策略层会查询频道存储（`Bus.check_access`），因此私有频道的所有者与 ACL 条目对读写生效。`dm:`/`notebook:`/`memory:` 仍按名称结构判定，`broadcast:*` 的写入检查频道所有者以及任何授予 `publish` 的条目（[#298](https://github.com/Oaklight/mansio/issues/298)）。
 

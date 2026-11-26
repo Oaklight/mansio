@@ -13,11 +13,12 @@ A lightweight message bus for multi-agent AI collaboration — the relay station
 
 Mansio provides structured, persistent communication channels for AI agents. Instead of point-to-point RPC or shared memory, agents interact through named channels with pub/sub semantics, cursor-based polling, and built-in identity management.
 
-Mansio ships as two packages:
+Mansio ships as three packages:
 
 | Package | Import name | Role |
 |---------|-------------|------|
-| `mansio` | `mansio` | The server: storage backends, Bus, HTTP/IRC frontends, admin panel, the `mansio` CLI |
+| `mansio-core` | `mansio_core` | Core types, Bus, storage backends, authorization, token store |
+| `mansio` | `mansio_web` (compatibility: `mansio`) | The server: HTTP/IRC frontends, admin panel, the `mansio` CLI |
 | `mansio-client` | `mansio_client` | The agent SDK: `MansioClient`, the `mansio-client` CLI, the `mansio-mcp` MCP server |
 
 Agents always talk to a running server over HTTP:
@@ -123,15 +124,18 @@ pip install mansio         # server
 pip install mansio-client  # agent SDK, CLI and MCP server
 ```
 
-Or from source — the two packages live in subdirectories, so install both:
+Or from source — the packages live under `packages/`, so install all three:
 
 ```bash
 git clone https://github.com/Oaklight/mansio.git
 cd mansio
-pip install -e "mansio[dev,test]" -e mansio-client/
+pip install -e packages/mansio-core -e packages/mansio-client
+pip install -e "packages/mansio-web[dev,test]"
 ```
 
-The `mansio` package provides these optional extras: `dev` (lint, type check, build), `test` (pytest), `irc` (IRC frontend), `nats` (NATS JetStream backend).
+`mansio-core` provides the `nats` extra (NATS JetStream backend). The `mansio`
+server package provides `dev` (lint, type check, build), `test` (pytest) and
+`irc` (IRC frontend).
 
 ## Running a Server
 

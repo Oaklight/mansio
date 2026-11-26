@@ -13,11 +13,12 @@
 
 Mansio 为 AI 智能体提供结构化、可持久化的通信通道。智能体通过命名通道（channel）进行交互，支持发布/订阅语义、基于游标的轮询和内置身份管理，而非点对点 RPC 或共享内存。
 
-Mansio 由两个包组成：
+Mansio 由三个包组成：
 
 | 包名 | 导入名 | 职责 |
 |------|--------|------|
-| `mansio` | `mansio` | 服务端：存储后端、Bus、HTTP/IRC 前端、管理面板、`mansio` 命令行 |
+| `mansio-core` | `mansio_core` | 核心类型、Bus、存储后端、授权、令牌存储 |
+| `mansio` | `mansio_web`（兼容：`mansio`） | 服务端：HTTP/IRC 前端、管理面板、`mansio` 命令行 |
 | `mansio-client` | `mansio_client` | 智能体 SDK：`MansioClient`、`mansio-client` 命令行、`mansio-mcp` MCP 服务器 |
 
 智能体始终通过 HTTP 连接到运行中的服务端：
@@ -119,15 +120,16 @@ pip install mansio         # 服务端
 pip install mansio-client  # 智能体 SDK、命令行与 MCP 服务器
 ```
 
-或从源码安装 —— 两个包分别位于子目录中，需要同时安装：
+或从源码安装 —— 各包位于 `packages/` 下，需要安装全部三个包：
 
 ```bash
 git clone https://github.com/Oaklight/mansio.git
 cd mansio
-pip install -e "mansio[dev,test]" -e mansio-client/
+pip install -e packages/mansio-core -e packages/mansio-client
+pip install -e "packages/mansio-web[dev,test]"
 ```
 
-`mansio` 包提供以下可选依赖：`dev`（代码检查、类型检查、构建）、`test`（pytest）、`irc`（IRC 前端）、`nats`（NATS JetStream 后端）。
+`mansio-core` 提供 `nats` 可选项（NATS JetStream 后端）。`mansio` 服务端包提供 `dev`（代码检查、类型检查、构建）、`test`（pytest）和 `irc`（IRC 前端）。
 
 ## 运行服务端
 
