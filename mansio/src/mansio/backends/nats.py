@@ -30,6 +30,7 @@ import logging
 import threading
 import urllib.parse
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -97,6 +98,9 @@ class NATSBackend(Backend, Presenceable, Compactable, Watchable):
         url: NATS server URL(s). Comma-separated for clusters.
         stream_name: JetStream stream name for mansio messages.
         subject_prefix: Subject prefix. Channels become ``<prefix>.<channel>``.
+        message_index_size: Maximum messages kept in the in-process lookup
+            cache (0 = unlimited). Evicted messages are still found by
+            ``get_message()``, which falls back to the stream.
         max_msgs: Maximum messages to retain per stream (0 = unlimited).
         max_bytes: Maximum stream size in bytes (0 = unlimited).
         storage: JetStream storage type ("file" or "memory").
@@ -110,15 +114,19 @@ class NATSBackend(Backend, Presenceable, Compactable, Watchable):
         *,
         stream_name: str = "MANSIO",
         subject_prefix: str = "mansio",
+        message_index_size: int = 10_000,
         max_msgs: int = 0,
         max_bytes: int = 0,
         storage: str = "file",
         connect_timeout: float = 5.0,
         operation_timeout: float = 30.0,
     ) -> None:
+        if message_index_size < 0:
+            raise ValueError("message_index_size must be >= 0 (0 = unlimited)")
         self._url = url
         self._stream_name = stream_name
         self._subject_prefix = subject_prefix
+        self._message_index_size = message_index_size
         self._max_msgs = max_msgs
         self._max_bytes = max_bytes
         self._storage = StorageType.FILE if storage == "file" else StorageType.MEMORY
@@ -142,11 +150,17 @@ class NATSBackend(Backend, Presenceable, Compactable, Watchable):
         # In-memory presence store (not persisted to NATS)
         self._presence: dict[str, dict] = {}
 
-        # In-memory message index for get_message() lookups, holding
+        # In-memory message cache for get_message() lookups, holding
         # messages stored through this instance plus any seen on a watch.
-        # Membership also means "already delivered here", which watch()
-        # uses to suppress duplicate dispatch.
-        self._messages_by_id: dict[str, Message] = {}
+        # Bounded LRU: a long-lived server must not grow with stream
+        # volume. A miss falls back to scanning the stream, so eviction
+        # only costs latency. Membership also means "already delivered
+        # here", which watch() uses to suppress duplicate dispatch; that
+        # echo/redelivery window is far shorter than the cache's reach.
+        self._messages_by_id: OrderedDict[str, Message] = OrderedDict()
+        # Guards the cache. store() writes from the caller's thread while
+        # watch() writes from the backend's event loop thread.
+        self._message_index_lock = threading.Lock()
 
         # Guards the live watch registry.
         self._watch_lock = threading.Lock()
@@ -333,8 +347,8 @@ class NATSBackend(Backend, Presenceable, Compactable, Watchable):
 
         # Index before publishing: a watch on this same subject can receive
         # the message before publish() returns, and the watch dispatcher
-        # uses this index to recognize — and skip — our own publishes.
-        self._messages_by_id[message.id] = message
+        # uses this cache to recognize — and skip — our own publishes.
+        self._remember(message)
         self._run_async(_pub())
 
     def store_queue(self, message: Message) -> None:
@@ -363,7 +377,7 @@ class NATSBackend(Backend, Presenceable, Compactable, Watchable):
             await self._kv.create(message.id, json.dumps(state).encode())
 
         # Indexed before publishing, for the reason given in store().
-        self._messages_by_id[message.id] = message
+        self._remember(message)
         self._run_async(_pub_queue())
 
     # ── Live watches ──────────────────────────────────────────
@@ -411,9 +425,8 @@ class NATSBackend(Backend, Presenceable, Compactable, Watchable):
                     "Skipping undecodable message on subject %s", nats_msg.subject, exc_info=True
                 )
                 return
-            if message.id in self._messages_by_id:
+            if not self._mark_new(message):
                 return
-            self._messages_by_id[message.id] = message
             try:
                 callback(message)
             except Exception:
@@ -538,13 +551,85 @@ class NATSBackend(Backend, Presenceable, Compactable, Watchable):
 
     # ── Message lookup ────────────────────────────────────────
 
-    def get_message(self, message_id: str) -> Message | None:
-        """Look up a message by ID from the in-memory index.
+    def _evict_index_locked(self) -> None:
+        """Drop least-recently-used entries beyond ``message_index_size``.
 
-        Only messages stored through this backend instance are indexed.
-        Returns None if the message is not found.
+        Caller must hold ``_message_index_lock``.
         """
-        return self._messages_by_id.get(message_id)
+        if self._message_index_size <= 0:
+            return
+        while len(self._messages_by_id) > self._message_index_size:
+            self._messages_by_id.popitem(last=False)
+
+    def _remember(self, message: Message) -> None:
+        """Cache *message*, refreshing its LRU position and evicting if full."""
+        with self._message_index_lock:
+            self._messages_by_id[message.id] = message
+            self._messages_by_id.move_to_end(message.id)
+            self._evict_index_locked()
+
+    def _mark_new(self, message: Message) -> bool:
+        """Cache *message* and report whether it had not been seen before.
+
+        Returns False when the message was already cached, which is how a
+        watch suppresses the echo of its own publishes and repeat
+        deliveries.
+        """
+        with self._message_index_lock:
+            if message.id in self._messages_by_id:
+                self._messages_by_id.move_to_end(message.id)
+                return False
+            self._messages_by_id[message.id] = message
+            self._evict_index_locked()
+            return True
+
+    async def _find_in_stream(self, message_id: str) -> Message | None:
+        """Scan every subject for *message_id*, without relying on the cache.
+
+        Linear in stream size and allocates one batch at a time. This is
+        the correctness path for messages the cache cannot answer (stored
+        by a sibling server, or before this process restarted), not a hot
+        path.
+        """
+        assert self._js is not None
+        sub = await self._js.pull_subscribe(f"{self._subject_prefix}.>", stream=self._stream_name)
+        try:
+            while True:
+                batch = await self._fetch_batch(sub, 500)
+                if batch is None:
+                    return None
+                for nats_msg in batch:
+                    try:
+                        candidate = self._nats_payload_to_msg(nats_msg.data)
+                    except (UnicodeDecodeError, json.JSONDecodeError, KeyError):
+                        # Not one of ours, or malformed; keep scanning.
+                        continue
+                    if candidate.id == message_id:
+                        return candidate
+        finally:
+            await sub.unsubscribe()
+
+    def get_message(self, message_id: str) -> Message | None:
+        """Look up a message by ID.
+
+        Checks the bounded in-process cache first; on a miss, scans the
+        JetStream stream so a message stored by a sibling server in the
+        cluster, or before this process restarted, is still found. The
+        result is cached.
+
+        Returns None if the message is not in the stream either.
+        """
+        with self._message_index_lock:
+            cached = self._messages_by_id.get(message_id)
+            if cached is not None:
+                self._messages_by_id.move_to_end(message_id)
+                return cached
+
+        self._ensure_connected()
+        found = self._run_async(self._find_in_stream(message_id))
+        if found is not None:
+            self._remember(found)
+        return found
 
     # ── Query ─────────────────────────────────────────────────
 
