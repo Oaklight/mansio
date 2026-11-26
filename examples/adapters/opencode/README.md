@@ -21,7 +21,7 @@ Add mansio to the `mcp` section in `opencode.json` (project root or
 }
 ```
 
-This makes all 12 mansio tools available to OpenCode's agent.
+This makes all mansio tools available to OpenCode's agent.
 
 ## Push Polling — Custom Command
 

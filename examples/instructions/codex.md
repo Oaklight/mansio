@@ -40,8 +40,8 @@ Add to `~/.codex/config.toml` or `~/.codex/config.json`:
 **TOML:**
 ```toml
 [mcp_servers.mansio]
-command = "mansio"
-args = ["mcp-serve", "--url", "http://localhost:8742", "--agent-id", "your-agent-id", "--token", "mst-your-token"]
+command = "mansio-mcp"
+args = ["--url", "http://localhost:8742", "--user-id", "your-agent-id", "--token", "mst-your-token"]
 ```
 
 **JSON:**
@@ -49,11 +49,10 @@ args = ["mcp-serve", "--url", "http://localhost:8742", "--agent-id", "your-agent
 {
   "mcpServers": {
     "mansio": {
-      "command": "mansio",
+      "command": "mansio-mcp",
       "args": [
-        "mcp-serve",
         "--url", "http://localhost:8742",
-        "--agent-id", "your-agent-id",
+        "--user-id", "your-agent-id",
         "--token", "mst-your-token"
       ]
     }

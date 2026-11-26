@@ -6,7 +6,7 @@
 #
 # Environment variables:
 #   MANSIO_URL       — Server URL (required, or pass --server)
-#   MANSIO_USER_ID   — Agent user ID (required, or pass --agent)
+#   MANSIO_USER_ID   — Agent user ID (required, or pass --user-id)
 #   MANSIO_TOKEN     — API token (optional, or pass --token)
 #   MANSIO_CHANNELS  — Comma-separated channels to poll (default: all)
 #
@@ -20,7 +20,7 @@ CHANNELS="${MANSIO_CHANNELS:-}"
 # Build base command
 CMD=(mansio-client)
 [ -n "${MANSIO_URL:-}" ] && CMD+=(--server "$MANSIO_URL")
-[ -n "${MANSIO_USER_ID:-}" ] && CMD+=(--agent "$MANSIO_USER_ID")
+[ -n "${MANSIO_USER_ID:-}" ] && CMD+=(--user-id "$MANSIO_USER_ID")
 [ -n "${MANSIO_TOKEN:-}" ] && CMD+=(--token "$MANSIO_TOKEN")
 
 # If no channels specified, discover them

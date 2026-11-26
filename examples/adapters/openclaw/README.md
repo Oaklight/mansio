@@ -26,7 +26,7 @@ tools:
         - --url
         - http://localhost:8742
         - --user-id
-        - ${AGENT_ID}
+        - your-agent-id
         - --token
         - mst-your-token-here
 ```
