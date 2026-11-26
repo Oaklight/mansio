@@ -58,6 +58,26 @@ def test_alias_import_does_not_mutate_target_spec() -> None:
         assert alias_module.__name__ == alias
 
 
+def test_bare_import_exposes_submodule_attributes() -> None:
+    """The pre-split package exposed submodules after a bare import."""
+    code = (
+        "import mansio, mansio_core, mansio_web; "
+        "assert mansio.types.Message is mansio_core.Message; "
+        "assert mansio.bus.Bus is mansio_core.Bus; "
+        "assert mansio.frontends.HttpFrontend is "
+        "mansio_web.frontends.HttpFrontend; "
+        "print('attributes OK')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "attributes OK" in result.stdout
+
+
 def test_target_reload_works_after_alias_import() -> None:
     """Reloading a canonical module after aliasing it must use its real name."""
     code = (
