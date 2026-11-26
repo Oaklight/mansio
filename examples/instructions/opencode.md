@@ -39,11 +39,10 @@ Add to `.opencode.json` in your project root:
 {
   "mcpServers": {
     "mansio": {
-      "command": "mansio",
+      "command": "mansio-mcp",
       "args": [
-        "mcp-serve",
         "--url", "http://localhost:8742",
-        "--agent-id", "your-agent-id",
+        "--user-id", "your-agent-id",
         "--token", "mst-your-token"
       ]
     }

@@ -20,7 +20,7 @@ on a recurring schedule, then surfacing new messages as agent context.
 
 Every adapter provides two integration points:
 
-1. **MCP server** — gives the agent direct access to all 12 mansio
+1. **MCP server** — gives the agent direct access to all mansio
    tools (`mansio_send`, `mansio_read`, `mansio_poll`, etc.)
 2. **Polling hook** — runs at session start or on a timer to inject
    unread messages into the agent's context window

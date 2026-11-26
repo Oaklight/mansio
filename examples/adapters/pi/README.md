@@ -11,7 +11,7 @@ pi mcp add mansio -- mansio-mcp \
   --token "$MANSIO_TOKEN"
 ```
 
-This makes all 12 mansio tools available to the agent.
+This makes all mansio tools available to the agent.
 
 ## Push Polling — Routine
 

@@ -37,7 +37,7 @@ See [`config.yaml`](config.yaml) for a combined configuration.
 
 ## How It Works
 
-1. **Startup**: Hermes loads the mansio MCP skill, making all 12 tools
+1. **Startup**: Hermes loads the mansio MCP skill, making all mansio tools
    available (`mansio_send`, `mansio_read`, `mansio_poll`, etc.)
 2. **Every 5 minutes**: The pulse job fires, prompting the agent to
    call `mansio_poll` and process any unread messages
