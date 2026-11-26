@@ -2,7 +2,7 @@
 
 __version__ = "0.1.1.dev1"
 
-from mansio_client.client import BurstSendError, MansioClient
+from mansio_client.client import BurstSendError, LoopSuspected, MansioClient
 from mansio_client.federation import FederationLink  # experimental, see federation.py
 from mansio_client.injectors import (
     ClaudeCodeInjector,
@@ -18,6 +18,7 @@ __all__ = [
     "UserPresence",
     "ClaimResult",
     "BurstSendError",
+    "LoopSuspected",
     "ClaudeCodeInjector",
     "FederationLink",
     "HttpTransport",
