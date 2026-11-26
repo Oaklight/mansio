@@ -1404,6 +1404,9 @@ class HttpFrontend:
             auth_result = request.state.auth_result
             owner = body.get("owner", "")
             if isinstance(auth_result, str):
+                denial = authz.create_denial(auth_result, name)
+                if denial:
+                    return {"error": "Forbidden", "message": denial}, 403
                 owner = auth_result  # scoped tokens own what they create
             elif not owner:
                 return {
