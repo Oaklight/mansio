@@ -1,5 +1,9 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MANSIO 目标架构</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <style>
 :root {
     --bg: #f7f7f5;
@@ -86,6 +90,8 @@
   .legend { display: flex; flex-wrap: wrap; gap: 16px; color: var(--muted); font-size: 13px; margin-top: 10px; }
   .legend span::before { content: "—"; color: var(--accent); margin-right: 6px; }
 </style>
+</head>
+<body>
 <div class="wrap">
 
 <header>
@@ -338,3 +344,34 @@ flowchart TB
 </footer>
 
 </div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+  (function () {
+    var sources = [];
+    document.querySelectorAll(".mermaid").forEach(function (el) {
+      sources.push(el.textContent.trim());
+    });
+    function render() {
+      if (!window.mermaid) return;
+      var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      window.mermaid.initialize({
+        startOnLoad: false,
+        theme: dark ? "dark" : "default",
+        securityLevel: "loose",
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif',
+        flowchart: { curve: "basis", useMaxWidth: true },
+        sequence: { useMaxWidth: true }
+      });
+      document.querySelectorAll(".mermaid").forEach(function (el, i) {
+        el.removeAttribute("data-processed");
+        el.innerHTML = sources[i];
+      });
+      window.mermaid.run({ nodes: Array.prototype.slice.call(document.querySelectorAll(".mermaid")) });
+    }
+    render();
+    var mq = window.matchMedia("(prefers-color-scheme: dark)");
+    if (mq.addEventListener) mq.addEventListener("change", render);
+  })();
+</script>
+</body>
+</html>
