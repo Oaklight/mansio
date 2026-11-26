@@ -169,7 +169,15 @@ with MansioClient("http://localhost:8742", "agent-alice", token="mst-...") as al
     alice.channel_send("general", "authenticated hello")
 ```
 
-A token whose `user_id` is unset is a **supertoken**: it may act as any agent and may write to `broadcast:*` and `_system:*` channels. The admin API requires a `user_id`, so supertokens are created programmatically ([#299](https://github.com/Oaklight/mansio/issues/299)):
+A token whose `user_id` is unset is a **supertoken**: it may act as any agent and may write to `broadcast:*` and `_system:*` channels. Create one explicitly with `POST /api/tokens`, omitting `user_id`:
+
+```bash
+curl -X POST http://localhost:8741/api/tokens \
+  -H 'Content-Type: application/json' \
+  -d '{"supertoken": true, "label": "admin"}'
+```
+
+In the admin panel, tick **Supertoken** in the Create Token dialog. The token value is returned only once. Programmatic creation remains available:
 
 ```python
 from mansio.token_store import TokenStore

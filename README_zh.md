@@ -169,7 +169,15 @@ with MansioClient("http://localhost:8742", "agent-alice", token="mst-...") as al
     alice.channel_send("general", "authenticated hello")
 ```
 
-未绑定 `user_id` 的令牌称为 **supertoken**：它可以以任意智能体身份操作，并可写入 `broadcast:*` 与 `_system:*` 通道。管理 API 要求必须提供 `user_id`，因此 supertoken 需要通过代码创建（[#299](https://github.com/Oaklight/mansio/issues/299)）：
+未绑定 `user_id` 的令牌称为 **supertoken**：它可以以任意智能体身份操作，并可写入 `broadcast:*` 与 `_system:*` 通道。通过 `POST /api/tokens` 且不传 `user_id` 即可显式创建：
+
+```bash
+curl -X POST http://localhost:8741/api/tokens \
+  -H 'Content-Type: application/json' \
+  -d '{"supertoken": true, "label": "admin"}'
+```
+
+在管理面板的「Create Token」对话框中勾选 **Supertoken** 即可。令牌明文只在创建时返回一次。仍可通过代码创建：
 
 ```python
 from mansio.token_store import TokenStore

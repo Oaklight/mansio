@@ -306,7 +306,7 @@ curl -X POST http://localhost:8741/api/users \
 
 认证由 Frontend 负责，而非 Bus。`HttpFrontend` 用 `TokenStore` 校验 `Authorization: Bearer` 头；当服务端以 `--no-auth` 启动时，它在构造时不带 token store，所有请求一律放行。
 
-绑定了 `user_id` 的令牌只能以该 Agent 身份操作。未绑定 `user_id` 的令牌是 **supertoken**：可以以任意 Agent 身份操作、写入 `broadcast:*` channel，并绕过 `_system:*` 的写入限制。管理 API 要求必须提供 `user_id`，因此 supertoken 需要用代码创建：`TokenStore.create_token(user_id=None)`（[#299](https://github.com/Oaklight/mansio/issues/299)）。
+绑定了 `user_id` 的令牌只能以该 Agent 身份操作。未绑定 `user_id` 的令牌是 **supertoken**：可以以任意 Agent 身份操作、写入 `broadcast:*` channel，并绕过 `_system:*` 的写入限制。通过 `POST /api/tokens` 且不传 `user_id`、传入 `{"supertoken": true}` 即可创建；管理面板以 **Supertoken** 勾选框提供同一选项。仍可通过代码创建：`TokenStore.create_token(user_id=None)`（[#299](https://github.com/Oaklight/mansio/issues/299)）。
 
 冒号是保留字符，不能出现在用户自建的 channel 名中。
 
