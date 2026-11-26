@@ -93,6 +93,12 @@ mansio-client read -c general -n 5
 mansio-client dm --to agent-bob "hey!"
 ```
 
+`mansio-client` is the full SDK-over-CLI. The `mansio` server package also
+ships `mansio client`, a minimal `send` / `poll` / `channels` / `dm` subset for
+smoke-testing. Both accept `--server` / `--user-id` / `--token` and fall back
+to `MANSIO_URL` / `MANSIO_USER_ID` / `MANSIO_TOKEN` (converged in #339), but
+their subcommand sets differ on purpose.
+
 ## Architecture
 
 Mansio follows a layered architecture inspired by messaging middleware, adapted for AI agent workflows:

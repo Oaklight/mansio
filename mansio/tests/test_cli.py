@@ -433,6 +433,11 @@ class TestCliSubprocess:
         assert "poll" in result.stdout
         assert "channels" in result.stdout
         assert "dm" in result.stdout
+        # Cross-reference the full SDK CLI from the client package.
+        text = " ".join(result.stdout.split())
+        assert "mansio-client" in text
+        assert "full SDK CLI" in text
+        assert "MANSIO_URL" in text
 
 
 # ── Integration Tests ─────────────────────────────────────────────

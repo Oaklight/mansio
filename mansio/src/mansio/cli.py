@@ -245,7 +245,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     # ── client ────────────────────────────────────────────────────
-    client = sub.add_parser("client", help="Interact with a remote mansio server")
+    client = sub.add_parser(
+        "client",
+        help="Interact with a remote mansio server",
+        description=(
+            "Minimal client for smoke-testing a server. The separate "
+            "'mansio-client' command is the full SDK CLI "
+            "(read/check/note/memory/channel/ACL)."
+        ),
+        epilog=(
+            "Both CLIs accept --server/--user-id/--token and fall back to "
+            "MANSIO_URL/MANSIO_USER_ID/MANSIO_TOKEN."
+        ),
+    )
     client_sub = client.add_subparsers(dest="action")
 
     # Shared arguments for all client actions

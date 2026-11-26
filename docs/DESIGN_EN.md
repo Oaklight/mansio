@@ -701,18 +701,22 @@ The Delivery Layer exposes Client SDK capabilities to external consumers.
 | Command | Package | Target User | Purpose |
 |---------|---------|-------------|---------|
 | `mansio serve` | `mansio` | Operators | Start Bus + admin panel (+ HTTP/IRC frontends) |
-| `mansio client send/poll/channels/dm` | `mansio` | Operators | Minimal client for smoke-testing a server |
+| `mansio client send/poll/channels/dm` | `mansio` | Operators | Minimal subset of `mansio-client` for smoke-testing a server |
 | `mansio-client` | `mansio-client` | LLMs via a bash tool, humans | Full SDK-over-CLI: messaging, notes, memory, channel and ACL management |
 | `mansio-mcp` | `mansio-client` | LLMs via MCP | The client operations as MCP tools over JSON-RPC stdio |
 
-Both client entry points resolve their connection settings from flags first and
-then from the environment. `mansio-client` takes `--server` / `--user-id` /
-`--token`, with `-a` / `--agent` kept as a deprecated spelling of `--user-id`
-that always emits a `DeprecationWarning`; `mansio-mcp` takes `--url` /
-`--user-id` / `--token` / `--display-name`. The shared environment variables are `MANSIO_URL`,
-`MANSIO_USER_ID`, `MANSIO_TOKEN` and — for `mansio-mcp` only —
-`MANSIO_DISPLAY_NAME`. `MANSIO_AGENT_ID` and the `PIAZZA_*` names are still
-accepted as deprecated aliases and emit a `DeprecationWarning`.
+The two CLI commands are not interchangeable. `mansio client` is the minimal
+operator/smoke-test subset; `mansio-client` is the full SDK-over-CLI and is
+the command to use for agent work. Since #339 they accept the same
+`--server` / `--user-id` / `--token` flags and fall back to the same
+`MANSIO_URL` / `MANSIO_USER_ID` / `MANSIO_TOKEN` environment variables, but
+their subcommand sets differ on purpose. `mansio-client` keeps `-a` /
+`--agent` as a deprecated spelling of `--user-id` that always emits a
+`DeprecationWarning`; `mansio client` keeps `-u` / `--user` and
+`--api-token` as deprecated spellings. `mansio-mcp` takes `--url` /
+`--user-id` / `--token` / `--display-name`, and is the only entry point that
+reads `MANSIO_DISPLAY_NAME`. `MANSIO_AGENT_ID` and the `PIAZZA_*` names are
+still accepted as deprecated aliases and emit a `DeprecationWarning`.
 
 ### 3.9 Push Integration (Multi-Agent Message Awareness)
 

@@ -17,7 +17,13 @@ from mansio_client.env import env_or as _env_or
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="mansio-client", description="Mansio agent client"
+        prog="mansio-client",
+        description="Mansio agent client",
+        epilog=(
+            "The mansio server package also ships 'mansio client', a minimal "
+            "send/poll/channels/dm CLI for smoke tests. Use this command for "
+            "the full set of operations."
+        ),
     )
     parser.add_argument(
         "-V", "--version", action="version", version=f"%(prog)s {__version__}"

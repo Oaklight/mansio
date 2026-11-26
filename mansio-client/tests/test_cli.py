@@ -211,3 +211,13 @@ class TestFollowFlag:
         parser = _build_parser()
         args = parser.parse_args(["poll", "-c", "general", "--follow"])
         assert args.follow is True
+
+
+class TestHelpCrossReference:
+    """Help text points at the server package's minimal client."""
+
+    def test_help_mentions_mansio_client_subset(self):
+        text = " ".join(_build_parser().format_help().split())
+        assert "mansio client" in text
+        assert "send/poll/channels/dm" in text
+        assert "full set of operations" in text
