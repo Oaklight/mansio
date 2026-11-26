@@ -239,3 +239,28 @@ class TestAclApiPermissions:
         )
         assert status == 400
         assert "permission must be one of" in data["message"]
+
+    @pytest.mark.parametrize("permission", [{}, [], 123, None, True])
+    def test_add_rejects_non_string(self, http_client, permission) -> None:
+        """Unhashable or non-string values are a 400, not a 500."""
+        base, bus = http_client
+        bus.create_channel("ch", "alice")
+        status, data = self._req(
+            "POST",
+            f"{base}/v1/channels/ch/acl",
+            {"user_id": "bob", "permission": permission},
+        )
+        assert status == 400, data
+        assert "permission must be one of" in data["message"]
+
+    @pytest.mark.parametrize("permission", [{}, [], 123, None, True])
+    def test_set_rejects_non_string(self, http_client, permission) -> None:
+        base, bus = http_client
+        bus.create_channel("ch", "alice")
+        status, data = self._req(
+            "PUT",
+            f"{base}/v1/channels/ch/acl",
+            {"acl": [{"user_id": "bob", "permission": permission}]},
+        )
+        assert status == 400, data
+        assert "permission must be one of" in data["message"]
