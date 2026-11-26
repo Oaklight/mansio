@@ -203,11 +203,12 @@ class TestClientOverHttp:
         client.channel_send("updates", "msg-1")
         client.channel_send("updates", "msg-2")
 
-        batch1 = client.channel_poll("updates")
+        # This test is about the cursor, so include the client's own sends.
+        batch1 = client.channel_poll("updates", include_own=True)
         assert len(batch1) >= 2
 
         client.channel_send("updates", "msg-3")
-        batch2 = client.channel_poll("updates")
+        batch2 = client.channel_poll("updates", include_own=True)
         assert len(batch2) == 1
         assert batch2[0].payload == "msg-3"
 
@@ -240,6 +241,25 @@ class TestClientOverHttp:
         assert asks[0].payload == "ask"
 
         client.close()
+
+    def test_own_messages_are_excluded_by_default(self, server_url: str) -> None:
+        """poll/subscribe/check_unread omit own messages; read keeps them."""
+        me = MansioClient(server_url, "self-agent")
+        other = MansioClient(server_url, "other-agent")
+
+        me.channel_send("own-ch", "mine")
+        other.channel_send("own-ch", "theirs")
+
+        # check_unread runs before the poll advances the cursor.
+        assert me.check_unread()["own-ch"] == 1
+        assert me.check_unread(include_own=True)["own-ch"] == 2
+
+        assert [m.payload for m in me.channel_poll("own-ch")] == ["theirs"]
+        assert [m.payload for m in me.channel_read("own-ch", include_own=False)] == ["theirs"]
+        assert {m.payload for m in me.channel_read("own-ch")} == {"mine", "theirs"}
+
+        me.close()
+        other.close()
 
 
 # ── SSE Push Tests ────────────────────────────────────────────────
@@ -304,6 +324,57 @@ class TestSsePush:
 
         sender.close()
         transport.close()
+
+    def test_client_subscribe_excludes_own_by_default(self, server_url: str) -> None:
+        """MansioClient.subscribe() drops messages the subscriber sent."""
+        received: list = []
+        own_seen = threading.Event()
+        other_seen = threading.Event()
+
+        client = MansioClient(server_url, "self-sse")
+        other = MansioClient(server_url, "other-sse")
+
+        def on_msg(msg):
+            received.append(msg)
+            if msg.sender == "self-sse":
+                own_seen.set()
+            else:
+                other_seen.set()
+
+        sub_id = client.subscribe("self-sse-ch", on_msg)
+        time.sleep(0.5)
+
+        client.channel_send("self-sse-ch", "mine")
+        other.channel_send("self-sse-ch", "theirs")
+
+        assert other_seen.wait(timeout=5), "other message not delivered"
+        time.sleep(0.3)  # give a wrongly delivered own event time to arrive
+        assert not own_seen.is_set()
+        assert [m.payload for m in received] == ["theirs"]
+
+        client.unsubscribe(sub_id)
+        client.close()
+        other.close()
+
+    def test_client_subscribe_include_own_delivers_own(self, server_url: str) -> None:
+        received: list = []
+        own_seen = threading.Event()
+
+        client = MansioClient(server_url, "self-sse-own")
+
+        def on_msg(msg):
+            received.append(msg)
+            own_seen.set()
+
+        sub_id = client.subscribe("self-sse-own-ch", on_msg, include_own=True)
+        time.sleep(0.5)
+        client.channel_send("self-sse-own-ch", "mine")
+
+        assert own_seen.wait(timeout=5), "own message not delivered"
+        assert [m.payload for m in received] == ["mine"]
+
+        client.unsubscribe(sub_id)
+        client.close()
 
     def test_unsubscribe_stops_delivery(self, server_url: str) -> None:
         """After unsubscribe, no more events are delivered."""

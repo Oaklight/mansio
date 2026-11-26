@@ -238,6 +238,7 @@ class MansioClient:
         order: Literal["oldest", "newest"] = "newest",
         thread_id: str | None = None,
         intent: str | None = None,
+        include_own: bool = True,
     ) -> list[Message]:
         """Read messages from *channel*.
 
@@ -248,11 +249,13 @@ class MansioClient:
             order: ``"oldest"`` or ``"newest"`` first.
             thread_id: Restrict to one conversation thread.
             intent: Restrict to messages carrying this intent label.
+            include_own: Include messages this user sent (default True;
+                the CLI and the MCP read tool default to False).
 
         Returns:
             Matching messages in the requested order.
         """
-        return self._transport.query(
+        msgs = self._transport.query(
             channel,
             after=after,
             limit=limit,
@@ -260,9 +263,16 @@ class MansioClient:
             thread_id=thread_id,
             intent=intent,
         )
+        if include_own:
+            return msgs
+        return [m for m in msgs if m.sender != self._user_id]
 
-    def channel_poll(self, channel: str) -> list[Message]:
+    def channel_poll(self, channel: str, *, include_own: bool = False) -> list[Message]:
         """Return messages on *channel* since this user's last poll.
+
+        Messages this user sent are omitted by default; pass
+        ``include_own=True`` to receive them. The cursor advances past
+        every new message, including the user's own.
 
         The new position is written to the server before returning, so
         it survives a client that never gets to call :meth:`close`.
@@ -272,7 +282,9 @@ class MansioClient:
         if msgs:
             self._cursors[channel] = msgs[-1].id
             self._save_cursors()
-        return msgs
+        if include_own:
+            return msgs
+        return [m for m in msgs if m.sender != self._user_id]
 
     @overload
     def channel_list(self) -> list[str]: ...
@@ -389,12 +401,16 @@ class MansioClient:
     def notification_check(self) -> list[Message]:
         return self.channel_poll(f"_system:notifications:{self._user_id}")
 
-    def check_unread(self) -> dict[str, int]:
+    def check_unread(self, *, include_own: bool = False) -> dict[str, int]:
         """Return per-channel unread message counts without advancing cursors.
 
         Queries each non-system channel for messages newer than the
         last-polled cursor.  Cursors are **not** advanced, so a
         subsequent :meth:`channel_poll` still returns the same messages.
+
+        Args:
+            include_own: Count messages this user sent (default False,
+                matching :meth:`channel_poll`).
 
         Returns:
             Dict mapping channel name to unread count (only channels
@@ -406,6 +422,8 @@ class MansioClient:
         for ch in user_channels:
             cursor = self._cursors.get(ch)
             msgs = self._transport.query(ch, after=cursor)
+            if not include_own:
+                msgs = [m for m in msgs if m.sender != self._user_id]
             if msgs:
                 unread[ch] = len(msgs)
         return unread
@@ -494,6 +512,8 @@ class MansioClient:
         channel: str,
         callback: Callable[[Message], None],
         on_error: Callable[[Message, Exception], None] | None = None,
+        *,
+        include_own: bool = False,
     ) -> str:
         """Subscribe to real-time notifications on a channel.
 
@@ -503,11 +523,14 @@ class MansioClient:
             on_error: Called with ``(message, exception)`` when *callback*
                 raises, so the subscriber can retry or record the failure.
                 When omitted, the exception is logged with its traceback.
+            include_own: Deliver messages this user sent (default False).
 
         Returns:
             Subscription ID for unsubscribe().
         """
-        return self._transport.subscribe(channel, callback, on_error=on_error)
+        return self._transport.subscribe(
+            channel, callback, on_error=on_error, include_own=include_own
+        )
 
     def unsubscribe(self, subscription_id: str) -> None:
         self._transport.unsubscribe(subscription_id)
@@ -516,6 +539,8 @@ class MansioClient:
         self,
         channels: list[str],
         injector: Injector,
+        *,
+        include_own: bool = False,
     ) -> list[str]:
         """Subscribe to multiple channels, routing messages through an injector.
 
@@ -528,6 +553,7 @@ class MansioClient:
             channels: List of channel names to subscribe to.
             injector: An :class:`~mansio_client.injectors.Injector`
                 instance that receives each incoming message.
+            include_own: Forward messages this user sent (default False).
 
         Returns:
             List of subscription IDs (one per channel). Pass these to
@@ -546,4 +572,7 @@ class MansioClient:
             for sid in sub_ids:
                 client.unsubscribe(sid)
         """
-        return [self.subscribe(ch, injector.inject) for ch in channels]
+        return [
+            self.subscribe(ch, injector.inject, include_own=include_own)
+            for ch in channels
+        ]

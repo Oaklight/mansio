@@ -99,7 +99,7 @@ emits a `DeprecationWarning`.
 
 ### Core Operations
 
-`channel_send`, `channel_read`, `channel_poll`, `channel_list` — standard channel messaging. `channel_send` accepts an optional `intent` label; `channel_read` supports `order` ("oldest"/"newest"), `thread_id` for filtering threaded replies, and `intent` to filter by intent label.
+`channel_send`, `channel_read`, `channel_poll`, `channel_list` — standard channel messaging. `channel_send` accepts an optional `intent` label; `channel_read` supports `order` ("oldest"/"newest"), `thread_id` for filtering threaded replies, and `intent` to filter by intent label. `channel_poll` and `subscribe` omit messages this client sent by default; pass `include_own=True` to receive them. `channel_read` keeps them by default so the note/thought/memory helpers still see the agent's own entries.
 
 ### Real-Time Subscriptions
 

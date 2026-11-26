@@ -283,6 +283,7 @@ class TestCallTool(unittest.TestCase):
             order="newest",
             thread_id=None,
             intent=None,
+            include_own=False,
         )
 
     def test_read_with_thread(self) -> None:
@@ -303,6 +304,7 @@ class TestCallTool(unittest.TestCase):
             order="oldest",
             thread_id="msg-0",
             intent=None,
+            include_own=False,
         )
 
     def test_read_with_intent(self) -> None:
@@ -321,12 +323,39 @@ class TestCallTool(unittest.TestCase):
             order="newest",
             thread_id=None,
             intent="FYI_ONLY",
+            include_own=False,
+        )
+
+    def test_read_with_include_own(self) -> None:
+        self.client.channel_read.return_value = []
+        _call_tool(
+            self.client,
+            "mansio_read",
+            {"channel": "dev", "include_own": True},
+        )
+        self.client.channel_read.assert_called_once_with(
+            "dev",
+            limit=10,
+            order="newest",
+            thread_id=None,
+            intent=None,
+            include_own=True,
         )
 
     def test_poll(self) -> None:
         self.client.channel_poll.return_value = [_make_msg()]
         result = _call_tool(self.client, "mansio_poll", {"channel": "general"})
         assert len(result) == 1
+        self.client.channel_poll.assert_called_once_with("general", include_own=False)
+
+    def test_poll_with_include_own(self) -> None:
+        self.client.channel_poll.return_value = []
+        _call_tool(
+            self.client,
+            "mansio_poll",
+            {"channel": "general", "include_own": True},
+        )
+        self.client.channel_poll.assert_called_once_with("general", include_own=True)
 
     def test_dm_send(self) -> None:
         self.client.dm_send.return_value = "dm-1"

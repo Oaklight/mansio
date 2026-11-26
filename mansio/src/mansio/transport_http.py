@@ -26,10 +26,15 @@ SSE_JOIN_TIMEOUT = 3.0
 
 
 class _Subscription(NamedTuple):
-    """One ``subscribe()`` registration: the callback and its error hook."""
+    """One ``subscribe()`` registration.
+
+    Holds the callback, its error hook, and whether messages sent by this
+    transport's own ``user_id`` are delivered.
+    """
 
     callback: Callable[[Message], None]
     on_error: Callable[[Message, Exception], None] | None
+    include_own: bool
 
 
 class MansioAPIError(Exception):
@@ -440,6 +445,8 @@ class HttpTransport:
         channel: str,
         callback: Callable[[Message], None],
         on_error: Callable[[Message, Exception], None] | None = None,
+        *,
+        include_own: bool = True,
     ) -> str:
         """Subscribe to real-time notifications via SSE.
 
@@ -452,6 +459,10 @@ class HttpTransport:
             on_error: Called with ``(message, exception)`` when *callback*
                 raises, so the subscriber can retry or record the failure.
                 When omitted, the exception is logged with its traceback.
+            include_own: When False, messages sent by this transport's
+                ``user_id`` are not delivered to *callback*. The transport
+                default is True; ``MansioClient.subscribe()`` defaults to
+                False.
 
         Returns:
             Subscription ID for unsubscribe().
@@ -462,7 +473,7 @@ class HttpTransport:
 
             if channel not in self._sse_callbacks:
                 self._sse_callbacks[channel] = {}
-            self._sse_callbacks[channel][sub_id] = _Subscription(callback, on_error)
+            self._sse_callbacks[channel][sub_id] = _Subscription(callback, on_error, include_own)
 
             needs_restart = channel not in self._sse_channels
             self._sse_channels.add(channel)
@@ -636,6 +647,8 @@ class HttpTransport:
             subs = list((self._sse_callbacks.get(channel) or {}).values())
 
         for sub in subs:
+            if not sub.include_own and msg.sender == self._user_id:
+                continue
             try:
                 sub.callback(msg)
             except Exception as exc:

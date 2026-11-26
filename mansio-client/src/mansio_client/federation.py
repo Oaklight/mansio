@@ -119,7 +119,11 @@ class _ReplicationStream:
 
     def start(self) -> None:
         """Subscribe on the source and start the delivery worker."""
-        self._sub_id = self._source.subscribe(self._channel, self._on_message)
+        # Federation replicates the channel as a whole, including messages
+        # the source client itself sent, so keep own messages here.
+        self._sub_id = self._source.subscribe(
+            self._channel, self._on_message, include_own=True
+        )
         self._thread = threading.Thread(
             target=self._run,
             name=f"mansio-federation-{self._channel}-{self._source_instance}",
