@@ -33,6 +33,7 @@ def _make_msg(**overrides: Any) -> Message:
         "metadata": None,
         "parent_id": None,
         "thread_id": None,
+        "intent": None,
     }
     defaults.update(overrides)
     return Message(**defaults)
@@ -65,11 +66,13 @@ class TestMsgToDict(unittest.TestCase):
             metadata={"key": "val"},
             parent_id="msg-0",
             thread_id="msg-0",
+            intent="DIRECT_QUESTION",
         )
         d = _msg_to_dict(msg)
         assert d["metadata"] == {"key": "val"}
         assert d["parent_id"] == "msg-0"
         assert d["thread_id"] == "msg-0"
+        assert d["intent"] == "DIRECT_QUESTION"
 
 
 class TestHandleRequest(unittest.TestCase):
@@ -226,6 +229,7 @@ class TestCallTool(unittest.TestCase):
             "hello",
             msg_type="chat",
             parent_id=None,
+            intent=None,
         )
 
     def test_send_with_parent(self) -> None:
@@ -245,6 +249,26 @@ class TestCallTool(unittest.TestCase):
             "reply",
             msg_type="note",
             parent_id="msg-1",
+            intent=None,
+        )
+
+    def test_send_with_intent(self) -> None:
+        self.client.channel_send.return_value = "msg-44"
+        _result = _call_tool(
+            self.client,
+            "mansio_send",
+            {
+                "channel": "general",
+                "content": "ping",
+                "intent": "REQUIRES_RESPONSE",
+            },
+        )
+        self.client.channel_send.assert_called_once_with(
+            "general",
+            "ping",
+            msg_type="chat",
+            parent_id=None,
+            intent="REQUIRES_RESPONSE",
         )
 
     def test_read(self) -> None:
@@ -257,6 +281,7 @@ class TestCallTool(unittest.TestCase):
             limit=10,
             order="newest",
             thread_id=None,
+            intent=None,
         )
 
     def test_read_with_thread(self) -> None:
@@ -276,6 +301,25 @@ class TestCallTool(unittest.TestCase):
             limit=5,
             order="oldest",
             thread_id="msg-0",
+            intent=None,
+        )
+
+    def test_read_with_intent(self) -> None:
+        self.client.channel_read.return_value = []
+        _call_tool(
+            self.client,
+            "mansio_read",
+            {
+                "channel": "dev",
+                "intent": "FYI_ONLY",
+            },
+        )
+        self.client.channel_read.assert_called_once_with(
+            "dev",
+            limit=10,
+            order="newest",
+            thread_id=None,
+            intent="FYI_ONLY",
         )
 
     def test_poll(self) -> None:

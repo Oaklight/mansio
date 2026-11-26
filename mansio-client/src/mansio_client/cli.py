@@ -47,6 +47,11 @@ def _build_parser() -> argparse.ArgumentParser:
     send = sub.add_parser("send", help="Send a message")
     send.add_argument("-c", "--channel", required=True)
     send.add_argument("--type", default="chat", dest="msg_type")
+    send.add_argument(
+        "--intent",
+        default=None,
+        help="Application intent label (e.g. REQUIRES_RESPONSE, FYI_ONLY)",
+    )
     send.add_argument("message")
 
     poll = sub.add_parser("poll", help="Poll new messages")
@@ -55,6 +60,11 @@ def _build_parser() -> argparse.ArgumentParser:
     read = sub.add_parser("read", help="Read messages")
     read.add_argument("-c", "--channel", required=True)
     read.add_argument("-n", "--limit", type=int, default=10)
+    read.add_argument(
+        "--intent",
+        default=None,
+        help="Only return messages with this intent label",
+    )
 
     sub.add_parser("channels", help="List channels")
     sub.add_parser("check", help="Quick check for new messages")
@@ -161,7 +171,14 @@ def _dispatch(args: argparse.Namespace, client: MansioClient) -> None:
 
 
 def _cmd_send(args: argparse.Namespace, client: MansioClient) -> None:
-    print(client.channel_send(args.channel, args.message, msg_type=args.msg_type))
+    print(
+        client.channel_send(
+            args.channel,
+            args.message,
+            msg_type=args.msg_type,
+            intent=args.intent,
+        )
+    )
 
 
 def _cmd_poll(args: argparse.Namespace, client: MansioClient) -> None:
@@ -170,7 +187,7 @@ def _cmd_poll(args: argparse.Namespace, client: MansioClient) -> None:
 
 
 def _cmd_read(args: argparse.Namespace, client: MansioClient) -> None:
-    for msg in client.channel_read(args.channel, limit=args.limit):
+    for msg in client.channel_read(args.channel, limit=args.limit, intent=args.intent):
         print(json.dumps(_msg_dict(msg), ensure_ascii=False))
 
 
@@ -266,7 +283,7 @@ def _cmd_registry_lookup(args: argparse.Namespace, client: MansioClient) -> None
 
 
 def _msg_dict(msg) -> dict:
-    return {
+    d = {
         "id": msg.id,
         "channel": msg.channel,
         "sender": msg.sender,
@@ -275,6 +292,13 @@ def _msg_dict(msg) -> dict:
         "timestamp": msg.timestamp,
         "metadata": msg.metadata,
     }
+    if msg.parent_id is not None:
+        d["parent_id"] = msg.parent_id
+    if msg.thread_id is not None:
+        d["thread_id"] = msg.thread_id
+    if msg.intent is not None:
+        d["intent"] = msg.intent
+    return d
 
 
 if __name__ == "__main__":
