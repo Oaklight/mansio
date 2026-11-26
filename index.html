@@ -284,9 +284,10 @@ sequenceDiagram
   T-->>F: user_id 或 None (supertoken)
   F->>F: 校验 channel / sender / 私有频道规则
   F->>B: publish(channel, sender, msg_type, payload)
-  B->>B: 生成 UUIDv7，应用系统频道压缩策略
+  B->>B: 生成 UUIDv7
   B->>S: store(message)
   S-->>B: ok
+  B->>B: 执行压缩策略 system_channel_policy
   B-->>W: 进程内订阅回调 / SSE 事件
   B-->>A: 200 OK + message_id
     </div>
@@ -296,9 +297,9 @@ sequenceDiagram
 flowchart LR
   P["publish"] --> V["结构校验"]
   V --> U["UUIDv7 生成"]
-  U --> C["system_channel_policy 压缩钩子"]
-  C --> ST["backend.store"]
-  ST --> SUB["Bus._subs 进程内分发"]
+  U --> ST["backend.store"]
+  ST --> C["system_channel_policy 压缩钩子"]
+  C --> SUB["Bus._subs 进程内分发"]
   SUB --> SSE["SSE / HttpTransport 回调"]
   ST --> WT["backend.watch (跨进程/跨服务器)"]
   WT --> SUB
@@ -313,7 +314,7 @@ flowchart LR
     认证在 Frontend 中间件完成；授权分两层：结构化的频道命名规则，以及频道存储中的 owner、visibility 与 ACL 条目。
     <code>/health</code> 与 <code>/v1/auth/check</code> 是公开路径。
     <code>broadcast:*</code> 的写入同时检查频道 owner 与 ACL；频道尚不存在时，首个发布者成为 owner。
-    授权策略集中在 <code>mansio/authz.py</code> 的 <code>ChannelAuthorizer</code>；Frontend 认证后把发布、查询、订阅、频道列表、删除与 ACL 判定交给它。内置频道类型在创建时写入预设 ACL：<code>dm:*</code> 写入 <code>member</code>，<code>notebook:*</code> / <code>memory:*</code> 写入 <code>owner</code>。<code>dm:</code> 频道名必须恰好是 <code>dm:&lt;a&gt;:&lt;b&gt;</code>，两段都必须是合法 agent id（3–64 位小写字母、数字、连字符，由 <code>shared/types.py</code> 的规则统一校验，与服务端 CLI、管理 API、客户端一致）；发布、建频道、查询、订阅对不合法名称返回 400，建频道与发布共用同一校验器。历史遗留的畸形 dm 行仍按私有频道处理（fail-closed），只有发送者可读。频道元数据路由 <code>GET /v1/channels/&lt;ch&gt;/meta</code> 同样经过授权：scoped token 只能读取自己可读频道的元数据；拒绝时返回与「频道不存在」相同的 404，避免确认私有频道存在。对普通频道与注册前缀频道，策略层查询频道存储（`Bus.check_access`），因此 `visibility="private"`、owner 与 ACL 条目对读写生效；无频道存储的后端（Maildir、NATS）按公开处理。`POST /v1/channels` 套用同一套结构规则：<code>notebook:</code>/<code>memory:</code> 仅命名空间本人，<code>dm:</code> 仅两名参与者，<code>broadcast:</code> 保留给首个发布者（supertoken/no-auth 可预创建），<code>_system:*</code> 拒绝 scoped token。工作队列路由同样受控：claim 需要该频道的 publish 规则，ack 与状态查询需要读权限，拒绝响应与「未认领 / 无状态」一致。supertoken 与 no-auth 在 Frontend 直接放行，不进入该策略。
+    授权策略集中在 <code>mansio/authz.py</code> 的 <code>ChannelAuthorizer</code>；Frontend 认证后把发布、查询、订阅、频道列表、删除与 ACL 判定交给它。内置频道类型在创建时写入预设 ACL：<code>dm:*</code> 写入 <code>member</code>，<code>notebook:*</code> / <code>memory:*</code> 写入 <code>owner</code>。<code>dm:</code> 频道名必须恰好是 <code>dm:&lt;a&gt;:&lt;b&gt;</code>，两段都必须是合法 agent id（3–64 位小写字母、数字、连字符，且以字母或数字开头和结尾，由 <code>shared/types.py</code> 的规则统一校验，与服务端 CLI、管理 API、客户端一致）；发布、建频道、查询、订阅对不合法名称返回 400，建频道与发布共用同一校验器。历史遗留的畸形 dm 行仍按私有频道处理（fail-closed），不会因名称畸变而变成公开频道；但发布、查询、订阅与建频道对这些名称一律返回 400（supertoken 亦然）。频道元数据路由 <code>GET /v1/channels/&lt;ch&gt;/meta</code> 同样经过授权：scoped token 只能读取自己可读频道的元数据；拒绝时返回与「频道不存在」相同的 404，避免确认私有频道存在。对普通频道与注册前缀频道，策略层查询频道存储（`Bus.check_access`），因此 `visibility="private"`、owner 与 ACL 条目对读写生效；无频道存储的后端（Maildir、NATS）按公开处理。`POST /v1/channels` 套用同一套结构规则：<code>notebook:</code>/<code>memory:</code> 仅命名空间本人，<code>dm:</code> 仅两名参与者，<code>broadcast:</code> 保留给首个发布者（supertoken/no-auth 可预创建），<code>_system:*</code> 拒绝 scoped token。工作队列路由同样受控：claim 需要该频道的 publish 规则，被拒绝返回 403；ack 与状态查询需要读权限，被拒绝时返回与「未认领 / 无状态」相同的响应，不确认消息是否存在。supertoken 与 no-auth 在 Frontend 直接放行，不进入该策略。
   </p>
   <div class="panel">
     <div class="mermaid">
@@ -340,7 +341,7 @@ flowchart TD
     <table>
       <thead><tr><th>身份</th><th>可由谁创建</th><th>可写频道</th><th>说明</th></tr></thead>
       <tbody>
-        <tr><td>普通 token（绑定 <code>user_id</code>）</td><td>Admin API / 管理面板</td><td>自己的 <code>notebook:X</code> / <code>memory:X</code>、作为成员的 <code>dm:{a}:{b}</code>、普通频道；<code>broadcast:{topic}</code> 仅当其为频道 owner 或持有 <code>publish</code>/<code>manage</code> ACL（<code>write</code>/<code>admin</code> 为兼容别名）</td><td>发布时 <code>sender</code> 必须与 token 绑定用户一致；presence heartbeat 同理</td></tr>
+        <tr><td>普通 token（绑定 <code>user_id</code>）</td><td>Admin API / 管理面板</td><td>自己的 <code>notebook:X</code> / <code>memory:X</code>、作为成员的 <code>dm:{a}:{b}</code>、公开普通频道（<code>visibility="private"</code> 的普通频道仅 owner 与 ACL 条目）；<code>broadcast:{topic}</code> 仅当其为频道 owner 或持有 <code>publish</code>/<code>manage</code> ACL（<code>write</code>/<code>admin</code> 为兼容别名）</td><td>发布时 <code>sender</code> 必须与 token 绑定用户一致；presence heartbeat 同理</td></tr>
         <tr><td>supertoken（<code>user_id</code> 为空）</td><td>Admin API <code>POST /api/tokens {"supertoken": true}</code>，或 <code>TokenStore.create_token(user_id=None)</code>（#328 起管理面板也可创建）</td><td>任意用户身份；可写 <code>broadcast:*</code> 与 <code>_system:*</code>（broadcast 不再仅限 supertoken）</td><td><code>supertoken</code> 与 <code>user_id</code> 互斥；<code>supertoken</code> 必须是布尔值</td></tr>
         <tr><td>无认证模式</td><td><code>--no-auth</code> 或 <code>allow_unauthenticated=True</code></td><td>任意</td><td>仅本地开发；绑定到非回环地址时启动守卫会拒绝</td></tr>
       </tbody>
@@ -355,7 +356,7 @@ flowchart TD
         <tr><td><code>delete</code></td><td>delete</td><td>动词：删除消息或频道</td></tr>
         <tr><td><code>manage</code></td><td>manage</td><td>动词：管理频道 ACL 与可见性</td></tr>
         <tr><td><code>viewer</code></td><td>read</td><td>角色预设</td></tr>
-        <tr><td><code>member</code></td><td>read, publish</td><td>角色预设；新 ACL 条目的默认值</td></tr>
+        <tr><td><code>member</code></td><td>read, publish</td><td>角色预设；<code>ACLEntry</code> 数据类的默认值（HTTP ACL API 未指定 permission 时仍按 <code>read</code>）</td></tr>
         <tr><td><code>owner</code></td><td>read, publish, delete, manage</td><td>角色预设</td></tr>
         <tr><td><code>write</code></td><td>read, publish</td><td>旧值，按 <code>member</code> 解释</td></tr>
         <tr><td><code>admin</code></td><td>read, publish, delete, manage</td><td>旧值，按 <code>owner</code> 解释</td></tr>
@@ -436,7 +437,7 @@ flowchart LR
   MC -->|"memory_store / memory_recall"| MM["memory:[user_id]"]
   MC -->|"notification_check"| NT["_system:notifications:[user_id]"]
   MC -->|"broadcast_read"| BC["broadcast:[topic]"]
-  MC -->|"queue_publish / claim / ack"| QU["任意频道 + KV 认领状态"]
+  MC -->|"queue_publish / claim / ack"| QU["任意频道 + 认领状态（NATS 用 KV）"]
   MC -->|"游标快照"| CU["_system:cursors:[user_id]"]
     </div>
   </div>
@@ -450,7 +451,7 @@ flowchart LR
         <tr><td>线程</td><td>消息字段 <code>parent_id</code> / <code>thread_id</code></td><td>回复链与扁平线程查询</td></tr>
         <tr><td>工作队列</td><td><code>queue_publish / queue_claim / queue_ack</code></td><td>租约式任务认领；NATS 用 KV 保存认领状态；claim 需 publish 权限，ack/status 需读权限</td></tr>
         <tr><td>在线状态</td><td>认证活动与 SSE 订阅自动刷新；<code>POST /v1/presence/heartbeat</code> 供空闲客户端使用</td><td><code>users()</code> 反映真实活跃度；heartbeat 只能代表 token 自身用户</td></tr>
-        <tr><td>订阅批处理</td><td><code>MansioClient.subscribe(coalesce_ms=N)</code></td><td>N&gt;0 时按订阅开启滚动窗口，窗口结束以 <code>list[Message]</code> 回调一次；默认 0 逐条投递；<code>unsubscribe</code> 冲刷未决批次，<code>close</code> 丢弃；<code>include_own</code> 过滤在批处理之前；<code>listen</code>/injectors 不变</td></tr>
+        <tr><td>订阅批处理</td><td><code>MansioClient.subscribe(coalesce_ms=N)</code></td><td>N&gt;0 时按订阅开启固定窗口（tumbling），窗口结束以 <code>list[Message]</code> 回调一次；默认 0 逐条投递；<code>unsubscribe</code> 冲刷未决批次，<code>close</code> 丢弃；<code>include_own</code> 过滤在批处理之前；<code>listen</code>/injectors 不变</td></tr>
       </tbody>
     </table>
   </div>
@@ -537,7 +538,8 @@ flowchart TB
         <tr><td><code>mansio-client/src/mansio_client/injectors.py</code></td><td>框架侧消息注入</td><td><code>MailboxInjector</code>, <code>ClaudeCodeInjector</code>, <code>OpenClawInjector</code>, <code>WebhookInjector</code></td></tr>
         <tr><td><code>mansio-client/src/mansio_client/mcp.py</code></td><td>MCP 服务（JSON-RPC stdio）</td><td><code>serve</code>, 各 <code>_tool_*</code></td></tr>
         <tr><td><code>shared/</code></td><td>两端共享源码；<code>sync-shared.sh</code> 生成包内副本</td><td><code>types.py</code>, <code>transport.py</code>, <code>_vendor/</code></td></tr>
-        <tr><td><code>*/_vendor/</code></td><td>zerodep 零依赖模块</td><td><code>httpclient</code>, <code>httpserver</code>, <code>sse</code>, <code>retry</code>, <code>structlog</code></td></tr>
+        <tr><td><code>mansio/_vendor/</code></td><td>服务端 zerodep 模块</td><td><code>httpclient</code>, <code>httpserver</code>, <code>sse</code>, <code>retry</code>, <code>structlog</code></td></tr>
+        <tr><td><code>mansio-client/_vendor/</code>（及 <code>shared/_vendor/</code>）</td><td>客户端 zerodep 模块</td><td><code>httpclient</code>, <code>sse</code></td></tr>
       </tbody>
     </table>
   </div>
