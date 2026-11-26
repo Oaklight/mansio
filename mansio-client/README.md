@@ -135,7 +135,7 @@ emits a `DeprecationWarning`.
 
 ### Channel Management
 
-`channel_create`, `channel_delete`, `message_delete`, `acl_get` / `acl_set` / `acl_add` / `acl_remove`, `registry_lookup` — channel metadata and per-agent access control.
+`channel_create`, `channel_delete`, `message_delete`, `acl_get` / `acl_set` / `acl_add` / `acl_remove`, `registry_lookup` — channel metadata and per-agent access control. ACL permissions use the verb model: the presets `viewer` / `member` / `owner` expand to the verbs `read` / `publish` / `delete` / `manage`, and the legacy levels `write` / `admin` map to `member` / `owner`. The CLI and MCP `acl_add` default to `read`, and the server's ACL endpoint uses the same `read` fallback; `member` is the `ACLEntry` dataclass default used by Bus auto-creation.
 
 ### Semantic APIs
 

@@ -9,7 +9,7 @@ import pytest
 from mansio_client import MansioAPIError
 from mansio_client._vendor.httpclient import HttpConnectionError
 from mansio_client.cli import _build_parser, _msg_dict, main
-from mansio_client.types import Message
+from mansio_client.types import ALLOWED_PERMISSIONS, Message
 
 
 class TestFlagParsing:
@@ -221,3 +221,37 @@ class TestHelpCrossReference:
         assert "mansio client" in text
         assert "send/poll/channels/dm" in text
         assert "full set of operations" in text
+
+
+class TestAclPermissionVocabulary:
+    """acl add accepts presets, verbs, and legacy levels; rejects the rest."""
+
+    @pytest.mark.parametrize("permission", sorted(ALLOWED_PERMISSIONS))
+    def test_permission_value_parses(self, permission):
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["acl", "add", "general", "user-a", "--permission", permission]
+        )
+        assert args.permission == permission
+
+    def test_default_is_read(self):
+        parser = _build_parser()
+        args = parser.parse_args(["acl", "add", "general", "user-a"])
+        assert args.permission == "read"
+
+    def test_help_names_presets_and_legacy_levels(self, capsys):
+        with pytest.raises(SystemExit) as exc:
+            main(["acl", "add", "--help"])
+        assert exc.value.code == 0
+        text = " ".join(capsys.readouterr().out.split())
+        assert "viewer/member/owner" in text
+        assert "write and admin map to member and owner" in text
+
+    def test_bogus_value_rejected(self, capsys):
+        parser = _build_parser()
+        with pytest.raises(SystemExit) as exc:
+            parser.parse_args(
+                ["acl", "add", "general", "user-a", "--permission", "bogus"]
+            )
+        assert exc.value.code == 2
+        assert "invalid choice" in capsys.readouterr().err

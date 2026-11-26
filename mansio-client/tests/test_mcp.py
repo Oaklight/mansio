@@ -9,7 +9,8 @@ from io import StringIO
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from mansio_client.types import ACLEntry, UserPresence, Message
+from mansio_client import MansioAPIError
+from mansio_client.types import ACLEntry, ALLOWED_PERMISSIONS, UserPresence, Message
 
 from mansio_client.mcp import (
     _DISPATCH,
@@ -643,6 +644,54 @@ class TestToolDefinitions(unittest.TestCase):
 
     def test_every_tool_is_dispatchable(self) -> None:
         assert {t["name"] for t in _TOOLS} == set(_DISPATCH)
+
+
+class TestAclPermissionVocabulary(unittest.TestCase):
+    """MCP ACL schemas use the shared verb/preset vocabulary."""
+
+    @staticmethod
+    def _tool(name: str) -> dict[str, Any]:
+        return next(t for t in _TOOLS if t["name"] == name)
+
+    def test_acl_add_enum_matches_shared_set(self) -> None:
+        enum = self._tool("mansio_acl_add")["inputSchema"]["properties"]["permission"][
+            "enum"
+        ]
+        assert enum == sorted(ALLOWED_PERMISSIONS)
+
+    def test_acl_set_enum_matches_shared_set(self) -> None:
+        enum = self._tool("mansio_acl_set")["inputSchema"]["properties"]["entries"][
+            "items"
+        ]["properties"]["permission"]["enum"]
+        assert enum == sorted(ALLOWED_PERMISSIONS)
+
+    def test_descriptions_name_presets(self) -> None:
+        for name in ("mansio_acl_add", "mansio_acl_set"):
+            description = self._tool(name)["description"]
+            assert "viewer/member/owner" in description
+
+    def test_bogus_value_surfaces_as_api_error(self) -> None:
+        client = MagicMock()
+        client.acl_add.side_effect = MansioAPIError(400, "invalid permission")
+        resp = _handle_request(
+            client,
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {
+                    "name": "mansio_acl_add",
+                    "arguments": {
+                        "channel": "general",
+                        "user_id": "user-a",
+                        "permission": "bogus",
+                    },
+                },
+            },
+        )
+        assert resp is not None
+        assert resp["result"]["isError"] is True
+        assert "invalid permission" in resp["result"]["content"][0]["text"]
 
 
 class TestServeLoop(unittest.TestCase):
