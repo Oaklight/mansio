@@ -393,8 +393,7 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                 # stats()/info(), matching list_channels() and SQLite.
                 del self._messages[ch]
         for mid in to_remove:
-            self._queue_status_map.pop(mid, None)
-            self._messages_by_id.pop(mid, None)
+            self._forget_message(mid)
         return deleted
 
     @staticmethod
@@ -409,20 +408,25 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
         kept.reverse()
         return kept
 
+    def _forget_message(self, message_id: str) -> None:
+        """Drop lookup and queue bookkeeping for a message removed from storage."""
+        self._messages_by_id.pop(message_id, None)
+        self._queue_status_map.pop(message_id, None)
+
     def _trim_to_limit(self, msgs: list[Message], max_messages: int) -> list[Message]:
-        """Trim *msgs* to *max_messages*, cleaning the id index."""
+        """Trim *msgs* to *max_messages*, forgetting the dropped messages."""
         if len(msgs) <= max_messages:
             return msgs
         for m in msgs[:-max_messages]:
-            self._messages_by_id.pop(m.id, None)
+            self._forget_message(m.id)
         return msgs[-max_messages:]
 
     def _cleanup_deduped_index(self, channel: str, kept_msgs: list[Message]) -> None:
-        """Remove index entries for messages no longer in *kept_msgs*."""
+        """Forget messages no longer present in *kept_msgs*."""
         kept_ids = {m.id for m in kept_msgs}
         for m in self._messages.get(channel, []):
             if m.id not in kept_ids:
-                self._messages_by_id.pop(m.id, None)
+                self._forget_message(m.id)
 
     def compact(
         self,
@@ -478,8 +482,7 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
         with self._lock:
             msgs = self._messages.pop(channel, [])
             for m in msgs:
-                self._messages_by_id.pop(m.id, None)
-                self._queue_status_map.pop(m.id, None)
+                self._forget_message(m.id)
             return len(msgs)
 
     def delete_message(self, message_id: str) -> bool:
