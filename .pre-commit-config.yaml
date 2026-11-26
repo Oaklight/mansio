@@ -1,14 +1,4 @@
 repos:
-  - repo: local
-    hooks:
-      - id: sync-shared
-        name: sync shared files
-        description: Sync shared/ to mansio and mansio-client packages.
-        entry: bash scripts/sync-shared.sh
-        language: system
-        pass_filenames: false
-        always_run: true
-
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.20
     hooks:
@@ -20,8 +10,8 @@ repos:
     hooks:
       - id: ty
         name: ty check
-        description: Type check src/ with ty.
-        entry: ty check --project mansio --exit-zero-on-warning
+        description: Type check packages/ with ty.
+        entry: ty check --exit-zero-on-warning
         language: system
         pass_filenames: false
         require_serial: true
@@ -31,6 +21,6 @@ repos:
     rev: v5.1.0
     hooks:
       - id: complexipy
-        files: ^mansio/src/mansio/
-        exclude: ^mansio/src/mansio/_vendor/
+        files: ^packages/mansio-(core|web)/src/
+        exclude: ^packages/.*/src/.*/_vendor/
         args: [-mx, "25"]

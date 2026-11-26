@@ -1,0 +1,33 @@
+"""mansio-client — lightweight agent SDK for mansio message bus."""
+
+__version__ = "0.1.1.dev1"
+
+from mansio_core.types import ClaimResult, Message, UserPresence
+
+from mansio_client.client import BurstSendError, LoopSuspected, MansioClient
+from mansio_client.federation import FederationLink  # experimental, see federation.py
+from mansio_client.injectors import (
+    ClaudeCodeInjector,
+    Injector,
+    MailboxInjector,
+    OpenClawInjector,
+    WebhookInjector,
+)
+from mansio_client.transport import HttpTransport, MansioAPIError
+
+__all__ = [
+    "UserPresence",
+    "ClaimResult",
+    "BurstSendError",
+    "LoopSuspected",
+    "ClaudeCodeInjector",
+    "FederationLink",
+    "HttpTransport",
+    "Injector",
+    "MailboxInjector",
+    "MansioAPIError",
+    "MansioClient",
+    "Message",
+    "OpenClawInjector",
+    "WebhookInjector",
+]

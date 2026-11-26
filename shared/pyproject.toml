@@ -1,2 +1,0 @@
-[tool.zerodep]
-vendor-dir = "_vendor"
