@@ -59,6 +59,23 @@ from mansio_core.authz import (
     dm_participants,
 )
 from mansio_core.authz import user_involved as _user_involved
+from mansio_core.contracts import (
+    ContractError,
+    parse_acl_add,
+    parse_acl_set,
+    parse_admin_cleanup,
+    parse_admin_compact,
+    parse_channel_create,
+    parse_channels,
+    parse_heartbeat,
+    parse_presence_list,
+    parse_publish,
+    parse_query,
+    parse_queue_ack,
+    parse_queue_claim,
+    parse_queue_status,
+    parse_registry_lookup,
+)
 
 from mansio_web._vendor.httpserver import App, JSONResponse, Response, StreamingResponse
 from mansio_web._vendor.structlog import get_logger
@@ -147,6 +164,12 @@ def _invalid_dm_name(channel: str) -> bool:
     )
 
 
+def _require_valid_dm_channel(channel: str) -> None:
+    """Raise a contract error for a malformed ``dm:`` channel name."""
+    if _invalid_dm_name(channel):
+        raise ContractError(DM_NAME_EXPECTED, field="channel")
+
+
 def _validate_channel_name(
     channel: str, token_store: TokenStore | None = None
 ) -> tuple[dict, int] | None:
@@ -229,296 +252,17 @@ def _validate_and_auth_publish(
     return None
 
 
-def _fmt_bytes(n: int) -> str:
-    """Format byte count as human-readable string (e.g. 256KB, 16KB, 1MB)."""
-    if n >= 1024 * 1024 and n % (1024 * 1024) == 0:
-        return f"{n // (1024 * 1024)}MB"
-    if n >= 1024 and n % 1024 == 0:
-        return f"{n // 1024}KB"
-    return f"{n} bytes"
+def _bad_request(err: ContractError) -> tuple[dict[str, str], int]:
+    """Return a contract error as an HTTP 400 response."""
+    return err.as_error(), 400
 
 
-_PUBLISH_REQUIRED = ("channel", "sender", "msg_type", "payload")
-_MAX_PAYLOAD_BYTES = 256 * 1024  # 256 KB
-_MAX_MSG_TYPE_LEN = 64
-_MAX_METADATA_BYTES = 16384
-
-
-def _validate_metadata(metadata: Any) -> tuple[dict, int] | None:
-    """Validate metadata type and size. Returns error tuple or None if OK."""
-    if metadata is None:
-        return None
-    if not isinstance(metadata, dict):
-        return {
-            "error": "Bad Request",
-            "message": "metadata must be a JSON object or null",
-        }, 400
+def _json_body(request: Any, message: str = "Request body must be valid JSON") -> Any:
+    """Decode the request body, mapping JSON failures to a contract error."""
     try:
-        meta_json = json.dumps(metadata, ensure_ascii=False)
-    except (TypeError, ValueError):
-        return {
-            "error": "Bad Request",
-            "message": "Metadata must be JSON-serializable",
-        }, 400
-    if len(meta_json.encode()) > _MAX_METADATA_BYTES:
-        return {
-            "error": "Bad Request",
-            "message": f"Metadata exceeds maximum size of {_fmt_bytes(_MAX_METADATA_BYTES)}",
-        }, 400
-    return None
-
-
-def _validate_tags(metadata: dict) -> tuple[dict, int] | None:
-    """Validate and normalise ``metadata["tags"]`` in-place.
-
-    Returns an error tuple or *None* if valid.
-    """
-    tags = metadata["tags"]
-    if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
-        return {
-            "error": "Bad Request",
-            "message": "Tags must be a list of strings",
-        }, 400
-    tags = [t.strip() for t in tags]
-    if not all(tags):
-        return {
-            "error": "Bad Request",
-            "message": "Tags must be non-empty strings",
-        }, 400
-    if len(tags) > 20:
-        return {"error": "Bad Request", "message": "Maximum 20 tags allowed"}, 400
-    if any(len(t) > 64 for t in tags):
-        return {
-            "error": "Bad Request",
-            "message": "Each tag must be at most 64 characters",
-        }, 400
-    metadata["tags"] = tags
-    return None
-
-
-def _validate_payload(data: dict) -> tuple[dict, int] | None:
-    """Validate ``data["payload"]``.
-
-    Returns an error tuple or *None* if valid.
-    """
-    payload = data["payload"]
-    if not isinstance(payload, str) or not payload.strip():
-        return {
-            "error": "Bad Request",
-            "message": "Payload must be a non-empty string",
-        }, 400
-    if "\x00" in payload:
-        return {
-            "error": "Bad Request",
-            "message": "Payload must not contain null bytes",
-        }, 400
-    if len(payload.encode("utf-8")) > _MAX_PAYLOAD_BYTES:
-        return {
-            "error": "Bad Request",
-            "message": f"Payload exceeds maximum size of {_fmt_bytes(_MAX_PAYLOAD_BYTES)}",
-        }, 400
-    return None
-
-
-def _validate_msg_type(data: dict) -> tuple[dict, int] | None:
-    """Validate and normalise ``data["msg_type"]`` in-place.
-
-    Returns an error tuple or *None* if valid.
-    """
-    msg_type = data["msg_type"]
-    if not isinstance(msg_type, str) or not msg_type.strip():
-        return {
-            "error": "Bad Request",
-            "message": "msg_type must be a non-empty string",
-        }, 400
-    if "\x00" in msg_type:
-        return {
-            "error": "Bad Request",
-            "message": "msg_type must not contain null bytes",
-        }, 400
-    data["msg_type"] = msg_type.strip()
-    if len(data["msg_type"]) > _MAX_MSG_TYPE_LEN:
-        return {
-            "error": "Bad Request",
-            "message": f"msg_type must be at most {_MAX_MSG_TYPE_LEN} characters",
-        }, 400
-    return None
-
-
-def _parse_publish_body(request: Any) -> dict | tuple:
-    """Parse and validate the publish request body.
-
-    Returns the validated data dict, or an (error_dict, status) tuple.
-    """
-    try:
-        data = request.json()
-    except Exception:
-        return {
-            "error": "Bad Request",
-            "message": "Request body must be valid JSON",
-        }, 400
-    if not isinstance(data, dict):
-        return {
-            "error": "Bad Request",
-            "message": "Request body must be a JSON object",
-        }, 400
-
-    missing = [f for f in _PUBLISH_REQUIRED if f not in data]
-    if missing:
-        return {
-            "error": "Bad Request",
-            "message": f"Missing: {', '.join(missing)}",
-        }, 400
-
-    payload_err = _validate_payload(data)
-    if payload_err:
-        return payload_err
-
-    msg_type_err = _validate_msg_type(data)
-    if msg_type_err:
-        return msg_type_err
-
-    metadata = data.get("metadata")
-    meta_err = _validate_metadata(metadata)
-    if meta_err:
-        return meta_err
-
-    if isinstance(metadata, dict) and "tags" in metadata:
-        tags_err = _validate_tags(metadata)
-        if tags_err:
-            return tags_err
-
-    if "\x00" in data["channel"]:
-        return {
-            "error": "Bad Request",
-            "message": "Channel must not contain null bytes",
-        }, 400
-
-    sender = data["sender"]
-    if not isinstance(sender, str) or "\x00" in sender:
-        return {
-            "error": "Bad Request",
-            "message": "Sender must be a string without null bytes",
-        }, 400
-
-    return data
-
-
-def _parse_query_limit(raw: str | None, max_limit: int) -> int | tuple[dict, int]:
-    """Parse and validate query limit parameter.
-
-    Returns int limit on success, or (error_dict, status) tuple.
-    """
-    try:
-        limit = int(raw or "100")
-    except ValueError:
-        return {
-            "error": "Bad Request",
-            "message": "'limit' must be an integer",
-        }, 400
-    if limit < 1:
-        return {
-            "error": "Bad Request",
-            "message": "'limit' must be at least 1",
-        }, 400
-    return min(limit, max_limit)
-
-
-def _parse_query_offset(raw: str | None) -> int | tuple[dict, int]:
-    """Parse and validate query offset parameter.
-
-    Returns int offset on success, or (error_dict, status) tuple.
-    """
-    if raw is None:
-        return 0
-    try:
-        offset = int(raw)
-    except ValueError:
-        return {
-            "error": "Bad Request",
-            "message": "'offset' must be an integer",
-        }, 400
-    if offset < 0:
-        return {
-            "error": "Bad Request",
-            "message": "'offset' must be non-negative",
-        }, 400
-    return offset
-
-
-def _parse_query_timeout(raw: str | None, default: int = 120) -> int | tuple[dict, int]:
-    """Parse and validate query timeout parameter.
-
-    Returns int timeout on success, or (error_dict, status) tuple.
-    """
-    try:
-        timeout = int(raw or str(default))
-    except ValueError:
-        return {
-            "error": "Bad Request",
-            "message": "'timeout' must be an integer",
-        }, 400
-    if timeout < 1:
-        return {
-            "error": "Bad Request",
-            "message": "'timeout' must be at least 1",
-        }, 400
-    return timeout
-
-
-def _parse_query_params(request: Any, max_limit: int) -> dict:
-    """Extract and validate query parameters (channel, after, limit, order, offset).
-
-    Returns dict with 'channel', 'after', 'limit', 'order', 'offset' on success,
-    or dict with 'error' key and '_status' key on failure.
-    """
-    channel = (request.query_params.get("channel") or [None])[0]
-    if not channel:
-        return {
-            "error": "Bad Request",
-            "message": "Query param 'channel' required",
-            "_status": 400,
-        }
-
-    if _invalid_dm_name(channel):
-        return {"error": "Bad Request", "message": DM_NAME_EXPECTED, "_status": 400}
-
-    after = (request.query_params.get("after") or [None])[0]
-    msg_type = (request.query_params.get("msg_type") or [None])[0]
-    limit = _parse_query_limit(
-        (request.query_params.get("limit") or [None])[0],
-        max_limit,
-    )
-    if not isinstance(limit, int):
-        return {"error": limit[0]["error"], "message": limit[0]["message"], "_status": 400}
-
-    offset = _parse_query_offset(
-        (request.query_params.get("offset") or [None])[0],
-    )
-    if not isinstance(offset, int):
-        return {"error": offset[0]["error"], "message": offset[0]["message"], "_status": 400}
-
-    order = (request.query_params.get("order") or ["oldest"])[0]
-    if order not in ("oldest", "newest"):
-        return {
-            "error": "Bad Request",
-            "message": "'order' must be 'oldest' or 'newest'",
-            "_status": 400,
-        }
-
-    thread_id = (request.query_params.get("thread_id") or [None])[0]
-    intent = (request.query_params.get("intent") or [None])[0]
-
-    return {
-        "channel": channel,
-        "after": after,
-        "limit": limit,
-        "msg_type": msg_type,
-        "order": order,
-        "thread_id": thread_id,
-        "intent": intent,
-        "offset": offset,
-    }
+        return request.json()
+    except Exception as exc:
+        raise ContractError(message) from exc
 
 
 async def _dm_unregistered_warning(bus: Any, channel: str, sender: str) -> str | None:
@@ -538,12 +282,11 @@ async def _dm_unregistered_warning(bus: Any, channel: str, sender: str) -> str |
 
 async def _handle_queue_status(request: Any, bus: Any, authz: ChannelAuthorizer) -> dict | tuple:
     """Handle /v1/queue/status requests."""
-    message_id = (request.query_params.get("message_id") or [None])[0]
-    if not message_id:
-        return {
-            "error": "Bad Request",
-            "message": "Query param 'message_id' required",
-        }, 400
+    try:
+        status = parse_queue_status(request.query_params)
+    except ContractError as err:
+        return _bad_request(err)
+    message_id = status.message_id
 
     auth_result = request.state.auth_result
     if isinstance(auth_result, str):
@@ -559,28 +302,12 @@ async def _handle_queue_status(request: Any, bus: Any, authz: ChannelAuthorizer)
     return {"found": True, "status": result}
 
 
-def _parse_queue_body(request: Any, required_field: str) -> tuple[dict, tuple | None]:
-    """Parse JSON body and validate a required field for queue endpoints."""
-    try:
-        data = request.json()
-    except Exception:
-        return {}, ({"error": "Bad Request", "message": "Invalid JSON"}, 400)
-    if not isinstance(data, dict):
-        return {}, ({"error": "Bad Request", "message": "Invalid JSON"}, 400)
-    value = data.get(required_field, "").strip()
-    if not value:
-        return {}, ({"error": "Bad Request", "message": f"Missing '{required_field}'"}, 400)
-    data[required_field] = value
-    return data, None
-
-
-def _resolve_claimed_by(auth_result: Any, data: dict) -> tuple[str, tuple | None]:
-    """Resolve claimed_by from auth context or request body."""
+def _resolve_claimed_by(auth_result: Any, claimed_by: str | None) -> tuple[str, tuple | None]:
+    """Resolve claimed_by from the auth context or the parsed request body."""
     if auth_result is False:
         return "", ({"error": "Unauthorized", "message": "Valid token required"}, 401)
     if isinstance(auth_result, str):
         return auth_result, None
-    claimed_by = data.get("claimed_by", "").strip()
     if not claimed_by:
         return "", ({"error": "Bad Request", "message": "Missing 'claimed_by'"}, 400)
     return claimed_by, None
@@ -877,20 +604,17 @@ class HttpFrontend:
 
         @self._app.post("/v1/publish")
         async def publish(request: Request) -> dict | tuple:
-            parsed = _parse_publish_body(request)
-            if not isinstance(parsed, dict):
-                return parsed  # error tuple
-            data = parsed
+            try:
+                payload = parse_publish(_json_body(request))
+            except ContractError as err:
+                return _bad_request(err)
 
             auth_result = request.state.auth_result
-            data["channel"] = data["channel"].strip()
-            data["sender"] = data["sender"].strip()
-
             auth_error = _validate_and_auth_publish(
                 auth_result,
-                data["sender"],
-                data["channel"],
-                msg_type=data["msg_type"],
+                payload.sender,
+                payload.channel,
+                msg_type=payload.msg_type,
                 token_store=self._token_store,
                 authz=self._authz,
             )
@@ -900,14 +624,14 @@ class HttpFrontend:
             try:
                 msg_id = await asyncio.to_thread(
                     bus.publish,
-                    channel=data["channel"],
-                    sender=data["sender"],
-                    msg_type=data["msg_type"],
-                    payload=data["payload"],
-                    metadata=data.get("metadata"),
-                    queue=bool(data.get("queue")),
-                    parent_id=data.get("parent_id"),
-                    intent=data.get("intent"),
+                    channel=payload.channel,
+                    sender=payload.sender,
+                    msg_type=payload.msg_type,
+                    payload=payload.payload,
+                    metadata=payload.metadata,
+                    queue=payload.queue,
+                    parent_id=payload.parent_id,
+                    intent=payload.intent,
                 )
             except ValueError as e:
                 return {
@@ -916,7 +640,7 @@ class HttpFrontend:
                 }, 404 if "not found" in str(e) else 400
             result: dict[str, object] = {"message_id": msg_id}
 
-            warning = await _dm_unregistered_warning(bus, data["channel"], data["sender"])
+            warning = await _dm_unregistered_warning(bus, payload.channel, payload.sender)
             if warning:
                 result["warning"] = warning
 
@@ -924,56 +648,53 @@ class HttpFrontend:
 
         @self._app.get("/v1/query")
         async def query(request: Request) -> dict | tuple:
-            qp = _parse_query_params(request, max_query_limit)
-            if "error" in qp:
-                status = qp.pop("_status", 400)
-                return qp, status
-            channel, after, limit = qp["channel"], qp["after"], qp["limit"]
-            offset = qp.get("offset", 0)
+            try:
+                qp = parse_query(
+                    request.query_params,
+                    max_limit=max_query_limit,
+                    validate_channel=_require_valid_dm_channel,
+                )
+            except ContractError as err:
+                return _bad_request(err)
 
             # Early access check: scoped tokens cannot query private
             # channels they don't belong to.  This also prevents leaking
             # the total message count (issue #251).
             auth_result = request.state.auth_result
-            if (
-                isinstance(auth_result, str)
-                and channel
-                and not authz.can_read(auth_result, channel)
-            ):
+            if isinstance(auth_result, str) and not authz.can_read(auth_result, qp.channel):
                 return {
                     "error": "Forbidden",
-                    "message": f"Token for '{auth_result}' cannot query channel '{channel}'",
+                    "message": f"Token for '{auth_result}' cannot query channel '{qp.channel}'",
                 }, 403
 
             msgs = await asyncio.to_thread(
                 bus.query,
-                channel,
-                after=after,
-                limit=limit,
-                msg_type=qp.get("msg_type"),
-                order=qp.get("order", "oldest"),
-                thread_id=qp.get("thread_id"),
-                intent=qp.get("intent"),
-                offset=offset,
+                qp.channel,
+                after=qp.after,
+                limit=qp.limit,
+                msg_type=qp.msg_type,
+                order=qp.order,
+                thread_id=qp.thread_id,
+                intent=qp.intent,
+                offset=qp.offset,
             )
 
             msgs = _filter_visible_messages(auth_result, msgs)
 
-            total = await asyncio.to_thread(bus.message_count, channel)
-            has_more = len(msgs) == limit
+            total = await asyncio.to_thread(bus.message_count, qp.channel)
+            has_more = len(msgs) == qp.limit
 
             return {
                 "messages": [_msg_to_dict(m) for m in msgs],
                 "count": len(msgs),
                 "total": total,
-                "offset": offset,
+                "offset": qp.offset,
                 "has_more": has_more,
             }
 
         @self._app.get("/v1/channels")
         async def channels(request: Request) -> dict:
-            detail_param = (request.query_params.get("detail") or ["false"])[0]
-            want_detail = detail_param.lower() == "true"
+            want_detail = parse_channels(request.query_params).detail
 
             auth_result = request.state.auth_result
 
@@ -1016,12 +737,11 @@ class HttpFrontend:
 
         @self._app.get("/v1/registry/lookup")
         async def registry_lookup(request: Request) -> dict | tuple:
-            user_id = (request.query_params.get("user_id") or [""])[0].strip()
-            if not user_id:
-                return {
-                    "error": "Bad Request",
-                    "message": "Query param 'user_id' required",
-                }, 400
+            try:
+                query = parse_registry_lookup(request.query_params)
+            except ContractError as err:
+                return _bad_request(err)
+            user_id = query.user_id
             token_store = self._token_store
             if token_store is not None and await asyncio.to_thread(
                 token_store.user_exists, user_id
@@ -1134,27 +854,12 @@ class HttpFrontend:
                 }, 403
 
             try:
-                data = request.json()
-            except Exception:
-                return {
-                    "error": "Bad Request",
-                    "message": "Request body must be valid JSON",
-                }, 400
+                cleanup = parse_admin_cleanup(_json_body(request))
+            except ContractError as err:
+                return _bad_request(err)
 
-            if not isinstance(data, dict):
-                return {
-                    "error": "Bad Request",
-                    "message": "Request body must be a JSON object",
-                }, 400
-
-            pattern = data.get("pattern", "").strip()
-            if not pattern:
-                return {
-                    "error": "Bad Request",
-                    "message": "'pattern' field is required (e.g. 'test:*')",
-                }, 400
-
-            older_than = data.get("older_than")
+            pattern = cleanup.pattern
+            older_than = cleanup.older_than
 
             all_channels = cast(list[str], await asyncio.to_thread(bus.channels, detail=False))
             matched = _match_channels(all_channels, pattern)
@@ -1212,33 +917,13 @@ class HttpFrontend:
                 }, 403
 
             try:
-                data = request.json()
-            except Exception:
-                return {
-                    "error": "Bad Request",
-                    "message": "Request body must be valid JSON",
-                }, 400
+                compact = parse_admin_compact(_json_body(request))
+            except ContractError as err:
+                return _bad_request(err)
 
-            if not isinstance(data, dict):
-                return {
-                    "error": "Bad Request",
-                    "message": "Request body must be a JSON object",
-                }, 400
-
-            channel = data.get("channel", "").strip()
-            if not channel:
-                return {
-                    "error": "Bad Request",
-                    "message": "'channel' field is required",
-                }, 400
-
-            max_messages = data.get("max_messages")
-            if max_messages is not None and (not isinstance(max_messages, int) or max_messages < 1):
-                return {
-                    "error": "Bad Request",
-                    "message": "max_messages must be a positive integer",
-                }, 400
-            keep_latest_per_sender = bool(data.get("keep_latest_per_sender", False))
+            channel = compact.channel
+            max_messages = compact.max_messages
+            keep_latest_per_sender = compact.keep_latest_per_sender
 
             try:
                 removed = await asyncio.to_thread(
@@ -1268,44 +953,45 @@ class HttpFrontend:
         # ── Shared handlers ───────────────────────────────────────
 
         async def _handle_claim(request: Request) -> dict | tuple:
-            data, err = _parse_queue_body(request, "channel")
-            if err:
-                return err
+            try:
+                claim = parse_queue_claim(_json_body(request, "Invalid JSON"))
+            except ContractError as err:
+                return _bad_request(err)
             auth_result = request.state.auth_result
-            claimed_by, err = _resolve_claimed_by(auth_result, data)
+            claimed_by, err = _resolve_claimed_by(auth_result, claim.claimed_by)
             if err:
                 return err
 
             if isinstance(auth_result, str):
-                denial = await asyncio.to_thread(authz.claim_denial, auth_result, data["channel"])
+                denial = await asyncio.to_thread(authz.claim_denial, auth_result, claim.channel)
                 if denial:
                     return {"error": "Forbidden", "message": denial}, 403
 
-            lease = int(data.get("lease_seconds", 300))
             result = await asyncio.to_thread(
-                bus.queue_claim, data["channel"], claimed_by, lease_seconds=lease
+                bus.queue_claim, claim.channel, claimed_by, lease_seconds=claim.lease_seconds
             )
             if result is None:
                 return {"claimed": False}
             return {"claimed": True, "result": _claim_result_to_dict(result)}
 
         async def _handle_ack(request: Request) -> dict | tuple:
-            data, err = _parse_queue_body(request, "message_id")
-            if err:
-                return err
+            try:
+                ack = parse_queue_ack(_json_body(request, "Invalid JSON"))
+            except ContractError as err:
+                return _bad_request(err)
             auth_result = request.state.auth_result
-            claimed_by, err = _resolve_claimed_by(auth_result, data)
+            claimed_by, err = _resolve_claimed_by(auth_result, ack.claimed_by)
             if err:
                 return err
 
             if isinstance(auth_result, str):
-                message = await asyncio.to_thread(bus.get_message, data["message_id"])
+                message = await asyncio.to_thread(bus.get_message, ack.message_id)
                 if message is not None and not authz.can_read(auth_result, message.channel):
                     # Same answer as "not claimed by you": an unauthorized
                     # caller learns nothing about the message's existence.
                     return {"acked": False}
 
-            result = await asyncio.to_thread(bus.queue_ack, data["message_id"], claimed_by)
+            result = await asyncio.to_thread(bus.queue_ack, ack.message_id, claimed_by)
             if result is None:
                 return {"acked": False}
             return {"acked": True, "result": _claim_result_to_dict(result)}
@@ -1332,12 +1018,11 @@ class HttpFrontend:
         @self._app.post("/v1/presence/heartbeat")
         async def presence_heartbeat(request: Request) -> dict | tuple:
             auth_result = request.state.auth_result
-            body = request.json()
-            if not body or not isinstance(body, dict):
-                return {"error": "JSON body required"}, 400
-            user_id = body.get("user_id", "").strip()
-            if not user_id:
-                return {"error": "user_id required"}, 400
+            try:
+                heartbeat = parse_heartbeat(_json_body(request, "JSON body required"))
+            except ContractError as err:
+                return _bad_request(err)
+            user_id = heartbeat.user_id
             # A scoped token may only report its own user's presence.
             # Supertokens (auth_result is None) and no-auth mode (True)
             # keep acting on behalf of any user, as they do elsewhere.
@@ -1346,10 +1031,7 @@ class HttpFrontend:
                     "error": "Forbidden",
                     "message": (f"Token bound to '{auth_result}', cannot heartbeat as '{user_id}'"),
                 }, 403
-            metadata = body.get("metadata")
-            meta_err = _validate_metadata(metadata)
-            if meta_err:
-                return meta_err
+            metadata = heartbeat.metadata
             try:
                 await asyncio.to_thread(bus.heartbeat, user_id, metadata)
             except NotImplementedError:
@@ -1361,12 +1043,12 @@ class HttpFrontend:
 
         @self._app.get("/v1/presence")
         async def presence_list(request: Request) -> dict | tuple:
-            raw_timeout = (request.query_params.get("timeout") or ["120"])[0]
-            timeout = _parse_query_timeout(raw_timeout)
-            if isinstance(timeout, tuple):
-                return timeout
             try:
-                agents = await asyncio.to_thread(bus.users, timeout)
+                query = parse_presence_list(request.query_params)
+            except ContractError as err:
+                return _bad_request(err)
+            try:
+                agents = await asyncio.to_thread(bus.users, query.timeout)
             except NotImplementedError:
                 return {
                     "error": "Not Implemented",
@@ -1386,12 +1068,12 @@ class HttpFrontend:
 
         @self._app.get("/v1/presence/<user_id>")
         async def presence_agent(request: Request, user_id: str = "") -> dict | tuple:
-            raw_timeout = (request.query_params.get("timeout") or ["120"])[0]
-            timeout = _parse_query_timeout(raw_timeout)
-            if isinstance(timeout, tuple):
-                return timeout
             try:
-                result = await asyncio.to_thread(bus.user_status, user_id, timeout)
+                query = parse_presence_list(request.query_params)
+            except ContractError as err:
+                return _bad_request(err)
+            try:
+                result = await asyncio.to_thread(bus.user_status, user_id, query.timeout)
             except NotImplementedError:
                 return {
                     "error": "Not Implemented",
@@ -1420,10 +1102,11 @@ class HttpFrontend:
 
         @self._app.post("/v1/channels")
         async def create_channel(request: Request) -> dict | tuple:
-            body = request.json()
-            name = body.get("name", "").strip()
-            if not name:
-                return {"error": "Bad Request", "message": "'name' is required"}, 400
+            try:
+                payload = parse_channel_create(_json_body(request))
+            except ContractError as err:
+                return _bad_request(err)
+            name = payload.name
 
             if name.startswith(DM_PREFIX):
                 error = _validate_channel_name(name, token_store=self._token_store)
@@ -1431,7 +1114,7 @@ class HttpFrontend:
                     return error
 
             auth_result = request.state.auth_result
-            owner = body.get("owner", "")
+            owner = payload.owner or ""
             if isinstance(auth_result, str):
                 denial = authz.create_denial(auth_result, name)
                 if denial:
@@ -1443,12 +1126,7 @@ class HttpFrontend:
                     "message": "'owner' is required for supertoken/no-auth",
                 }, 400
 
-            visibility = body.get("visibility", "public")
-            if visibility not in ("public", "private"):
-                return {
-                    "error": "Bad Request",
-                    "message": "visibility must be 'public' or 'private'",
-                }, 400
+            visibility = payload.visibility
 
             try:
                 meta = await asyncio.to_thread(
@@ -1563,31 +1241,26 @@ class HttpFrontend:
             if denied:
                 return denied
 
-            body = request.json()
-            raw_entries = body.get("acl", [])
-            if not isinstance(raw_entries, list):
-                return {"error": "Bad Request", "message": "'acl' must be a list"}, 400
+            try:
+                payload = parse_acl_set(_json_body(request))
+            except ContractError as err:
+                return _bad_request(err)
 
             from mansio_core.types import ACLEntry
 
             auth_result = request.state.auth_result
             now = _now_iso()
             granted_by = auth_result if isinstance(auth_result, str) else None
-            entries = []
-            for raw in raw_entries:
-                permission = raw.get("permission", "read")
-                permission_err = _validate_permission(permission)
-                if permission_err:
-                    return permission_err
-                entries.append(
-                    ACLEntry(
-                        channel=channel,
-                        user_id=raw["user_id"],
-                        permission=permission,
-                        granted_at=now,
-                        granted_by=granted_by,
-                    )
+            entries = [
+                ACLEntry(
+                    channel=channel,
+                    user_id=spec.user_id,
+                    permission=spec.permission,
+                    granted_at=now,
+                    granted_by=granted_by,
                 )
+                for spec in payload.entries
+            ]
 
             try:
                 await asyncio.to_thread(bus.set_acl, channel, entries)
@@ -1613,15 +1286,12 @@ class HttpFrontend:
             if denied:
                 return denied
 
-            body = request.json()
-            user_id = body.get("user_id", "").strip()
-            if not user_id:
-                return {"error": "Bad Request", "message": "'user_id' is required"}, 400
-
-            permission = body.get("permission", "read")
-            permission_err = _validate_permission(permission)
-            if permission_err:
-                return permission_err
+            try:
+                payload = parse_acl_add(_json_body(request))
+            except ContractError as err:
+                return _bad_request(err)
+            user_id = payload.user_id
+            permission = payload.permission
 
             from mansio_core.types import ACLEntry
 
@@ -1801,37 +1471,6 @@ class HttpFrontend:
             return await _handle_subscribe(request, [channel])
 
 
-def _match_channels(channels: list[str], pattern: str) -> list[str]:
-    """Match channel names against a glob-like pattern.
-
-    Supports ``*`` as a wildcard for any sequence of characters.
-    The pattern is matched against the full channel name.
-
-    Args:
-        channels: List of channel names to match.
-        pattern: Glob pattern (e.g. ``"test:*"``, ``"*"``)
-
-    Returns:
-        List of matching channel names.
-    """
-    import fnmatch
-
-    return [ch for ch in channels if fnmatch.fnmatch(ch, pattern)]
-
-
-def _validate_permission(permission: Any) -> tuple[dict, int] | None:
-    """Validate an ACL permission string against the presets and verbs."""
-    from mansio_core.types import ALLOWED_PERMISSIONS
-
-    if not isinstance(permission, str) or permission not in ALLOWED_PERMISSIONS:
-        allowed = ", ".join(sorted(ALLOWED_PERMISSIONS))
-        return {
-            "error": "Bad Request",
-            "message": f"permission must be one of: {allowed}",
-        }, 400
-    return None
-
-
 async def _require_acl_manage(
     auth_result: Any, authz: ChannelAuthorizer, channel: str
 ) -> tuple[dict, int] | None:
@@ -1848,6 +1487,24 @@ async def _require_acl_manage(
             "message": f"Agent '{auth_result}' lacks manage permission on '{channel}'",
         }, 403
     return None
+
+
+def _match_channels(channels: list[str], pattern: str) -> list[str]:
+    """Match channel names against a glob-like pattern.
+
+    Supports ``*`` as a wildcard for any sequence of characters.
+    The pattern is matched against the full channel name.
+
+    Args:
+        channels: List of channel names to match.
+        pattern: Glob pattern (e.g. ``"test:*"``, ``"*"``)
+
+    Returns:
+        List of matching channel names.
+    """
+    import fnmatch
+
+    return [ch for ch in channels if fnmatch.fnmatch(ch, pattern)]
 
 
 def _filter_visible_messages(auth_result: Any, msgs: list[Message]) -> list[Message]:
