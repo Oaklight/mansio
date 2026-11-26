@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, overload
 
+from mansio._vendor.structlog import get_logger
 from mansio.admin.metrics import MetricsCollector
 from mansio.backends import SQLiteBackend
 from mansio.protocols import (
@@ -23,6 +24,8 @@ from mansio.protocols import (
 )
 from mansio.system_policy import CompactionPolicy, system_channel_policy
 from mansio.types import ACLEntry, ChannelMeta, ClaimResult, Message, UserPresence
+
+logger = get_logger(__name__)
 
 # Thread-safe monotonic sequence for _uuid7 fallback
 _seq_lock = threading.Lock()
@@ -143,6 +146,9 @@ class Bus:
         Returns:
             The message ID.
 
+        Subscriber callbacks are isolated: an exception raised by one is
+        logged and does not abort the publish or reach the other subscribers.
+
         Raises:
             ValueError: If parent_id references a non-existent message
                 or a message in a different channel.
@@ -195,11 +201,10 @@ class Bus:
         self._metrics.record()
         self._compaction_policy(self._backend, channel)
 
-        # Notify subscribers of this process's own publish (snapshot to avoid
-        # mutation during iteration). Publishes from other processes reach the
-        # same subscribers through the backend watch started in subscribe().
-        for callback in list(self._subs.get(channel, {}).values()):
-            callback(msg)
+        # Notify subscribers of this process's own publish. Publishes from
+        # other processes reach the same subscribers through the backend
+        # watch started in subscribe().
+        self._notify(channel, msg)
 
         return msg_id
 
@@ -311,14 +316,32 @@ class Bus:
             if channel_subs.pop(subscription_id, None) is not None and not channel_subs:
                 self._stop_watch(channel)
 
+    def _notify(self, channel: str, message: Message) -> None:
+        """Deliver *message* to this channel's in-process subscribers.
+
+        Each callback runs isolated.  A callback that raises is logged and
+        skipped so the publisher and the remaining subscribers are not
+        affected; this also keeps a Watchable backend's delivery thread
+        alive.  The callback list is snapshotted so a callback may
+        subscribe or unsubscribe during delivery.
+        """
+        for callback in list(self._subs.get(channel, {}).values()):
+            try:
+                callback(message)
+            except Exception:
+                logger.exception(
+                    "subscriber callback raised",
+                    channel=channel,
+                    message_id=message.id,
+                )
+
     def _start_watch(self, channel: str) -> None:
         """Ensure a backend watch exists for *channel*, if the backend supports it."""
         if channel in self._watches or not isinstance(self._backend, Watchable):
             return
 
         def _deliver(msg: Message) -> None:
-            for callback in list(self._subs.get(channel, {}).values()):
-                callback(msg)
+            self._notify(channel, msg)
 
         self._watches[channel] = self._backend.watch(channel, _deliver)
 
