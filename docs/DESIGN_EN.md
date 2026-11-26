@@ -437,8 +437,9 @@ message exists. A claim never creates a `broadcast:*` channel for the caller.
 **Deleting channels**: a scoped token may delete a `dm:`/`notebook:`/`memory:`
 channel it belongs to, and a plain or registered-prefix channel whose stored
 row grants it the `delete` verb (the owner, or an ACL entry granting
-`delete`/`manage`). Unregistered plain channels, `broadcast:*`, and
-`_system:*` remain supertoken-only.
+`delete`; the `manage` verb controls the ACL and does not include deletion).
+Unregistered plain channels, `broadcast:*`, and `_system:*` remain
+supertoken-only.
 
 ##### Input Validation
 

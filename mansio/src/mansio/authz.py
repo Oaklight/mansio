@@ -278,9 +278,10 @@ class ChannelAuthorizer:
         Name-private channels keep their membership rule and ``_system:*``
         stays closed.  Plain and registered-prefix channels need a stored
         row and the ``delete`` verb on it: that is the owner, or an ACL entry
-        granting ``delete``/``manage``.  An unregistered channel has no owner
-        and stays under the shared-channel denial.  ``broadcast:*`` keeps its
-        own rule and is not part of this path.
+        granting ``delete`` (the ``owner`` preset includes it; ``manage``
+        alone controls the ACL, not deletion).  An unregistered channel has
+        no owner and stays under the shared-channel denial.  ``broadcast:*``
+        keeps its own rule and is not part of this path.
         """
         if channel.startswith("_system:"):
             return (
