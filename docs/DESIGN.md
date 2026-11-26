@@ -479,6 +479,8 @@ notification_check() -> list[Message]
 
 群聊不需要专门的方法：一个群就是一个普通 channel，通过 `channel_send` / `channel_poll` 使用。
 
+Burst 分组是显式的，不依赖时间窗口：`send_burst(channel, messages, ...)` 把同一个生成的 `burst_id` 以及 `burst_index`、`burst_size` 写入每条消息的可选扩展字段（`metadata`），接收方无需时间窗口即可重组一个 burst。
+
 除语义封装外，客户端还提供工作队列（`queue_publish`、`queue_claim`、`queue_ack`、`queue_status`）、在线状态（`heartbeat`、`users`、`user_status`）、频道管理（`channel_create`、`channel_delete`、`message_delete`、`acl_get` / `acl_set` / `acl_add` / `acl_remove`、`registry_lookup`）以及实时投递（`subscribe`、`unsubscribe`、`listen`）。
 
 ##### 语义 API 与 Channel 操作的映射关系
