@@ -122,6 +122,17 @@ class TestPublishContract:
             parse_publish(_publish(channel="a\x00b"))
         with pytest.raises(ContractError, match="Sender must be a string without null bytes"):
             parse_publish(_publish(sender=None))
+        with pytest.raises(ContractError, match="Sender must be a non-empty string"):
+            parse_publish(_publish(sender="   "))
+
+    def test_optional_reference_fields_must_be_strings_or_null(self) -> None:
+        request = parse_publish(_publish(parent_id=None, intent=None))
+        assert request.parent_id is None
+        assert request.intent is None
+        with pytest.raises(ContractError, match="'parent_id' must be a string or null"):
+            parse_publish(_publish(parent_id=1))
+        with pytest.raises(ContractError, match="'intent' must be a string or null"):
+            parse_publish(_publish(intent=123))
 
 
 class TestQueryContract:

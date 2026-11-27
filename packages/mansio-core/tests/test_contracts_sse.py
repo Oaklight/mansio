@@ -10,6 +10,7 @@ from mansio_core.contracts import (
     StreamEvent,
     message_from_dict,
     message_to_dict,
+    parse_publish,
     parse_stream_event,
     stream_event_to_json,
 )
@@ -73,6 +74,22 @@ class TestMessageWireObject:
         assert message.metadata is None
         assert message.parent_id is None
 
+    def test_empty_producer_controlled_fields_are_rejected(self) -> None:
+        """The publish contract rejects these, so the parser may reject them too."""
+        for field in ("channel", "sender", "msg_type", "payload"):
+            with pytest.raises(ContractError, match=f"requires '{field}'"):
+                message_from_dict(
+                    {
+                        "id": "m",
+                        "channel": "c",
+                        "sender": "s",
+                        "msg_type": "t",
+                        "payload": "p",
+                        "timestamp": "ts",
+                        field: "",
+                    }
+                )
+
     def test_extra_fields_are_ignored(self) -> None:
         message = message_from_dict(
             {
@@ -96,6 +113,17 @@ class TestMessageWireObject:
             ({"id": 1}, "requires 'id'"),
             (
                 {"id": "m", "channel": "c", "sender": "s", "msg_type": "t", "payload": "p"},
+                "requires 'timestamp'",
+            ),
+            (
+                {
+                    "id": "m",
+                    "channel": "c",
+                    "sender": "s",
+                    "msg_type": "t",
+                    "payload": "p",
+                    "timestamp": "",
+                },
                 "requires 'timestamp'",
             ),
             (
@@ -156,3 +184,40 @@ class TestStreamEventDocument:
     def test_invalid_envelopes(self, data: str, match: str) -> None:
         with pytest.raises(ContractError, match=match):
             parse_stream_event(data)
+
+
+class TestPublishToStreamRoundTrip:
+    """A request the publish contract accepts always parses as a stream event."""
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {},
+            {"parent_id": None, "intent": None},
+            {"parent_id": "parent-1", "intent": "REQUIRES_RESPONSE"},
+            {"metadata": {"tags": [" a ", "b"]}},
+        ],
+    )
+    def test_accepted_publish_round_trips(self, overrides: dict) -> None:
+        body = {
+            "channel": "general",
+            "sender": " alice ",
+            "msg_type": "text",
+            "payload": "hello",
+        }
+        body.update(overrides)
+        request = parse_publish(body)
+        message = Message(
+            id="msg-1",
+            channel=request.channel,
+            sender=request.sender,
+            msg_type=request.msg_type,
+            payload=request.payload,
+            timestamp="2026-01-01T00:00:00+00:00",
+            metadata=request.metadata,
+            parent_id=request.parent_id,
+            thread_id=request.parent_id,
+            intent=request.intent,
+        )
+        event = StreamEvent(channel=request.channel, message=message)
+        assert parse_stream_event(stream_event_to_json(event)) == event

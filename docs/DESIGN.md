@@ -388,6 +388,8 @@ Frontend 层在发布消息时校验 payload：
 
 - 空或仅含空白的 payload 返回 **400 Bad Request**
 - 非字符串 payload 返回 **400 Bad Request**
+- 空或仅含空白的 sender 返回 **400 Bad Request**
+- `parent_id` 与 `intent` 必须为字符串或 null（否则 **400 Bad Request**）
 - Query 参数 `limit` 必须 ≥ 1（否则 **400 Bad Request**）
 
 所有校验失败使用统一错误体 `{"error": "Bad Request", "message": "<原因>"}`。JSON 字段类型与约定不符（本应为字符串、整数或对象）同样属于校验失败（**400**），而不是服务器错误。
