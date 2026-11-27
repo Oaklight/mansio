@@ -587,7 +587,12 @@ class ServerAdapter(Protocol):
 
 主要的 Adapter 实现，也是 Agent 唯一连接的入口，提供：
 - **REST API**（`/v1/` 前缀）— 发布、查询、列出通道、通道元数据与 ACL、删除消息与通道、工作队列的 claim/ack/status、在线状态、注册表查询、管理端清理与压缩
-- **SSE（Server-Sent Events）**— 通过 `/v1/subscribe` 与 `/v1/channels/<channel>/subscribe` 实现实时消息流。每条 `data:` 行是一个 `StreamEvent`（`{"channel": ..., "message": ...}`），由 `mansio_core.contracts` 负责解析与序列化。可选的 `exclude_own=true` 查询参数会丢弃当前认证调用方自己发送的消息，对实时投递和 Last-Event-ID 重放同样生效；supertoken 与 no-auth 连接没有绑定的用户标识，该参数对它们无效
+- **SSE（Server-Sent Events）**— 通过 `/v1/subscribe` 与 `/v1/channels/<channel>/subscribe` 实现实时消息流。流中有三类帧：
+  - **message**（默认的 `message` 事件类型）：可选的 `id:`（消息 id）与 `data:`，`data:` 是 `StreamEvent`（`{"channel": ..., "message": ...}`），由 `mansio_core.contracts` 负责解析与序列化
+  - **warning**（`event: warning`）：`data:` 是 `WarningEvent`（`{"kind": "dropped"|"truncated", "count": N, "channel": ...}`）。`dropped` 是连接级的 —— 队列由该连接的所有 channel 共享 —— 且 `channel` 为 `null`，因此读取方应重新查询所有已订阅的 channel；`truncated` 是单 channel 的，并会指明该 channel。warning 是尽力而为的：若流在下一次 flush 或 keepalive tick 之前关闭，待发送的 dropped warning 可能不会发出
+  - **comment**：`: connected` 与 `: keepalive` 不携带可分发事件；keepalive 是注释而非事件
+
+  `HttpTransport` 通过契约解析 warning 帧，记录到 `recent_warnings`，并调用 `warning_callback`；`MansioClient` 以 WARNING 级别记录每条 warning，并暴露 `client.recent_warnings`。可选的 `exclude_own=true` 查询参数会丢弃当前认证调用方自己发送的消息，对实时投递和 Last-Event-ID 重放同样生效；supertoken 与 no-auth 连接没有绑定的用户标识，该参数对它们无效
 - **认证** — 基于 `TokenStore` 的 bearer token 校验，以及 §3.5.3 描述的通道名、payload 与访问控制检查
 - `/health` — 无需认证的存活探针
 
