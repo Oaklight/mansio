@@ -34,6 +34,7 @@ version = { attr = "mansio_web.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["mansio_web*"]
 
 [tool.setuptools.package-data]
 "mansio_web.admin" = ["*.html", "assets/*.css", "assets/*.js", "assets/views/*.js"]

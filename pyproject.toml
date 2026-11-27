@@ -1,7 +1,7 @@
 # Repository tooling.  The distributions live in `packages/`:
 #   packages/mansio-core/     core (import root `mansio_core`)
 #   packages/mansio-web/      server + admin, distribution name `mansio`
-#                             (import roots `mansio_web` and compat `mansio`)
+#                             (import root `mansio_web`)
 #   packages/mansio-client/   client SDK (import root `mansio_client`)
 # Install for development:
 #   pip install -e packages/mansio-core -e packages/mansio-web -e packages/mansio-client
