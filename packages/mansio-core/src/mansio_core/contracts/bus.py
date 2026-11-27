@@ -1,9 +1,11 @@
 """Typed wire contracts for the bus HTTP API.
 
-The dataclasses are the single definition of the request and response
-documents.  Parsers in :mod:`mansio_core.contracts.parsers` turn decoded
-JSON and query values into these objects; route handlers serialize them
-back to JSON.  No type here exposes a backend-internal object.
+Request dataclasses are the single definition of each request document:
+parsers in :mod:`mansio_core.contracts.parsers` turn decoded JSON and query
+values into them, and the route handlers consume the parsed object.
+Response dataclasses document the wire schema, but handlers still return
+plain dicts and do not construct them yet (planned for M3).  No type here
+exposes a backend-internal object.
 """
 
 from __future__ import annotations
