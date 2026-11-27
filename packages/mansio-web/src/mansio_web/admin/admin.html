@@ -8,279 +8,48 @@
 <script src="/assets/theme-init.js"></script>
 </head>
 <body class="auth-pending">
-<div class="app">
-    <!-- Header -->
-    <header class="header">
-        <div class="header-logo">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-            Mansio Admin
-        </div>
-        <div class="header-spacer"></div>
-        <div style="display:flex;align-items:center;gap:8px;">
-            <div class="status-dot" id="statusDot"></div>
-            <span class="status-label" id="statusLabel">Connecting...</span>
-        </div>
-        <button class="btn btn-secondary btn-sm btn-icon" onclick="refreshCurrentTab()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-            </svg>
-            Refresh
-        </button>
-        <button class="settings-btn" onclick="toggleSettings()" title="Settings">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-        </button>
-        <button class="btn btn-secondary btn-sm" id="logoutBtn" onclick="doLogout()" style="display:none">Logout</button>
+<div class="app-shell" id="appShell">
+    <header class="topbar">
+        <a class="brand" href="#/overview" aria-label="Mansio admin home">
+            <span class="brand-mark" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </span>
+            <span class="brand-name">Mansio</span>
+        </a>
+        <span class="breadcrumb" id="breadcrumb">Overview</span>
+        <div class="topbar-search" id="globalSearch"></div>
+        <div class="topbar-actions" id="topbarActions"></div>
     </header>
-
-    <!-- Tabs -->
-    <div class="tabs">
-        <button class="tab-btn active" onclick="switchTab('dashboard')">Dashboard</button>
-        <button class="tab-btn" onclick="switchTab('channels')">Channels</button>
-        <button class="tab-btn" onclick="switchTab('messages')">Messages</button>
-        <button class="tab-btn" onclick="switchTab('subscriptions')">Subscriptions</button>
-        <button class="tab-btn" onclick="switchTab('tokens')">Tokens</button>
-        <button class="tab-btn" onclick="switchTab('system')">System</button>
-    </div>
-
-    <!-- Dashboard Tab -->
-    <div class="tab-content active" id="tab-dashboard">
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-label">Total Messages</div>
-                <div class="stat-value" id="statMessages">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Channels</div>
-                <div class="stat-value" id="statChannels">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Senders</div>
-                <div class="stat-value" id="statSenders">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Active Subscriptions</div>
-                <div class="stat-value" id="statSubs">-</div>
-            </div>
-        </div>
-
-        <div class="chart-container">
-            <div class="chart-title">Throughput (messages/sec, last 60s)</div>
-            <canvas class="chart-canvas" id="throughputChart"></canvas>
-        </div>
-
-        <div class="table-container">
-            <div class="table-title" style="padding-bottom:8px;">Channel Breakdown</div>
-            <table>
-                <thead><tr>
-                    <th>Channel</th><th>Messages</th><th>Senders</th><th>Last Message</th>
-                </tr></thead>
-                <tbody id="channelBreakdown"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Channels Tab -->
-    <div class="tab-content" id="tab-channels">
-        <div class="ch-toolbar">
-            <input id="chSearch" type="text" placeholder="Search channels..." oninput="renderChannelView()">
-            <select id="chTypeFilter" onchange="renderChannelView()">
-                <option value="all">All types</option>
-                <option value="dm">DM</option>
-                <option value="notebook">Notebook</option>
-                <option value="memory">Memory</option>
-                <option value="broadcast">Broadcast</option>
-                <option value="custom">Custom</option>
-            </select>
-            <select id="chAgentFilter" onchange="renderChannelView()">
-                <option value="">All agents</option>
-            </select>
-            <label style="font-size:0.75rem;color:var(--text-secondary);display:flex;align-items:center;gap:4px">
-                <input type="checkbox" id="chShowSystem" onchange="renderChannelView()"> System
-            </label>
-            <div class="ch-view-btns">
-                <button class="active" onclick="setChannelView('tree')">Tree</button>
-                <button onclick="setChannelView('flat')">Flat</button>
-                <button onclick="setChannelView('agent')">Agent</button>
-            </div>
-        </div>
-        <div id="channelViewContainer"></div>
-    </div>
-
-    <!-- Messages Tab -->
-    <div class="tab-content" id="tab-messages">
-        <div class="filter-bar">
-            <select id="msgChannel" onchange="loadMessages()">
-                <option value="">Select channel...</option>
-            </select>
-            <input id="msgSender" type="text" placeholder="Filter sender..." style="max-width:160px" onchange="loadMessages()">
-            <input id="msgType" type="text" placeholder="Filter msg_type..." style="max-width:160px" onchange="loadMessages()">
-            <button class="btn btn-secondary btn-sm" onclick="loadMessages()">Apply</button>
-            <div class="header-spacer"></div>
-            <label style="font-size:0.75rem;color:var(--text-secondary);display:flex;align-items:center;gap:4px;">
-                <input type="checkbox" id="msgAutoRefresh" checked> Auto-refresh
-            </label>
-        </div>
-
-        <div class="message-container" id="messageContainer">
-            <div class="message-empty">Select a channel to view messages</div>
-        </div>
-
-        <div class="publish-section">
-            <div class="publish-header" onclick="togglePublish()">
-                <span>Publish Message</span>
-                <svg id="publishChevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.2s">
-                    <polyline points="6 9 12 15 18 9"/>
-                </svg>
-            </div>
-            <div class="publish-body" id="publishBody">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Channel</label>
-                        <input id="pubChannel" type="text" placeholder="channel-name">
-                    </div>
-                    <div class="form-group">
-                        <label>Sender</label>
-                        <input id="pubSender" type="text" placeholder="admin-panel" value="admin-panel">
-                    </div>
-                    <div class="form-group">
-                        <label>Message Type</label>
-                        <input id="pubMsgType" type="text" placeholder="text" value="text">
-                    </div>
-                </div>
-                <div class="form-group" style="margin-bottom:12px">
-                    <label>Payload</label>
-                    <textarea id="pubPayload" placeholder="Message content..."></textarea>
-                </div>
-                <div class="form-group" style="margin-bottom:12px">
-                    <label>Metadata (JSON, optional)</label>
-                    <textarea id="pubMetadata" placeholder='{"key": "value"}' style="min-height:40px"></textarea>
-                </div>
-                <button class="btn btn-primary" onclick="publishMessage()">Send</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Subscriptions Tab -->
-    <div class="tab-content" id="tab-subscriptions">
-        <div class="sub-total" id="subTotal">Loading...</div>
-        <div class="table-container">
-            <table>
-                <thead><tr>
-                    <th>Channel</th><th>Subscription IDs</th><th>Count</th>
-                </tr></thead>
-                <tbody id="subList"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Tokens Tab -->
-    <div class="tab-content" id="tab-tokens">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-            <span style="font-size:0.875rem;color:var(--text-secondary)" id="tokenStatus"></span>
-            <button class="btn btn-primary btn-sm" onclick="showCreateTokenModal()">+ Create Token</button>
-        </div>
-        <div id="tokenRevealArea"></div>
-        <div class="table-container">
-            <table>
-                <thead><tr>
-                    <th>ID</th><th>Agent ID</th><th>Label</th><th>Prefix</th><th>Created</th><th>Last Used</th><th>Actions</th>
-                </tr></thead>
-                <tbody id="tokenList"></tbody>
-            </table>
-        </div>
-    </div>
-    <!-- System Tab -->
-    <div class="tab-content" id="tab-system">
-        <div id="systemInfo" style="color:var(--text-secondary);text-align:center;padding:40px">Loading...</div>
-    </div>
-
-    <!-- Status Footer -->
-    <footer class="status-footer">
-        <span id="footerBackend">Backend: —</span>
-        <span id="footerMessages">Messages: —</span>
-        <span id="footerUptime">Uptime: —</span>
-        <span class="footer-spacer"></span>
-        <span>Mansio Admin</span>
-    </footer>
+    <nav class="sidebar" id="sidebar" aria-label="Sections"></nav>
+    <main class="main-pane" id="mainPane" tabindex="-1"></main>
+    <aside class="detail-pane-slot" id="detailPane" aria-label="Detail"></aside>
 </div>
 
-<!-- Settings Popup -->
-<div class="settings-popup hidden" id="settingsPopup" onclick="if(event.target===this)toggleSettings()">
+<div class="settings-popup hidden" id="settingsPopup">
     <div class="settings-card">
-        <h3>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:text-bottom">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-            Settings
-        </h3>
-        <div class="settings-section">
-            <div class="settings-label">Theme</div>
-            <div class="theme-switcher" id="themeSwitcher">
-                <button onclick="setTheme('light')" title="Light mode">☀️ Light</button>
-                <button onclick="setTheme('auto')" title="Follow system">🖥️ Auto</button>
-                <button onclick="setTheme('dark')" title="Dark mode">🌙 Dark</button>
-            </div>
-        </div>
-        <hr class="settings-divider">
-        <div class="settings-section">
-            <div class="settings-label">About</div>
-            <div class="settings-info">
-                <strong>Mansio Admin</strong><br>
-                Lightweight message broker admin panel.<br>
-                <a href="https://github.com/Oaklight/mansio" target="_blank" rel="noopener">GitHub →</a>
-            </div>
-        </div>
-        <div style="text-align:right;margin-top:8px">
-            <button class="btn btn-secondary btn-sm" onclick="toggleSettings()">Close</button>
+        <div class="field-label">Theme</div>
+        <div class="theme-switcher" id="themeSwitcher">
+            <button class="btn" type="button" data-theme="light">Light</button>
+            <button class="btn" type="button" data-theme="auto">Auto</button>
+            <button class="btn" type="button" data-theme="dark">Dark</button>
         </div>
     </div>
 </div>
 
-<!-- Login Overlay -->
 <div class="login-overlay hidden" id="loginOverlay">
-    <div class="login-card">
-        <h2><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:text-bottom"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Mansio Admin</h2>
-        <div class="login-error" id="loginError"></div>
-        <input type="password" id="loginPassword" placeholder="Admin password" onkeydown="if(event.key==='Enter')doLogin()">
-        <button class="btn btn-primary" style="width:100%" onclick="doLogin()">Login</button>
-    </div>
+    <form class="login-card" id="loginForm">
+        <h2>Sign in</h2>
+        <p>Admin authentication is required.</p>
+        <label class="field">
+            <span class="field-label">Password</span>
+            <input class="input" id="loginPassword" type="password" autocomplete="current-password">
+        </label>
+        <div class="login-error" id="loginError" role="alert"></div>
+        <button class="btn btn-primary" type="submit" id="loginButton">Sign in</button>
+    </form>
 </div>
 
-<!-- Create Token Modal -->
-<div class="modal-overlay hidden" id="createTokenModal">
-    <div class="modal-card">
-        <h3>Create Agent Token</h3>
-        <div class="form-group" style="margin-bottom:12px">
-            <label>Agent ID</label>
-            <input id="newTokenAgentId" type="text" placeholder="agent-alice">
-        </div>
-        <div class="form-group" style="margin-bottom:12px">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                <input id="newTokenSupertoken" type="checkbox" onchange="syncSupertokenInput()">
-                Supertoken (wildcard — not bound to an agent)
-            </label>
-        </div>
-        <div class="form-group" style="margin-bottom:16px">
-            <label>Label</label>
-            <input id="newTokenLabel" type="text" placeholder="Description">
-        </div>
-        <div style="display:flex;gap:8px;justify-content:flex-end">
-            <button class="btn btn-secondary" onclick="hideCreateTokenModal()">Cancel</button>
-            <button class="btn btn-primary" onclick="submitCreateToken()">Create</button>
-        </div>
-    </div>
-</div>
-
-<!-- Toast Container -->
-<div class="toast-container" id="toastContainer"></div>
-
+<div class="toast-container" id="toastContainer" aria-live="polite"></div>
 <script type="module" src="/assets/app.js"></script>
 </body>
 </html>
