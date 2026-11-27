@@ -26,7 +26,15 @@ export function parseHash(hash = window.location.hash) {
     const [pathPart, queryPart = ''] = raw.split('?');
     const segments = pathPart.split('/').filter(Boolean);
     const name = KNOWN.has(segments[0]) ? segments[0] : DEFAULT_ROUTE;
-    const id = segments[1] ? decodeURIComponent(segments[1]) : null;
+    let id = null;
+    if (segments[1]) {
+        try {
+            id = decodeURIComponent(segments[1]);
+        } catch {
+            // A truncated percent sequence must not stop the app from booting.
+            id = segments[1];
+        }
+    }
     return { name, id, query: new URLSearchParams(queryPart) };
 }
 

@@ -11,7 +11,10 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 GENERATOR = REPO / "scripts" / "gen_admin_contracts.py"
-JS_TESTS = Path(__file__).resolve().parent / "js" / "contracts.test.js"
+JS_TESTS = [
+    Path(__file__).resolve().parent / "js" / "contracts.test.js",
+    Path(__file__).resolve().parent / "js" / "router.test.js",
+]
 
 
 def test_contracts_module_is_up_to_date():
@@ -28,7 +31,7 @@ def test_contracts_module_is_up_to_date():
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_contracts_and_models_js_tests():
     result = subprocess.run(
-        ["node", "--test", str(JS_TESTS)],
+        ["node", "--test", *[str(path) for path in JS_TESTS]],
         capture_output=True,
         text=True,
         timeout=120,
