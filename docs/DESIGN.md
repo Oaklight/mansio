@@ -632,10 +632,14 @@ client = MansioClient("http://mansio:8742", "agent-1", token="mst-xxx")
 admin/
 ├── server.py      # AdminServer —— 路由、生命周期、REST API
 ├── auth.py        # 密码登录与会话 cookie
-├── metrics.py     # 进程内吞吐量采集
-├── static.py      # 静态资源服务
-└── admin.html     # 单页仪表板 UI
+├── view.py        # AdminView —— 管理端响应文档
+├── static.py      # Admin HTML 加载与资源白名单
+├── admin.html     # 仪表板骨架（仅标记）
+└── assets/        # admin.css、theme-init.js、app/api/util/state/auth/refresh.js，
+                   # 以及 views/ 下每个标签页一个 ES 模块
 ```
+
+UI 资源经固定白名单从 `/assets/<file>` 提供：未知名称、穿越路径段或未知后缀在读取任何包资源之前即被拒绝。页面直接加载 ES 模块，因此 `admin.html` 不含内联 CSS 或 JS。
 
 路由分组：会话（`/api/login`、`/api/logout`、`/api/auth-check`）、检查（`/api/stats`、`/api/stats/throughput`、`/api/channels`、`/api/messages`、`/api/subscriptions`、`/api/system`）、身份（`/api/users`、`/api/tokens`、`/api/prefixes`）。
 
