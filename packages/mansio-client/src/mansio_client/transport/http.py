@@ -11,10 +11,16 @@ import logging
 import socket
 import threading
 import urllib.parse
+from collections import deque
 from collections.abc import Callable
-from typing import Literal, NamedTuple, overload
+from typing import Any, Literal, NamedTuple, overload
 
-from mansio_core.contracts import ContractError, parse_stream_event
+from mansio_core.contracts import (
+    ContractError,
+    WarningEvent,
+    parse_stream_event,
+    parse_warning_event,
+)
 from mansio_core.types import (
     ACLEntry,
     ChannelMeta,
@@ -30,6 +36,9 @@ logger = logging.getLogger(__name__)
 
 #: Seconds to wait for the SSE thread to notice a stop request.
 SSE_JOIN_TIMEOUT = 3.0
+
+#: How many recent SSE warnings the transport keeps for inspection.
+WARNING_HISTORY = 100
 
 
 class _Subscription(NamedTuple):
@@ -117,6 +126,12 @@ class HttpTransport:
         self._sse_stop = threading.Event()
         self._sub_counter = 0
         self._last_event_id: str = ""  # track across SSE restarts
+
+        # SSE warnings: history for inspection, callback for direct users.
+        # The callback runs on the SSE thread.
+        self.warning_callback: Callable[[WarningEvent], None] | None = None
+        self._warnings: deque[WarningEvent] = deque(maxlen=WARNING_HISTORY)
+        self._warnings_lock = threading.Lock()
 
     # ── Transport Protocol ────────────────────────────────────────
 
@@ -634,9 +649,7 @@ class HttpTransport:
             for event in self._sse_client:
                 if self._sse_stop.is_set():
                     break
-                if event.id:
-                    self._last_event_id = event.id
-                self._dispatch_sse_event(event.data)
+                self._handle_sse_event(event)
         except Exception as exc:
             # SSEClient reconnects internally, so reaching here means the
             # stream is finished: either a deliberate stop or a failure
@@ -656,6 +669,54 @@ class HttpTransport:
             [("channel", ch) for ch in channels] + [("user_id", self._user_id)]
         )
         return f"{self._base_url}/v1/subscribe?{params}"
+
+    def _handle_sse_event(self, event: Any) -> None:
+        """Route one parsed SSE record.
+
+        ``event: warning`` records go through the warning contract; every
+        other record follows the existing message path. Comments never
+        reach this method, because the SSE parser does not emit them.
+        """
+        if event.id:
+            self._last_event_id = event.id
+        if event.event == "warning":
+            self._handle_warning_record(event.data)
+        else:
+            self._dispatch_sse_event(event.data)
+
+    @property
+    def recent_warnings(self) -> tuple[WarningEvent, ...]:
+        """Recent SSE warnings, oldest first (at most ``WARNING_HISTORY``)."""
+        with self._warnings_lock:
+            return tuple(self._warnings)
+
+    def _handle_warning_record(self, data: str) -> None:
+        """Parse one ``event: warning`` record and record it.
+
+        A malformed warning is logged and dropped; the stream and message
+        delivery continue. The callback runs on the SSE thread, so an
+        exception from it is logged and never re-raised.
+        """
+        try:
+            warning = parse_warning_event(data)
+        except ContractError as exc:
+            logger.warning("invalid SSE warning event: %s", exc)
+            return
+        with self._warnings_lock:
+            self._warnings.append(warning)
+        callback = self.warning_callback
+        if callback is None:
+            logger.warning(
+                "SSE warning: %s (count=%d, channel=%s)",
+                warning.kind,
+                warning.count,
+                warning.channel or "-",
+            )
+            return
+        try:
+            callback(warning)
+        except Exception:
+            logger.exception("SSE warning callback failed")
 
     def _dispatch_sse_event(self, data: str) -> None:
         """Parse SSE event data and dispatch to callbacks."""

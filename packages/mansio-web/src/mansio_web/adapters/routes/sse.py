@@ -14,8 +14,10 @@ from mansio_core.authz import user_involved as _user_involved
 from mansio_core.contracts import (
     ContractError,
     StreamEvent,
+    WarningEvent,
     parse_stream_event,
     stream_event_to_json,
+    warning_event_to_json,
 )
 
 from mansio_web._vendor.httpserver import App, StreamingResponse
@@ -124,15 +126,24 @@ def _format_sse_event(data: str, event_id: str) -> str:
     return f"data: {data}\n\n"
 
 
+def _format_sse_warning(event: WarningEvent) -> str:
+    """Format one typed warning event (``event: warning`` + JSON ``data:``)."""
+    return f"event: warning\ndata: {warning_event_to_json(event)}\n\n"
+
+
 def _drain_drop_counter(
     drop_lock: threading.Lock | None,
     drop_counter: list[int] | None,
 ) -> str:
-    """Return an SSE warning comment if events were dropped, else empty string.
+    """Return a typed warning frame if events were dropped, else empty string.
 
-    The warning is emitted after the next live event or on the next
-    keepalive tick, whichever comes first, so a stream that goes quiet
-    after drops still reports them within the keepalive interval.
+    ``dropped`` is connection-wide: the queue is shared by every channel of
+    the connection, so the reader cannot attribute the loss to one channel
+    and should re-query all subscribed channels. The warning is emitted
+    after the next live event or on the next keepalive tick, whichever
+    comes first, so a stream that goes quiet after drops still reports
+    them within the keepalive interval. It is best-effort: a stream that
+    closes before then may never send it.
     """
     if drop_lock is None or drop_counter is None:
         return ""
@@ -140,26 +151,27 @@ def _drain_drop_counter(
         dropped = drop_counter[0]
         drop_counter[0] = 0
     if dropped:
-        return f": warning: {dropped} event(s) dropped (slow consumer), re-query for gaps\n\n"
+        return _format_sse_warning(WarningEvent(kind="dropped", count=dropped))
     return ""
 
 
 async def _replay_missed_events(session: _SSESession) -> Any:
     """Yield SSE events for messages published after ``last_event_id``.
 
-    When a channel's replay fills ``_SSE_REPLAY_LIMIT``, a warning comment
-    precedes that channel's events.  The query cannot tell whether more
-    messages exist beyond the limit, so the client should re-query; the
-    warning can be a false positive when exactly the limit is waiting.
+    When a channel's replay fills ``_SSE_REPLAY_LIMIT``, a typed
+    ``truncated`` warning for that channel precedes its events.  The query
+    cannot tell whether more messages exist beyond the limit, so the
+    client should re-query; the warning can be a false positive when
+    exactly the limit is waiting. Unlike ``dropped``, this warning names
+    one channel.
     """
     for ch in session.channels:
         missed = await asyncio.to_thread(
             session.bus.query, ch, after=session.last_event_id, limit=_SSE_REPLAY_LIMIT
         )
         if len(missed) >= _SSE_REPLAY_LIMIT:
-            yield (
-                f": warning: replay truncated at {_SSE_REPLAY_LIMIT} "
-                f"for channel '{ch}', re-query for more\n\n"
+            yield _format_sse_warning(
+                WarningEvent(kind="truncated", count=_SSE_REPLAY_LIMIT, channel=ch)
             )
         if isinstance(session.auth_result, str):
             missed = [m for m in missed if _user_involved(session.auth_result, m.channel, m.sender)]
@@ -177,10 +189,11 @@ async def _sse_event_generator(session: _SSESession) -> Any:
     Each event includes an ``id:`` field (the message ID) so the
     W3C SSE client can resume on reconnect.
 
-    When events are dropped due to slow consumption, a warning SSE
-    comment is emitted after the next event or keepalive tick so the
-    client knows to re-query for any gaps.  A replay that fills
-    ``_SSE_REPLAY_LIMIT`` is also flagged as possibly truncated.
+    When events are dropped due to slow consumption, a typed warning
+    event is emitted after the next event or keepalive tick so the client
+    knows to re-query every subscribed channel.  A replay that fills
+    ``_SSE_REPLAY_LIMIT`` is flagged as ``truncated`` for that channel.
+    ``: connected`` and ``: keepalive`` remain comments.
     """
     try:
         yield ": connected\n\n"

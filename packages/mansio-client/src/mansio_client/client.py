@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+from collections import deque
 from collections.abc import Callable
 from typing import Literal, overload
 from uuid import uuid4
 
+from mansio_core.contracts import WarningEvent
 from mansio_core.transport import Transport
 from mansio_core.types import (
     ACLEntry,
@@ -42,6 +45,9 @@ from mansio_client.semantic import SemanticMixin
 from mansio_client.transport import create_transport
 
 _log = logging.getLogger(__name__)
+
+#: How many recent SSE warnings the client keeps for inspection.
+_WARNING_HISTORY = 100
 
 
 class BurstSendError(RuntimeError):
@@ -107,6 +113,12 @@ class MansioClient(CursorMixin, LoopMixin, CoalesceMixin, SemanticMixin):
         self._user_id = user_id
         self._display_name = display_name or user_id
         self._transport: Transport = create_transport(url, user_id=user_id, token=token)
+        # The client owns its warning history; the transport only invokes
+        # the callback. This keeps the client independent of whether a
+        # transport keeps warnings of its own.
+        self._warnings: deque[WarningEvent] = deque(maxlen=_WARNING_HISTORY)
+        self._warnings_lock = threading.Lock()
+        self._transport.warning_callback = self._on_transport_warning
         self._cursors: dict[str, str] = {}
         self._persisted: dict[str, str] = {}
         self._coalescers: dict[str, _Coalescer] = {}
@@ -133,6 +145,30 @@ class MansioClient(CursorMixin, LoopMixin, CoalesceMixin, SemanticMixin):
     @property
     def display_name(self) -> str:
         return self._display_name
+
+    @property
+    def recent_warnings(self) -> tuple[WarningEvent, ...]:
+        """Recent SSE warnings, oldest first (at most 100).
+
+        A ``dropped`` warning is connection-wide: the stream queue is
+        shared across the subscription's channels, so re-query all
+        subscribed channels. A ``truncated`` warning is per-channel.
+        Warnings are best-effort; a stream that closes before the next
+        flush or keepalive tick may miss a drop warning.
+        """
+        with self._warnings_lock:
+            return tuple(self._warnings)
+
+    def _on_transport_warning(self, warning: WarningEvent) -> None:
+        """Record and log a warning forwarded by the transport."""
+        with self._warnings_lock:
+            self._warnings.append(warning)
+        _log.warning(
+            "SSE warning: %s (count=%d, channel=%s)",
+            warning.kind,
+            warning.count,
+            warning.channel or "-",
+        )
 
     def close(self) -> None:
         """Release resources, retrying any cursor write that failed.
