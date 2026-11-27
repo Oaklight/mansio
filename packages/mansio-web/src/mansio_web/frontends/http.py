@@ -166,10 +166,10 @@ class _SSESession:
 #   are exempt from user rules — validated separately
 # User channels: no colons (reserved for system prefixes), Unicode letters OK
 # End anchor [^\W_] = letters/digits (no trailing underscore)
-_USER_CHANNEL_RE = re.compile(r"^(?=[^\W\d_])[\w.-]{1,63}[^\W_]$")
+_USER_CHANNEL_RE = re.compile(r"^(?=[^\W\d_])[\w.-]{1,63}[^\W_]\Z")
 _NO_CONSECUTIVE_SPECIALS = re.compile(r"[._-]{2}")
 _RESERVED_PREFIXES = ("_system:", "dm:", "notebook:", "memory:", "broadcast:")
-_SYSTEM_CHANNEL_RE = re.compile(r"^[\w_][\w:.-]{1,126}[\w]$")
+_SYSTEM_CHANNEL_RE = re.compile(r"^[\w_][\w:.-]{1,126}[\w]\Z")
 
 
 def _now_iso() -> str:

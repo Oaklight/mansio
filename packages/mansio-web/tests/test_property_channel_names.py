@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from mansio_web.frontends.http import _validate_channel_name
@@ -68,9 +67,5 @@ def test_plain_channel_name_mutations_are_rejected(name: str) -> None:
         assert _validate_channel_name(mutated) is not None, mutated
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="_USER_CHANNEL_RE uses '$', which also matches before a trailing newline (#384)",
-)
 def test_plain_channel_name_with_trailing_newline_is_rejected() -> None:
     assert _validate_channel_name("abc\n") is not None

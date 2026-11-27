@@ -100,6 +100,13 @@ class TestDmParser:
         assert dm_channel_error("dm:a:b") is not None
         assert not is_channel_member("a", "dm:a:b")
 
+    def test_trailing_newline_in_id_is_rejected(self) -> None:
+        """#384: ``$`` matched before a trailing newline, so ``alice\\n``
+        passed the user-id rule and parsed as a DM participant."""
+        assert not is_valid_user_id("alice\n")
+        assert dm_participants("dm:alice\n:bob") is None
+        assert dm_channel_error("dm:alice:bob\n") is not None
+
     @pytest.mark.parametrize(
         "channel", ["general", "notebook:alice", "memory:bob", "broadcast:news"]
     )

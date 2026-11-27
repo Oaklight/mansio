@@ -130,6 +130,25 @@ class TestValidateChannelName:
     def test_valid_system_channel(self, name: str) -> None:
         assert _validate_channel_name(name) is None
 
+    # --- Invalid: trailing newline ---
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "abc\n",  # plain user channel
+            "general\n",  # plain user channel
+            "_system:agents\n",  # system channel
+            "notebook:alice\n",  # reserved prefix
+            "broadcast:releases\n",  # reserved prefix
+            "dm:alice:bob\n",  # newline in a DM participant slot
+        ],
+    )
+    def test_reject_trailing_newline(self, name: str) -> None:
+        """#384: a ``$`` anchor also matches before a trailing newline."""
+        result = _validate_channel_name(name)
+        assert result is not None
+        assert result[1] == 400
+
     # --- Boundary: exactly 64 chars ---
 
     def test_64_char_boundary(self) -> None:
