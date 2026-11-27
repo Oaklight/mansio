@@ -169,7 +169,7 @@ Redis Streams 与 AMQP backend 仍在路线图上（§9），目前没有任何�
 继承 `Backend`，实现其抽象方法，再按存储自身能力加上相应的可选协议 —— 这些协议是结构化的，不要求显式继承（已有的 backend 仍把它们写在基类列表里，作为文档）：
 
 ```python
-from mansio.protocols import Backend, Deletable
+from mansio_core.protocols import Backend, Deletable
 
 class MyBackend(Backend, Deletable):
     def __init__(self, connection_url: str): ...
@@ -624,7 +624,7 @@ client = MansioClient("http://mansio:8742", "agent-1", token="mst-xxx")
 # → MansioClient 持有 Transport；实现是 HttpTransport
 ```
 
-它不属于服务端发行包：`mansio_web` 与 `mansio` 兼容包都不再导出它，在这两处导入会抛出 `ImportError`，并指向 `mansio_client.transport`。
+它不属于服务端发行包：`mansio_web` 不导出它，导入会抛出 `ImportError`，并指向 `mansio_client.transport`。
 
 ### 3.7 管理面板
 
@@ -655,15 +655,15 @@ UI 资源经固定白名单从 `/assets/<file>` 提供：未知名称、穿越�
 Delivery 层将 Client SDK 的能力暴露给外部消费者。
 
 ```
-┌────────────────────────────────────────────────────┐
-│              mansio_client.MansioClient            │
-├─────────────────┬─────────────────┬────────────────┤
-│   mansio-mcp    │  mansio-client  │  mansio client │
-│   MCP 服务器    │      CLI        │  CLI（服务端   │
-│                 │                 │  包内）        │
-│  LLM 通过 MCP   │  LLM 或人类     │  运维人员做    │
-│  工具调用       │  通过 shell     │  连通性验证    │
-└─────────────────┴─────────────────┴────────────────┘
+┌──────────────────────────────────────┐
+│       mansio_client.MansioClient     │
+├─────────────────┬────────────────────┤
+│   mansio-mcp    │   mansio-client    │
+│   MCP 服务器    │        CLI         │
+│                 │                    │
+│  LLM 通过 MCP   │  LLM 或人类        │
+│  工具调用       │  通过 shell        │
+└─────────────────┴────────────────────┘
 ```
 
 #### 命令入口
@@ -671,11 +671,10 @@ Delivery 层将 Client SDK 的能力暴露给外部消费者。
 | 命令 | 所属包 | 目标用户 | 用途 |
 |------|--------|---------|------|
 | `mansio serve` | `mansio` | 运维人员 | 启动 Bus + 管理面板（可选 HTTP/IRC 前端） |
-| `mansio client …` | `mansio` | — | 已弃用的空壳：退出码 2，并指向 `mansio-client send/poll/channels/dm` |
 | `mansio-client` | `mansio-client` | 通过 bash 工具的 LLM、人类 | 完整的 SDK-over-CLI：消息、笔记、记忆、通道与 ACL 管理 |
 | `mansio-mcp` | `mansio-client` | 通过 MCP 的 LLM | 把客户端操作暴露为 MCP 工具（JSON-RPC stdio） |
 
-`mansio client` 不再发送请求：HTTP transport 已从服务端发行包移除，该命令现在以退出码 2 结束，并在错误信息中指明替代子命令。它的解析参数保留一个发行周期，让脚本得到迁移提示而不是 argparse 报错。`mansio-client` 是完整的 SDK-over-CLI，Agent 工作应使用后者，并保留 `-a` / `--agent` 作为 `--user-id` 的已弃用写法（总是发出 `DeprecationWarning`）。`mansio-mcp` 使用 `--url` / `--user-id` / `--token` / `--display-name`，并且是唯一读取 `MANSIO_DISPLAY_NAME` 的入口。`MANSIO_AGENT_ID` 和 `PIAZZA_*` 仍作为已弃用的别名被接受，并会发出 `DeprecationWarning`。
+服务端发行包只提供 `mansio serve`。`mansio-client` 是完整的 SDK-over-CLI，Agent 工作应使用它，并保留 `-a` / `--agent` 作为 `--user-id` 的已弃用写法（总是发出 `DeprecationWarning`）。`mansio-mcp` 使用 `--url` / `--user-id` / `--token` / `--display-name`，并且是唯一读取 `MANSIO_DISPLAY_NAME` 的入口。`MANSIO_AGENT_ID` 和 `PIAZZA_*` 仍作为已弃用的别名被接受，并会发出 `DeprecationWarning`。
 
 ### 3.9 推送集成（多 Agent 消息感知）
 

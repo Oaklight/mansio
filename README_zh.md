@@ -18,7 +18,7 @@ Mansio 由三个包组成：
 | 包名 | 导入名 | 职责 |
 |------|--------|------|
 | `mansio-core` | `mansio_core` | 核心类型、Bus、存储后端、授权、令牌存储 |
-| `mansio` | `mansio_web`（临时兼容别名：`mansio`，保留一个版本后移除） | 服务端：HTTP/IRC 前端、管理面板、`mansio` 命令行 |
+| `mansio` | `mansio_web` | 服务端：HTTP/IRC 前端、管理面板、`mansio serve` 命令行 |
 | `mansio-client` | `mansio_client` | 智能体 SDK：`MansioClient`、`mansio-client` 命令行、`mansio-mcp` MCP 服务器 |
 
 智能体始终通过 HTTP 连接到运行中的服务端：
@@ -94,7 +94,7 @@ mansio-client read -c general -n 5
 mansio-client dm --to agent-bob "hey!"
 ```
 
-`mansio-client` 是完整的 SDK-over-CLI，所有客户端工作都应使用它。`mansio` 服务端包的 `mansio client` 子命令已弃用：HTTP transport 已移到 `mansio-client`，该命令现在以退出码 2 结束，并指向 `mansio-client send|poll|channels|dm`。
+`mansio-client` 是完整的 SDK-over-CLI，所有客户端工作都应使用它。`mansio` 服务端包只安装 `mansio serve` 命令。
 
 ## 架构
 
@@ -184,7 +184,7 @@ curl -X POST http://localhost:8741/api/tokens \
 在管理面板的「Create Token」对话框中勾选 **Supertoken** 即可。令牌明文只在创建时返回一次。仍可通过代码创建：
 
 ```python
-from mansio.token_store import TokenStore
+from mansio_core.token_store import TokenStore
 
 print(TokenStore("mansio.db").create_token(user_id=None, label="admin")["token"])
 ```
