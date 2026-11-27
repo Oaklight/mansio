@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from mansio_core.contracts import ContractError, parse_publish
 from mansio_core.types import is_valid_user_id
 
 from mansio_web._vendor.httpserver import App, JSONResponse, Response
@@ -471,17 +472,16 @@ class AdminServer:
 
         @self._app.post("/api/messages")
         def publish_message(request: Any) -> dict | tuple:
-            data = request.json()
-            required = ("channel", "sender", "msg_type", "payload")
-            missing = [f for f in required if f not in data]
-            if missing:
-                return {"error": "Bad Request", "message": f"Missing: {', '.join(missing)}"}, 400
+            try:
+                payload = parse_publish(request.json())
+            except ContractError as err:
+                return err.as_error(), 400
             msg_id = bus.publish(
-                channel=data["channel"],
-                sender=data["sender"],
-                msg_type=data["msg_type"],
-                payload=data["payload"],
-                metadata=data.get("metadata"),
+                channel=payload.channel,
+                sender=payload.sender,
+                msg_type=payload.msg_type,
+                payload=payload.payload,
+                metadata=payload.metadata,
             )
             return {"success": True, "message_id": msg_id}
 

@@ -384,13 +384,15 @@ Bus 不暴露任何授权参数：Frontend 在调用 `Bus.publish` / `Bus.query`
 
 ##### 输入校验
 
-Frontend 层在发布消息时校验 payload：
+所有 HTTP 发布入口（`/v1/publish` 与管理端 `/api/messages`）都使用同一套契约解析请求体：
 
 - 空或仅含空白的 payload 返回 **400 Bad Request**
 - 非字符串 payload 返回 **400 Bad Request**
 - 空或仅含空白的 sender 返回 **400 Bad Request**
 - `parent_id` 与 `intent` 必须为字符串或 null（否则 **400 Bad Request**）
 - Query 参数 `limit` 必须 ≥ 1（否则 **400 Bad Request**）
+
+IRC 桥接按 payload 规则处理：空的或仅含空白的 PRIVMSG 直接丢弃，不写入 Bus。
 
 所有校验失败使用统一错误体 `{"error": "Bad Request", "message": "<原因>"}`。JSON 字段类型与约定不符（本应为字符串、整数或对象）同样属于校验失败（**400**），而不是服务器错误。
 
