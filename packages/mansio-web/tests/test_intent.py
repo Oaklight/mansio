@@ -256,7 +256,7 @@ class TestHttpFrontendIntent:
 
     def test_transport_intent(self, server_url):
         """HttpTransport passes intent through publish and query."""
-        from mansio_web import HttpTransport
+        from mansio_client.transport import HttpTransport
 
         transport = HttpTransport(server_url)
         transport.publish("test-intent-transport", "agent", "text", "hello", intent="PASS_FLOOR")

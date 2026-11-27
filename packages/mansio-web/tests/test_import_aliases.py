@@ -9,14 +9,27 @@ import sys
 import mansio
 import mansio_core
 import mansio_web
+import pytest
 
 
 def test_top_level_names_are_the_same_objects() -> None:
     assert mansio.Bus is mansio_core.Bus
     assert mansio.MemoryBackend is mansio_core.MemoryBackend
     assert mansio.MansioServer is mansio_web.MansioServer
-    assert mansio.HttpTransport is mansio_web.HttpTransport
     assert mansio.__version__ == mansio_web.__version__
+
+
+def test_removed_transport_names_point_at_mansio_client() -> None:
+    """HttpTransport and MansioAPIError moved to the client distribution."""
+    for module in (mansio, mansio_web):
+        for name in ("HttpTransport", "MansioAPIError"):
+            with pytest.raises(ImportError, match="mansio-client"):
+                getattr(module, name)
+
+
+def test_removed_transport_module_import_has_a_hint() -> None:
+    with pytest.raises(ImportError, match="mansio_client.transport"):
+        importlib.import_module("mansio.transport_http")
 
 
 def test_documented_submodules_still_import() -> None:

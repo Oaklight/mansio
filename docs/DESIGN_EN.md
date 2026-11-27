@@ -292,9 +292,10 @@ client = MansioClient(
 )
 ```
 
-Internally the client holds an `HttpTransport` that speaks the Frontend's REST +
-SSE API. Transport is a purely internal abstraction; users never interact with
-it directly.
+Internally the client holds a `Transport` (typed by
+`mansio_core.transport.Transport`) and constructs the HTTP + SSE
+implementation from `mansio_client.transport`. Transport is a purely internal
+abstraction; users never interact with it directly.
 
 On construction the client announces itself (a `presence` message on
 `_system:agents`) and restores its saved cursors; both steps are best-effort and
@@ -695,12 +696,20 @@ store setup and the admin panel.
 
 #### HttpTransport
 
-Client-side counterpart to HttpFrontend, used internally by `MansioClient`:
+The HTTP/SSE implementation of `mansio_core.transport.Transport`, in the
+`mansio-client` distribution (`mansio_client.transport`). `MansioClient`
+constructs one internally:
 
 ```python
+from mansio_client.transport import HttpTransport
+
 client = MansioClient("http://mansio:8742", "agent-1", token="mst-xxx")
-# → Uses HttpTransport internally
+# → MansioClient holds a Transport; the implementation is HttpTransport
 ```
+
+It is not part of the server distribution: `mansio_web` and the `mansio`
+compatibility package do not export it, and importing either name there raises
+an `ImportError` that points at `mansio_client.transport`.
 
 ### 3.7 Admin Panel
 
@@ -743,19 +752,17 @@ The Delivery Layer exposes Client SDK capabilities to external consumers.
 | Command | Package | Target User | Purpose |
 |---------|---------|-------------|---------|
 | `mansio serve` | `mansio` | Operators | Start Bus + admin panel (+ HTTP/IRC frontends) |
-| `mansio client send/poll/channels/dm` | `mansio` | Operators | Minimal subset of `mansio-client` for smoke-testing a server |
+| `mansio client …` | `mansio` | — | Deprecated stub: exits 2 and points at `mansio-client send/poll/channels/dm` |
 | `mansio-client` | `mansio-client` | LLMs via a bash tool, humans | Full SDK-over-CLI: messaging, notes, memory, channel and ACL management |
 | `mansio-mcp` | `mansio-client` | LLMs via MCP | The client operations as MCP tools over JSON-RPC stdio |
 
-The two CLI commands are not interchangeable. `mansio client` is the minimal
-operator/smoke-test subset; `mansio-client` is the full SDK-over-CLI and is
-the command to use for agent work. Since #339 they accept the same
-`--server` / `--user-id` / `--token` flags and fall back to the same
-`MANSIO_URL` / `MANSIO_USER_ID` / `MANSIO_TOKEN` environment variables, but
-their subcommand sets differ on purpose. `mansio-client` keeps `-a` /
-`--agent` as a deprecated spelling of `--user-id` that always emits a
-`DeprecationWarning`; `mansio client` keeps `-u` / `--user` and
-`--api-token` as deprecated spellings. `mansio-mcp` takes `--url` /
+`mansio client` no longer performs requests: the HTTP transport was removed
+from the server distribution, and the command now exits 2 with a message
+naming the replacement subcommands. Its remaining parser flags are kept for
+one release so scripts fail with that hint instead of an argparse error.
+`mansio-client` is the full SDK-over-CLI and the command to use for agent
+work. It keeps `-a` / `--agent` as a deprecated spelling of `--user-id` that
+always emits a `DeprecationWarning`. `mansio-mcp` takes `--url` /
 `--user-id` / `--token` / `--display-name`, and is the only entry point that
 reads `MANSIO_DISPLAY_NAME`. `MANSIO_AGENT_ID` and the `PIAZZA_*` names are
 still accepted as deprecated aliases and emit a `DeprecationWarning`.

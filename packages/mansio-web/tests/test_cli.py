@@ -315,21 +315,13 @@ class TestParseArgsClient:
         assert args.user == "env-agent"
         assert args.api_token == "mst-env"
 
-    def test_client_send_missing_server_exits(self, monkeypatch, capsys):
-        monkeypatch.delenv("MANSIO_URL", raising=False)
-        monkeypatch.delenv("MANSIO_USER_ID", raising=False)
+    def test_client_command_exits_with_deprecation(self, capsys):
         with pytest.raises(SystemExit) as exc:
             main(["client", "send", "-u", "aaa", "-c", "ch", "msg"])
-        assert exc.value.code == 1
-        assert "MANSIO_URL" in capsys.readouterr().err
-
-    def test_client_send_missing_user_exits(self, monkeypatch, capsys):
-        monkeypatch.delenv("MANSIO_URL", raising=False)
-        monkeypatch.delenv("MANSIO_USER_ID", raising=False)
-        with pytest.raises(SystemExit) as exc:
-            main(["client", "send", "-s", "http://x:8742", "-c", "ch", "msg"])
-        assert exc.value.code == 1
-        assert "MANSIO_USER_ID" in capsys.readouterr().err
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "`mansio client` is deprecated" in err
+        assert "mansio-client send|poll|channels|dm" in err
 
 
 # ── Helpers ───────────────────────────────────────────────────────
@@ -462,196 +454,30 @@ def http_server_url():
     server.shutdown()
 
 
-class TestClientIntegration:
-    """Integration tests: subprocess client commands against a live server."""
+class TestClientDeprecated:
+    """``mansio client`` is a stub that points at the mansio-client package."""
 
-    def test_send_and_poll(self, http_server_url: str) -> None:
-        """Send a message via CLI, then poll it back."""
-        # Send
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "mansio_web.cli",
-                "client",
-                "send",
-                "-s",
-                http_server_url,
-                "-u",
-                "test-agent",
-                "-c",
-                "test-ch",
-                "hello from cli",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        msg_id = result.stdout.strip()
-        assert msg_id  # should print message ID
-
-        # Poll
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "mansio_web.cli",
-                "client",
-                "poll",
-                "-s",
-                http_server_url,
-                "-u",
-                "test-agent",
-                "-c",
-                "test-ch",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        messages = [json.loads(line) for line in result.stdout.strip().split("\n")]
-        assert len(messages) >= 1
-        assert any(m["payload"] == "hello from cli" for m in messages)
-
-    def test_channels(self, http_server_url: str) -> None:
-        """List channels after sending a message."""
-        # Send to create a channel
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "mansio_web.cli",
-                "client",
-                "send",
-                "-s",
-                http_server_url,
-                "-u",
-                "test-agent",
-                "-c",
-                "my-channel",
-                "seed",
-            ],
-            capture_output=True,
-            text=True,
-        )
-
-        # List channels
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "mansio_web.cli",
-                "client",
-                "channels",
-                "-s",
-                http_server_url,
-                "-u",
-                "test-agent",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        channels = result.stdout.strip().split("\n")
-        assert "my-channel" in channels
-
-    def test_dm(self, http_server_url: str) -> None:
-        """Send a DM via CLI."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "mansio_web.cli",
-                "client",
-                "dm",
-                "-s",
-                http_server_url,
-                "-u",
-                "alice",
-                "--to",
-                "bob",
-                "hey bob!",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        msg_id = result.stdout.strip()
-        assert msg_id
-
-    def test_channels_with_env_only(self, http_server_url: str) -> None:
-        """MANSIO_URL / MANSIO_USER_ID replace the -s/-u flags."""
-        env = dict(os.environ)
-        env["MANSIO_URL"] = http_server_url
-        env["MANSIO_USER_ID"] = "env-agent"
-        env.pop("MANSIO_TOKEN", None)
-
-        result = subprocess.run(
-            [sys.executable, "-m", "mansio_web.cli", "client", "channels"],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-        assert result.returncode == 0, result.stderr
-
-    def test_send_with_user_id_alias(self, http_server_url: str) -> None:
-        """--user-id is the canonical spelling shared with mansio-client."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "mansio_web.cli",
-                "client",
-                "send",
-                "-s",
-                http_server_url,
-                "--user-id",
-                "alias-agent",
-                "-c",
-                "alias-ch",
-                "hi",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, result.stderr
-        assert result.stdout.strip()
-
-
-class TestClientErrorReporting:
-    """Client failures print one error line and exit 1, like mansio-client."""
-
-    def test_invalid_user_id_exits_cleanly(self, monkeypatch, capsys):
-        monkeypatch.setenv("MANSIO_URL", "http://127.0.0.1:1")
+    def test_send_exits_2_with_migration_hint(self, capsys) -> None:
         with pytest.raises(SystemExit) as exc:
-            main(["client", "channels", "--user-id", "INVALID"])
-        assert exc.value.code == 1
+            main(
+                [
+                    "client",
+                    "send",
+                    "-s",
+                    "http://127.0.0.1:1",
+                    "-u",
+                    "test-agent",
+                    "-c",
+                    "ch",
+                    "msg",
+                ]
+            )
+        assert exc.value.code == 2
         err = capsys.readouterr().err
-        assert "error: Invalid user_id" in err
-        assert "Traceback" not in err
+        assert "`mansio client` is deprecated" in err
+        assert "mansio-client send|poll|channels|dm" in err
 
-    def test_api_error_prints_one_line(self, mansio_server):
-        url, _store, _bus, _server = mansio_server
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "mansio_web.cli",
-                "client",
-                "channels",
-                "-s",
-                url,
-                "-u",
-                "test-agent",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 1
-        assert result.stderr.startswith("error: HTTP 403")
-        assert "Traceback" not in result.stderr
-
-    def test_connection_error_prints_one_line(self):
+    def test_subprocess_reports_the_migration(self) -> None:
         result = subprocess.run(
             [
                 sys.executable,
@@ -667,9 +493,9 @@ class TestClientErrorReporting:
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 1
-        assert "error: cannot reach http://127.0.0.1:1" in result.stderr
-        assert "Traceback" not in result.stderr
+        assert result.returncode == 2
+        assert "`mansio client` is deprecated" in result.stderr
+        assert "mansio-client send|poll|channels|dm" in result.stderr
 
 
 class TestMansioClientCliFollow:

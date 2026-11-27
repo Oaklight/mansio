@@ -269,7 +269,7 @@ client = MansioClient(
 )
 ```
 
-客户端内部持有一个 `HttpTransport`，与 Frontend 的 REST + SSE API 通信。Transport 是纯内部抽象，用户不直接接触。
+客户端内部持有一个 `Transport`（由 `mansio_core.transport.Transport` 定义），并构造来自 `mansio_client.transport` 的 HTTP + SSE 实现。Transport 是纯内部抽象，用户不直接接触。
 
 构造时客户端会先发布一条上线通告（向 `_system:agents` 写一条 `presence` 消息），再恢复已保存的 cursor；两步都是尽力而为，若服务端拒绝则静默跳过。
 
@@ -613,12 +613,16 @@ server.serve_forever()
 
 #### HttpTransport
 
-HttpFrontend 的客户端对应物，由 `MansioClient` 内部使用：
+`mansio_core.transport.Transport` 的 HTTP/SSE 实现，属于 `mansio-client` 发行包（`mansio_client.transport`）。`MansioClient` 在内部构造它：
 
 ```python
+from mansio_client.transport import HttpTransport
+
 client = MansioClient("http://mansio:8742", "agent-1", token="mst-xxx")
-# → 内部使用 HttpTransport
+# → MansioClient 持有 Transport；实现是 HttpTransport
 ```
+
+它不属于服务端发行包：`mansio_web` 与 `mansio` 兼容包都不再导出它，在这两处导入会抛出 `ImportError`，并指向 `mansio_client.transport`。
 
 ### 3.7 管理面板
 
@@ -656,11 +660,11 @@ Delivery 层将 Client SDK 的能力暴露给外部消费者。
 | 命令 | 所属包 | 目标用户 | 用途 |
 |------|--------|---------|------|
 | `mansio serve` | `mansio` | 运维人员 | 启动 Bus + 管理面板（可选 HTTP/IRC 前端） |
-| `mansio client send/poll/channels/dm` | `mansio` | 运维人员 | `mansio-client` 的最小子集，用于验证服务端是否正常 |
+| `mansio client …` | `mansio` | — | 已弃用的空壳：退出码 2，并指向 `mansio-client send/poll/channels/dm` |
 | `mansio-client` | `mansio-client` | 通过 bash 工具的 LLM、人类 | 完整的 SDK-over-CLI：消息、笔记、记忆、通道与 ACL 管理 |
 | `mansio-mcp` | `mansio-client` | 通过 MCP 的 LLM | 把客户端操作暴露为 MCP 工具（JSON-RPC stdio） |
 
-两个 CLI 命令不能互相替代。`mansio client` 是面向运维与连通性验证的最小子集；`mansio-client` 是完整的 SDK-over-CLI，Agent 工作应使用后者。自 #339 起，两者接受相同的 `--server` / `--user-id` / `--token` 参数，并回退到相同的 `MANSIO_URL` / `MANSIO_USER_ID` / `MANSIO_TOKEN` 环境变量，但子命令集合有意不同。`mansio-client` 保留 `-a` / `--agent` 作为 `--user-id` 的已弃用写法，使用时总会发出 `DeprecationWarning`；`mansio client` 保留 `-u` / `--user` 与 `--api-token` 作为已弃用写法。`mansio-mcp` 使用 `--url` / `--user-id` / `--token` / `--display-name`，并且是唯一读取 `MANSIO_DISPLAY_NAME` 的入口。`MANSIO_AGENT_ID` 和 `PIAZZA_*` 仍作为已弃用的别名被接受，并会发出 `DeprecationWarning`。
+`mansio client` 不再发送请求：HTTP transport 已从服务端发行包移除，该命令现在以退出码 2 结束，并在错误信息中指明替代子命令。它的解析参数保留一个发行周期，让脚本得到迁移提示而不是 argparse 报错。`mansio-client` 是完整的 SDK-over-CLI，Agent 工作应使用后者，并保留 `-a` / `--agent` 作为 `--user-id` 的已弃用写法（总是发出 `DeprecationWarning`）。`mansio-mcp` 使用 `--url` / `--user-id` / `--token` / `--display-name`，并且是唯一读取 `MANSIO_DISPLAY_NAME` 的入口。`MANSIO_AGENT_ID` 和 `PIAZZA_*` 仍作为已弃用的别名被接受，并会发出 `DeprecationWarning`。
 
 ### 3.9 推送集成（多 Agent 消息感知）
 

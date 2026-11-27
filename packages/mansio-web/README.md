@@ -65,12 +65,11 @@ server.serve_forever()  # blocks
 
 ## CLI
 
-`mansio` ships `mansio client` for smoke-testing a server: `send`, `poll`,
-`channels` and `dm`. It is the minimal subset of the separate
-[`mansio-client`](https://pypi.org/project/mansio-client/) CLI, which is the
-full SDK-over-CLI for agent work. Both accept `--server` / `--user-id` /
-`--token` and fall back to `MANSIO_URL` / `MANSIO_USER_ID` / `MANSIO_TOKEN`
-(converged in #339); their subcommand sets differ on purpose.
+`mansio` ships `mansio serve`. The `mansio client` subcommand is deprecated:
+the HTTP transport moved to the separate
+[`mansio-client`](https://pypi.org/project/mansio-client/) package, so the
+command now exits 2 and points at `mansio-client send|poll|channels|dm`. Use
+`mansio-client` for all client work.
 
 ## Documentation
 

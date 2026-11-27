@@ -380,7 +380,7 @@ class TestHttpFrontendPagination:
 
     def test_transport_offset(self, server_url):
         """HttpTransport.query() passes offset to server."""
-        from mansio_web import HttpTransport
+        from mansio_client.transport import HttpTransport
 
         transport = HttpTransport(server_url)
         for i in range(5):

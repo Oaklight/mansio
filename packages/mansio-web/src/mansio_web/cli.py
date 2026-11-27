@@ -8,20 +8,14 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import signal
 import sys
 import threading
 import time
-import urllib.error
 from typing import Any, NoReturn
 
 from mansio_core import SQLiteBus, __version__
-from mansio_core.types import is_valid_user_id
-
-from mansio_web import MansioAPIError
-from mansio_web._vendor.httpclient import HttpClientError
 
 _LEGACY_DB = "piazza.db"
 _DEFAULT_DB = "mansio.db"
@@ -79,29 +73,6 @@ def _parse_host_port(value: str, default_host: str = "127.0.0.1") -> tuple[str, 
         return default_host, int(value)
     except ValueError:
         raise argparse.ArgumentTypeError(f"Invalid port: {value!r}") from None
-
-
-def _msg_to_json(msg) -> str:
-    """Serialize a Message to a JSON string.
-
-    Args:
-        msg: A Message object.
-
-    Returns:
-        JSON string representation.
-    """
-    return json.dumps(
-        {
-            "id": msg.id,
-            "channel": msg.channel,
-            "sender": msg.sender,
-            "msg_type": msg.msg_type,
-            "payload": msg.payload,
-            "timestamp": msg.timestamp,
-            "metadata": msg.metadata,
-        },
-        ensure_ascii=False,
-    )
 
 
 # ── Argument Parsing ──────────────────────────────────────────────
@@ -754,86 +725,6 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     bus.close()
 
 
-def _cmd_client_send(args: argparse.Namespace) -> None:
-    """Handle ``client send``.
-
-    Args:
-        args: Parsed arguments namespace.
-    """
-    from mansio_web.transport_http import HttpTransport
-
-    transport = HttpTransport(args.server, user_id=args.user, token=args.api_token)
-    msg_id = transport.publish(args.channel, args.user, args.msg_type, args.message)
-    print(msg_id)
-    transport.close()
-
-
-def _cmd_client_poll(args: argparse.Namespace) -> None:
-    """Handle ``client poll``.
-
-    Args:
-        args: Parsed arguments namespace.
-    """
-    from mansio_web.transport_http import HttpTransport
-
-    transport = HttpTransport(args.server, user_id=args.user, token=args.api_token)
-
-    if args.follow:
-        # SSE mode: subscribe and print each message as JSON line
-        stop = threading.Event()
-
-        def on_msg(msg):
-            print(_msg_to_json(msg), flush=True)
-
-        transport.subscribe(args.channel, on_msg)
-
-        def handle_signal(_signum: int, _frame: object) -> None:
-            stop.set()
-
-        signal.signal(signal.SIGINT, handle_signal)
-        signal.signal(signal.SIGTERM, handle_signal)
-
-        stop.wait()
-    else:
-        # One-shot poll
-        for msg in transport.query(args.channel, limit=args.limit):
-            print(_msg_to_json(msg))
-
-    transport.close()
-
-
-def _cmd_client_channels(args: argparse.Namespace) -> None:
-    """Handle ``client channels``.
-
-    Args:
-        args: Parsed arguments namespace.
-    """
-    from mansio_web.transport_http import HttpTransport
-
-    transport = HttpTransport(args.server, user_id=args.user, token=args.api_token)
-    for ch in transport.channels():
-        print(ch)
-    transport.close()
-
-
-def _cmd_client_dm(args: argparse.Namespace) -> None:
-    """Handle ``client dm``.
-
-    Args:
-        args: Parsed arguments namespace.
-    """
-    from mansio_web.transport_http import HttpTransport
-
-    # Compute canonical DM channel (same logic as MansioClient._dm_channel)
-    pair = sorted([args.user, args.to_user])
-    channel = f"dm:{pair[0]}:{pair[1]}"
-
-    transport = HttpTransport(args.server, user_id=args.user, token=args.api_token)
-    msg_id = transport.publish(channel, args.user, "chat", args.message)
-    print(msg_id)
-    transport.close()
-
-
 # ── Entry Point ───────────────────────────────────────────────────
 
 
@@ -848,30 +739,13 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "serve":
         _cmd_serve(args)
     elif args.command == "client":
-        if args.action is None:
-            print("usage: mansio client {send,poll,channels,dm} ...", file=sys.stderr)
-            sys.exit(1)
-        if not args.server or not args.user:
-            _fail("--server and --user-id required (or set MANSIO_URL and MANSIO_USER_ID)")
-        if not is_valid_user_id(args.user):
-            _fail(
-                f"Invalid user_id {args.user!r}: must be 3-64 chars, "
-                "lowercase alphanumeric + hyphens, start/end with alphanumeric."
-            )
-        handlers = {
-            "send": _cmd_client_send,
-            "poll": _cmd_client_poll,
-            "channels": _cmd_client_channels,
-            "dm": _cmd_client_dm,
-        }
-        try:
-            handlers[args.action](args)
-        except MansioAPIError as exc:
-            _fail(str(exc))
-        except HttpClientError as exc:
-            _fail(f"cannot reach {args.server}: {exc}")
-        except (urllib.error.URLError, ConnectionError, OSError) as exc:
-            _fail(f"cannot reach {args.server}: {exc}")
+        print(
+            "error: `mansio client` is deprecated and no longer sends requests. "
+            "Install the mansio-client package and use "
+            "`mansio-client send|poll|channels|dm` instead.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     else:
         _build_parser().print_help()
         sys.exit(1)
