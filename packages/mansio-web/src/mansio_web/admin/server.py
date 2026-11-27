@@ -317,8 +317,25 @@ class AdminServer:
         self._setup_token_routes()
 
     def _setup_ui_routes(self) -> None:
-        """Root path — serve admin HTML or API index."""
+        """Root path — serve admin HTML or API index; serve UI assets."""
         serve_ui = self._serve_ui
+
+        @self._app.get("/assets/<path:path>")
+        def asset(request: Any, path: str) -> Response | tuple:
+            from .static import get_asset
+
+            loaded = get_asset(path) if serve_ui else None
+            if loaded is None:
+                return {
+                    "error": "Not Found",
+                    "message": f"Asset '{path}' not found",
+                }, 404
+            body, content_type = loaded
+            return Response(
+                body,
+                content_type=content_type,
+                headers={"Cache-Control": "no-cache"},
+            )
 
         @self._app.get("/")
         def root(request: Any) -> Response | dict:
