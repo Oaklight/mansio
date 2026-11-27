@@ -120,6 +120,10 @@ class TestPublishContract:
             parse_publish(_publish(channel=1))
         with pytest.raises(ContractError, match="Channel must not contain null bytes"):
             parse_publish(_publish(channel="a\x00b"))
+        with pytest.raises(ContractError, match="Channel must be a non-empty string"):
+            parse_publish(_publish(channel=""))
+        with pytest.raises(ContractError, match="Channel must be a non-empty string"):
+            parse_publish(_publish(channel="   "))
         with pytest.raises(ContractError, match="Sender must be a string without null bytes"):
             parse_publish(_publish(sender=None))
         with pytest.raises(ContractError, match="Sender must be a non-empty string"):

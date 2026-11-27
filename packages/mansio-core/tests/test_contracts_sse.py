@@ -187,7 +187,7 @@ class TestStreamEventDocument:
 
 
 class TestPublishToStreamRoundTrip:
-    """A request the publish contract accepts always parses as a stream event."""
+    """Field values the publish contract accepts also parse as a stream event."""
 
     @pytest.mark.parametrize(
         "overrides",

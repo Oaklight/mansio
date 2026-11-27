@@ -138,6 +138,9 @@ def parse_publish(body: Any) -> PublishRequest:
         raise ContractError("Channel must be a string without null bytes", field="channel")
     if "\x00" in channel:
         raise ContractError("Channel must not contain null bytes", field="channel")
+    channel = channel.strip()
+    if not channel:
+        raise ContractError("Channel must be a non-empty string", field="channel")
 
     sender = data["sender"]
     if not isinstance(sender, str) or "\x00" in sender:
@@ -155,7 +158,7 @@ def parse_publish(body: Any) -> PublishRequest:
         raise ContractError("'intent' must be a string or null", field="intent")
 
     return PublishRequest(
-        channel=channel.strip(),
+        channel=channel,
         sender=sender,
         msg_type=msg_type,
         payload=payload,
