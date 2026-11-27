@@ -23,7 +23,7 @@ tumbling time window.  The non-stateful tests below pin that boundary.
 
 from __future__ import annotations
 
-import mansio_client.client as client_mod
+import mansio_client.coalesce as coalesce_mod
 from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.stateful import (
@@ -33,7 +33,7 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
 )
 from mansio_client import MansioClient
-from mansio_client.client import _Coalescer
+from mansio_client.coalesce import _Coalescer
 from mansio_client.types import Message
 
 CHANNEL = "ch"
@@ -156,7 +156,7 @@ class CoalescerMachine(RuleBasedStateMachine):
 
 
 def test_coalescer_state_machine(monkeypatch) -> None:
-    monkeypatch.setattr(client_mod, "_TIMER_FACTORY", FakeTimer)
+    monkeypatch.setattr(coalesce_mod, "_TIMER_FACTORY", FakeTimer)
     run_state_machine_as_test(CoalescerMachine, settings=SETTINGS)
 
 
@@ -217,7 +217,7 @@ def test_negative_coalesce_ms_is_rejected() -> None:
 
 
 def test_positive_coalesce_ms_batches_and_unsubscribe_flushes(monkeypatch) -> None:
-    monkeypatch.setattr(client_mod, "_TIMER_FACTORY", FakeTimer)
+    monkeypatch.setattr(coalesce_mod, "_TIMER_FACTORY", FakeTimer)
     FakeTimer.instances.clear()
     transport = _FakeTransport()
     client = _bare_client(transport)
