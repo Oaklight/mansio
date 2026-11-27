@@ -59,9 +59,31 @@ from mansio_core.authz import (
 )
 from mansio_core.authz import user_involved as _user_involved
 from mansio_core.contracts import (
+    ACLAddEntry,
+    ACLAddResult,
+    ACLRemoveResult,
+    ACLResult,
+    ACLSetResult,
+    AdminCleanupResult,
+    AdminCompactResult,
+    AuthCheckResult,
+    ChannelResult,
+    ChannelsResult,
     ContractError,
+    DeleteChannelResult,
+    DeleteMessageResult,
+    ErrorResult,
+    HealthResult,
+    PresenceAgentResult,
+    PresenceHeartbeatResult,
+    PresenceResult,
+    PublishResult,
+    QueryResult,
+    QueueAckResult,
+    QueueClaimResult,
+    QueueStatusResult,
+    RegistryLookupResult,
     StreamEvent,
-    message_to_dict,
     parse_acl_add,
     parse_acl_set,
     parse_admin_cleanup,
@@ -257,7 +279,7 @@ def _validate_and_auth_publish(
 
 def _bad_request(err: ContractError) -> tuple[dict[str, str], int]:
     """Return a contract error as an HTTP 400 response."""
-    return err.as_error(), 400
+    return ErrorResult(error="Bad Request", message=err.message).to_dict(), 400
 
 
 def _json_body(request: Any, message: str = "Request body must be valid JSON") -> Any:
@@ -302,7 +324,7 @@ async def _handle_queue_status(request: Any, bus: Any, authz: ChannelAuthorizer)
     result = await asyncio.to_thread(bus.queue_status, message_id)
     if result is None:
         return {"error": "Not Found", "message": "No queue status for this message"}, 404
-    return {"found": True, "status": result}
+    return QueueStatusResult(found=True, status=result).to_dict()
 
 
 def _resolve_claimed_by(auth_result: Any, claimed_by: str | None) -> tuple[str, tuple | None]:
@@ -314,24 +336,6 @@ def _resolve_claimed_by(auth_result: Any, claimed_by: str | None) -> tuple[str, 
     if not claimed_by:
         return "", ({"error": "Bad Request", "message": "Missing 'claimed_by'"}, 400)
     return claimed_by, None
-
-
-def _claim_result_to_dict(result: Any) -> dict[str, Any]:
-    """Serialize a ClaimResult to a dict."""
-    d: dict[str, Any] = {
-        "message": _msg_to_dict(result.message),
-        "status": result.status,
-        "claimed_by": result.claimed_by,
-        "claimed_at": result.claimed_at,
-    }
-    if result.lease_until is not None:
-        d["lease_until"] = result.lease_until
-    return d
-
-
-def _msg_to_dict(m: Message) -> dict[str, Any]:
-    """Serialize a Message to its wire dict (shared with the SSE contract)."""
-    return message_to_dict(m)
 
 
 class HttpFrontend:
@@ -588,7 +592,7 @@ class HttpFrontend:
 
         @self._app.get("/health")
         async def health(request: Request) -> dict:
-            return {"status": "ok"}
+            return HealthResult().to_dict()
 
         @self._app.post("/v1/publish")
         async def publish(request: Request) -> dict | tuple:
@@ -626,13 +630,8 @@ class HttpFrontend:
                     "error": "Not Found" if "not found" in str(e) else "Bad Request",
                     "message": str(e),
                 }, 404 if "not found" in str(e) else 400
-            result: dict[str, object] = {"message_id": msg_id}
-
             warning = await _dm_unregistered_warning(bus, payload.channel, payload.sender)
-            if warning:
-                result["warning"] = warning
-
-            return result
+            return PublishResult(message_id=msg_id, warning=warning).to_dict()
 
         @self._app.get("/v1/query")
         async def query(request: Request) -> dict | tuple:
@@ -672,13 +671,13 @@ class HttpFrontend:
             total = await asyncio.to_thread(bus.message_count, qp.channel)
             has_more = len(msgs) == qp.limit
 
-            return {
-                "messages": [_msg_to_dict(m) for m in msgs],
-                "count": len(msgs),
-                "total": total,
-                "offset": qp.offset,
-                "has_more": has_more,
-            }
+            return QueryResult(
+                messages=msgs,
+                count=len(msgs),
+                total=total,
+                offset=qp.offset,
+                has_more=has_more,
+            ).to_dict()
 
         @self._app.get("/v1/channels")
         async def channels(request: Request) -> dict | tuple:
@@ -695,14 +694,14 @@ class HttpFrontend:
                     all_detail = [
                         ch for ch in all_detail if authz.can_list_channel(auth_result, ch["name"])
                     ]
-                return {"channels": all_detail}
+                return ChannelsResult(channels=all_detail).to_dict()
 
             all_channels = cast(list[str], await asyncio.to_thread(bus.channels, detail=False))
             if isinstance(auth_result, str):
                 all_channels = [
                     ch for ch in all_channels if authz.can_list_channel(auth_result, ch)
                 ]
-            return {"channels": all_channels}
+            return ChannelsResult(channels=all_channels).to_dict()
 
         self._setup_auth_check_route()
 
@@ -716,10 +715,10 @@ class HttpFrontend:
             # Only the explicit opt-out disables auth. A frontend that merely
             # lacks a token store still requires a token it can never accept,
             # which is what the authenticated endpoints report too.
-            return {
-                "auth_mode": "disabled" if self._allow_unauthenticated else "required",
-                "has_tokens": has_tokens,
-            }
+            return AuthCheckResult(
+                auth_mode="disabled" if self._allow_unauthenticated else "required",
+                has_tokens=has_tokens,
+            ).to_dict()
 
     def _setup_registry_route(self) -> None:
         """Register registry lookup route."""
@@ -737,8 +736,8 @@ class HttpFrontend:
             if token_store is not None and await asyncio.to_thread(
                 token_store.user_exists, user_id
             ):
-                return {"found": True, "user_id": user_id}
-            return {"found": False, "user_id": user_id}
+                return RegistryLookupResult(found=True, user_id=user_id).to_dict()
+            return RegistryLookupResult(found=False, user_id=user_id).to_dict()
 
     def _setup_deletion_routes(self) -> None:
         """Register channel and message deletion routes."""
@@ -779,7 +778,7 @@ class HttpFrontend:
                     "message": f"Channel '{channel_name}' not found or already empty",
                 }, 404
 
-            return {"deleted": count, "channel": channel_name}
+            return DeleteChannelResult(deleted=count, channel=channel_name).to_dict()
 
     def _setup_delete_message_route(self) -> None:
         """Register DELETE /v1/messages/<message_id>."""
@@ -826,7 +825,7 @@ class HttpFrontend:
                     "message": f"Message '{message_id}' not found",
                 }, 404
 
-            return {"deleted": True, "message_id": message_id}
+            return DeleteMessageResult(deleted=True, message_id=message_id).to_dict()
 
     def _setup_admin_cleanup_route(self) -> None:
         """Register POST /v1/admin/channels/cleanup."""
@@ -885,11 +884,11 @@ class HttpFrontend:
                     "message": "Backend does not support deletion",
                 }, 501
 
-            return {
-                "channels_deleted": len(channels_deleted),
-                "messages_deleted": total_deleted,
-                "channels": channels_deleted,
-            }
+            return AdminCleanupResult(
+                channels_deleted=len(channels_deleted),
+                messages_deleted=total_deleted,
+                channels=channels_deleted,
+            ).to_dict()
 
     def _setup_admin_compact_route(self) -> None:
         """Register POST /v1/admin/compact."""
@@ -929,10 +928,7 @@ class HttpFrontend:
                     "message": "Backend does not support compaction",
                 }, 501
 
-            return {
-                "channel": channel,
-                "messages_removed": removed,
-            }
+            return AdminCompactResult(channel=channel, messages_removed=removed).to_dict()
 
     def _setup_queue_routes(self) -> None:
         """Register queue (claim/ack/status) routes."""
@@ -962,8 +958,8 @@ class HttpFrontend:
                 bus.queue_claim, claim.channel, claimed_by, lease_seconds=claim.lease_seconds
             )
             if result is None:
-                return {"claimed": False}
-            return {"claimed": True, "result": _claim_result_to_dict(result)}
+                return QueueClaimResult(claimed=False).to_dict()
+            return QueueClaimResult(claimed=True, result=result).to_dict()
 
         async def _handle_ack(request: Request) -> dict | tuple:
             try:
@@ -980,12 +976,12 @@ class HttpFrontend:
                 if message is not None and not authz.can_read(auth_result, message.channel):
                     # Same answer as "not claimed by you": an unauthorized
                     # caller learns nothing about the message's existence.
-                    return {"acked": False}
+                    return QueueAckResult(acked=False).to_dict()
 
             result = await asyncio.to_thread(bus.queue_ack, ack.message_id, claimed_by)
             if result is None:
-                return {"acked": False}
-            return {"acked": True, "result": _claim_result_to_dict(result)}
+                return QueueAckResult(acked=False).to_dict()
+            return QueueAckResult(acked=True, result=result).to_dict()
 
         # ── Canonical paths (/v1/queue/*) ─────────────────────────
 
@@ -1030,7 +1026,7 @@ class HttpFrontend:
                     "error": "Not Implemented",
                     "message": "Backend does not support presence",
                 }, 501
-            return {"ok": True}
+            return PresenceHeartbeatResult().to_dict()
 
         @self._app.get("/v1/presence")
         async def presence_list(request: Request) -> dict | tuple:
@@ -1045,17 +1041,7 @@ class HttpFrontend:
                     "error": "Not Implemented",
                     "message": "Backend does not support presence",
                 }, 501
-            return {
-                "agents": [
-                    {
-                        "user_id": a.user_id,
-                        "status": a.status,
-                        "last_seen": a.last_seen,
-                        "metadata": a.metadata,
-                    }
-                    for a in agents
-                ]
-            }
+            return PresenceResult(agents=agents).to_dict()
 
         @self._app.get("/v1/presence/<user_id>")
         async def presence_agent(request: Request, user_id: str = "") -> dict | tuple:
@@ -1072,12 +1058,12 @@ class HttpFrontend:
                 }, 501
             if result is None:
                 return {"error": "agent not found"}, 404
-            return {
-                "user_id": result.user_id,
-                "status": result.status,
-                "last_seen": result.last_seen,
-                "metadata": result.metadata,
-            }
+            return PresenceAgentResult(
+                user_id=result.user_id,
+                status=result.status,
+                last_seen=result.last_seen,
+                metadata=result.metadata,
+            ).to_dict()
 
     def _setup_channel_acl_routes(self) -> None:
         """Register channel metadata and ACL management routes."""
@@ -1131,14 +1117,7 @@ class HttpFrontend:
             except ValueError as exc:
                 return {"error": "Conflict", "message": str(exc)}, 409
 
-            return {
-                "channel": {
-                    "name": meta.name,
-                    "owner": meta.owner,
-                    "visibility": meta.visibility,
-                    "created_at": meta.created_at,
-                }
-            }, 201
+            return ChannelResult(channel=meta).to_dict(), 201
 
         @self._app.get("/v1/channels/<channel>/meta")
         async def get_channel_meta(request: Request, channel: str = "") -> dict | tuple:
@@ -1163,14 +1142,7 @@ class HttpFrontend:
             if meta is None:
                 return {"error": "Not Found", "message": f"Channel '{channel}' not found"}, 404
 
-            return {
-                "channel": {
-                    "name": meta.name,
-                    "owner": meta.owner,
-                    "visibility": meta.visibility,
-                    "created_at": meta.created_at,
-                }
-            }
+            return ChannelResult(channel=meta).to_dict()
 
     def _setup_acl_crud_routes(self) -> None:
         """Register ACL management routes (get, set, add, remove)."""
@@ -1199,18 +1171,7 @@ class HttpFrontend:
                     "message": "Backend does not support channel management",
                 }, 501
 
-            return {
-                "acl": [
-                    {
-                        "channel": e.channel,
-                        "user_id": e.user_id,
-                        "permission": e.permission,
-                        "granted_at": e.granted_at,
-                        "granted_by": e.granted_by,
-                    }
-                    for e in entries
-                ]
-            }
+            return ACLResult(acl=entries).to_dict()
 
     def _setup_acl_write_routes(self) -> None:
         """Register PUT/POST/DELETE ACL mutation routes."""
@@ -1261,7 +1222,7 @@ class HttpFrontend:
                     "message": "Backend does not support channel management",
                 }, 501
 
-            return {"status": "ok", "count": len(entries)}
+            return ACLSetResult(status="ok", count=len(entries)).to_dict()
 
     def _setup_acl_add_route(self) -> None:
         """Register POST /v1/channels/<channel>/acl."""
@@ -1305,14 +1266,14 @@ class HttpFrontend:
                     "message": "Backend does not support channel management",
                 }, 501
 
-            return {
-                "status": "ok",
-                "entry": {
-                    "channel": entry.channel,
-                    "user_id": entry.user_id,
-                    "permission": entry.permission,
-                },
-            }, 201
+            return ACLAddResult(
+                status="ok",
+                entry=ACLAddEntry(
+                    channel=entry.channel,
+                    user_id=entry.user_id,
+                    permission=entry.permission,
+                ),
+            ).to_dict(), 201
 
     def _setup_acl_remove_route(self) -> None:
         """Register DELETE /v1/channels/<channel>/acl/<user_id>."""
@@ -1344,7 +1305,7 @@ class HttpFrontend:
                     "message": f"No ACL entry for '{user_id}' on '{channel}'",
                 }, 404
 
-            return {"status": "ok"}
+            return ACLRemoveResult().to_dict()
 
     def _setup_sse_route(self) -> None:
         """Register the SSE subscribe routes."""
