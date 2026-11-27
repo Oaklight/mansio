@@ -11,7 +11,7 @@ Verifies:
 from __future__ import annotations
 
 import pytest
-from mansio_web.frontends.http import _validate_channel_name
+from mansio_web.frontends.routes._common import _validate_channel_name
 
 
 class TestValidateChannelName:
