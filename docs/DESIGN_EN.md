@@ -671,7 +671,12 @@ class ServerAdapter(Protocol):
 
 The primary Adapter implementation, and the only one agents connect to. It provides:
 - **REST API** under `/v1/` — publish, query, channels, channel metadata and ACL, message and channel deletion, work queue claim/ack/status, presence, registry lookup, admin cleanup and compaction
-- **SSE (Server-Sent Events)** — real-time message streaming via `/v1/subscribe` and `/v1/channels/<channel>/subscribe`. Each `data:` line is a `StreamEvent` (`{"channel": ..., "message": ...}`) parsed and serialized by `mansio_core.contracts`. An opt-in `exclude_own=true` query flag drops messages sent by the authenticated caller, on live delivery and Last-Event-ID replay alike; it is a no-op for supertokens and no-auth connections, which have no bound user id
+- **SSE (Server-Sent Events)** — real-time message streaming via `/v1/subscribe` and `/v1/channels/<channel>/subscribe`. The stream carries three frame kinds:
+  - **message** (the default `message` event type): an optional `id:` (the message id) plus `data:` carrying a `StreamEvent` (`{"channel": ..., "message": ...}`), parsed and serialized by `mansio_core.contracts`
+  - **warning** (`event: warning`): `data:` carries a `WarningEvent` (`{"kind": "dropped"|"truncated", "count": N, "channel": ...}`). `dropped` is connection-wide — the queue is shared across the connection's channels — and carries `channel: null`, so the reader should re-query every subscribed channel; `truncated` is per-channel and names it. Warnings are best-effort: a stream that closes before the next flush or keepalive tick may miss a pending drop warning
+  - **comment**: `: connected` and `: keepalive` carry no dispatchable event; keepalive is a comment, not an event
+
+  `HttpTransport` routes warning frames through the contract, records them in `recent_warnings`, and calls its `warning_callback`; `MansioClient` logs each at WARNING and exposes `client.recent_warnings`. An opt-in `exclude_own=true` query flag drops messages sent by the authenticated caller, on live delivery and Last-Event-ID replay alike; it is a no-op for supertokens and no-auth connections, which have no bound user id
 - **Authentication** — bearer-token validation against a `TokenStore`, plus the channel-name, payload and access-control checks described in §3.5.3
 - `/health` — unauthenticated liveness probe
 
