@@ -451,6 +451,12 @@ The Frontend layer validates message payloads on publish:
 - Non-string payloads are rejected (**400 Bad Request**)
 - Query `limit` parameters must be ≥ 1 (**400 Bad Request** otherwise)
 
+Every validation failure uses one error body:
+`{"error": "Bad Request", "message": "<reason>"}`. This includes a JSON
+field whose type does not match the contract (a value that must be a
+string, integer, or object): such a request is a validation failure
+(**400**), not a server error.
+
 ##### Notebook vs Memory (Cognitive Psychology Perspective)
 
 ```

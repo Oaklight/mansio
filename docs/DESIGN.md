@@ -382,6 +382,16 @@ Bus 不暴露任何授权参数：Frontend 在调用 `Bus.publish` / `Bus.query`
 
 **删除频道**：具有作用域的令牌可删除自己所属的 `dm:`/`notebook:`/`memory:` 频道，以及存储记录授予其 `delete` 动词的普通频道或注册前缀频道（所有者，或持有 `delete` 的 ACL 条目；`manage` 动词只控制 ACL，不包含删除权限）。未注册的普通频道、`broadcast:*` 与 `_system:*` 仍仅限 supertoken。
 
+##### 输入校验
+
+Frontend 层在发布消息时校验 payload：
+
+- 空或仅含空白的 payload 返回 **400 Bad Request**
+- 非字符串 payload 返回 **400 Bad Request**
+- Query 参数 `limit` 必须 ≥ 1（否则 **400 Bad Request**）
+
+所有校验失败使用统一错误体 `{"error": "Bad Request", "message": "<原因>"}`。JSON 字段类型与约定不符（本应为字符串、整数或对象）同样属于校验失败（**400**），而不是服务器错误。
+
 ##### Notebook vs Memory（认知心理学视角）
 
 ```
