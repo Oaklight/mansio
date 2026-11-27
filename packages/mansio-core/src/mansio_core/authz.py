@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from mansio_core.types import is_valid_user_id, permission_allows
+from mansio_core.types import is_valid_user_id, normalize_required, permission_allows
 
 if TYPE_CHECKING:
     from mansio_core.bus import Bus
@@ -105,6 +105,41 @@ def user_involved(user_id: str, channel: str, sender: str) -> bool:
     if sender == user_id:
         return True
     return is_channel_member(user_id, channel)
+
+
+def access_allowed(
+    owner: str | None,
+    visibility: str | None,
+    permission: str | None,
+    user_id: str,
+    required: str = "read",
+) -> bool:
+    """Decide a stored-channel access question.
+
+    This is the single copy of the channel-store rule: backends fetch the
+    rows, this function decides.  ``owner is None`` means the channel has no
+    metadata row, which every backend treats as public.
+
+    Args:
+        owner: Stored channel owner, or ``None`` for an unregistered channel.
+        visibility: Stored visibility (``"public"`` or ``"private"``), or
+            ``None`` when the channel is unregistered.
+        permission: The caller's stored permission preset/verb on the
+            channel, or ``None`` when there is no ACL entry.
+        user_id: Agent whose access is being decided.
+        required: Verb needed (legacy ``write``/``admin`` are mapped to
+            ``publish``/``manage`` by :func:`permission_allows`).
+
+    Returns:
+        True if access is granted.
+    """
+    if owner is None:
+        return True
+    if owner == user_id:
+        return True
+    if visibility == "public" and normalize_required(required) in ("read", "publish"):
+        return True
+    return permission is not None and permission_allows(permission, required)
 
 
 def broadcast_write_allowed(bus: Bus | None, channel: str, user_id: str) -> bool:

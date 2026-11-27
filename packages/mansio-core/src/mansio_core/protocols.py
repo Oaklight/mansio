@@ -7,7 +7,7 @@ Defines the Backend ABC and optional capability protocols
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Literal, Protocol, runtime_checkable
 
 from mansio_core._vendor.structlog import get_logger
@@ -390,6 +390,31 @@ class ChannelStore(Protocol):
 
         Returns:
             True if access is granted.
+        """
+        ...
+
+    def check_access_many(
+        self, channels: Sequence[str], user_id: str, required: str = "read"
+    ) -> dict[str, bool]:
+        """Check one verb for many channels in one call.
+
+        Same decision as :meth:`check_access` for every name, but without
+        one round trip per channel.  Callers listing a bounded set of
+        channels should use this; single-channel callers keep using
+        :meth:`check_access`.
+
+        Implementations must answer for names with no metadata row as
+        public (True), and must not require the names to exist.
+
+        Args:
+            channels: Channel names to check.  Duplicates may be collapsed.
+            user_id: Agent to check.
+            required: Verb needed (legacy ``write``/``admin`` are mapped
+                to ``publish``/``manage``).
+
+        Returns:
+            Mapping of channel name to the same answer
+            :meth:`check_access` would return for that name.
         """
         ...
 

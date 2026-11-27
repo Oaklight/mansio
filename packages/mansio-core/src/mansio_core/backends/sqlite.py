@@ -8,13 +8,14 @@ import os
 import shutil
 import sqlite3
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
 from mansio_core._vendor.retry import retry
 from mansio_core._vendor.structlog import get_logger
+from mansio_core.authz import access_allowed
 from mansio_core.protocols import Backend, ChannelStore, Compactable, Deletable, Presenceable
 from mansio_core.types import (
     ACLEntry,
@@ -22,9 +23,11 @@ from mansio_core.types import (
     ClaimResult,
     Message,
     UserPresence,
-    normalize_required,
-    permission_allows,
 )
+
+# ``check_access_many`` splits its IN lists so a large listing stays under
+# SQLite's bound-variable limit while keeping the query count fixed.
+_ACCESS_QUERY_CHUNK = 500
 
 _CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
     ("dm:", "dm"),
@@ -1001,18 +1004,51 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             ).fetchone()
             if row is None:
                 return True  # unregistered channels are public
-            ch_owner, ch_vis = row[0], row[1]
-            if ch_owner == user_id:
-                return True
-            if ch_vis == "public" and normalize_required(required) in ("read", "publish"):
+            owner, visibility = row[0], row[1]
+            if access_allowed(owner, visibility, None, user_id, required):
+                # Owner, unregistered, or public read/publish: no ACL row can
+                # change the answer, so skip the second query.
                 return True
             acl_row = self._conn.execute(
                 "SELECT permission FROM channel_acl WHERE channel = ? AND user_id = ?",
                 (channel, user_id),
             ).fetchone()
-            if acl_row is None:
-                return False
-            return permission_allows(acl_row[0], required)
+        return access_allowed(
+            owner,
+            visibility,
+            acl_row[0] if acl_row is not None else None,
+            user_id,
+            required,
+        )
+
+    def check_access_many(
+        self, channels: Sequence[str], user_id: str, required: str = "read"
+    ) -> dict[str, bool]:
+        names = list(dict.fromkeys(channels))
+        if not names:
+            return {}
+        result: dict[str, bool] = {}
+        with self._lock:
+            for start in range(0, len(names), _ACCESS_QUERY_CHUNK):
+                chunk = names[start : start + _ACCESS_QUERY_CHUNK]
+                placeholders = ",".join("?" * len(chunk))
+                rows = self._conn.execute(
+                    f"SELECT name, owner, visibility FROM channels WHERE name IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+                acl_rows = self._conn.execute(
+                    "SELECT channel, permission FROM channel_acl "
+                    f"WHERE user_id = ? AND channel IN ({placeholders})",
+                    [user_id, *chunk],
+                ).fetchall()
+                meta = {row[0]: (row[1], row[2]) for row in rows}
+                perms = {row[0]: row[1] for row in acl_rows}
+                for name in chunk:
+                    owner, visibility = meta.get(name, (None, None))
+                    result[name] = access_allowed(
+                        owner, visibility, perms.get(name), user_id, required
+                    )
+        return result
 
     # ── Presence ──────────────────────────────────────────────
 

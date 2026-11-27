@@ -5,9 +5,11 @@ from __future__ import annotations
 import dataclasses
 import threading
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
+from mansio_core.authz import access_allowed
 from mansio_core.protocols import Backend, ChannelStore, Compactable, Deletable, Presenceable
 from mansio_core.types import (
     ACLEntry,
@@ -15,8 +17,6 @@ from mansio_core.types import (
     ClaimResult,
     Message,
     UserPresence,
-    normalize_required,
-    permission_allows,
 )
 
 _CHANNEL_TYPE_PREFIXES: list[tuple[str, str]] = [
@@ -632,19 +632,31 @@ class MemoryBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
     def check_access(self, channel: str, user_id: str, required: str = "read") -> bool:
         with self._lock:
             meta = self._channels.get(channel)
-            if meta is None:
-                return True  # unregistered channels are public
-            if meta.owner == user_id:
-                return True
-            if meta.visibility == "public" and normalize_required(required) in (
-                "read",
-                "publish",
-            ):
-                return True
             entry = self._acl.get(channel, {}).get(user_id)
-            if entry is None:
-                return False
-            return permission_allows(entry.permission, required)
+            return access_allowed(
+                meta.owner if meta is not None else None,
+                meta.visibility if meta is not None else None,
+                entry.permission if entry is not None else None,
+                user_id,
+                required,
+            )
+
+    def check_access_many(
+        self, channels: Sequence[str], user_id: str, required: str = "read"
+    ) -> dict[str, bool]:
+        with self._lock:
+            result: dict[str, bool] = {}
+            for name in dict.fromkeys(channels):
+                meta = self._channels.get(name)
+                entry = self._acl.get(name, {}).get(user_id)
+                result[name] = access_allowed(
+                    meta.owner if meta is not None else None,
+                    meta.visibility if meta is not None else None,
+                    entry.permission if entry is not None else None,
+                    user_id,
+                    required,
+                )
+            return result
 
     def close(self) -> None:
         """Clear all stored messages."""

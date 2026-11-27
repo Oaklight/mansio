@@ -6,7 +6,7 @@ import contextlib
 import threading
 import uuid
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, overload
@@ -543,6 +543,19 @@ class Bus:
         if not isinstance(self._backend, ChannelStore):
             return True
         return self._backend.check_access(channel, user_id, required)
+
+    def check_access_many(
+        self, channels: Sequence[str], user_id: str, required: str = "read"
+    ) -> dict[str, bool]:
+        """Check one verb for many channels in one backend call.
+
+        Same answers as calling :meth:`check_access` per channel.  Backends
+        without ``ChannelStore`` treat every channel as public, so the
+        result is all True there without touching the backend.
+        """
+        if not isinstance(self._backend, ChannelStore):
+            return {channel: True for channel in channels}
+        return self._backend.check_access_many(channels, user_id, required)
 
     def get_acl(self, channel: str) -> list[ACLEntry]:
         """Return ACL entries for a channel."""
