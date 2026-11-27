@@ -3,17 +3,82 @@
 Request dataclasses are the single definition of each request document:
 parsers in :mod:`mansio_core.contracts.parsers` turn decoded JSON and query
 values into them, and the route handlers consume the parsed object.
-Response dataclasses document the wire schema, but handlers still return
-plain dicts and do not construct them yet (planned for M3).  No type here
-exposes a backend-internal object.
+Response dataclasses are what the handlers build: each one serializes to the
+document the route returns, so the wire shape has one definition.  No type
+here exposes a backend-internal object.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Literal
+from dataclasses import dataclass, field, fields
+from typing import Any, ClassVar, Literal
 
+from mansio_core.contracts.sse import message_to_dict
 from mansio_core.types import ACLEntry, ChannelMeta, ClaimResult, Message, UserPresence
+
+
+def _wire_value(value: Any) -> Any:
+    """Convert a nested value to its JSON form."""
+    if isinstance(value, _WireResult):
+        return value.to_dict()
+    if isinstance(value, Message):
+        return message_to_dict(value)
+    if isinstance(value, ClaimResult):
+        data: dict[str, Any] = {
+            "message": message_to_dict(value.message),
+            "status": value.status,
+            "claimed_by": value.claimed_by,
+            "claimed_at": value.claimed_at,
+        }
+        if value.lease_until is not None:
+            data["lease_until"] = value.lease_until
+        return data
+    if isinstance(value, ChannelMeta):
+        return {
+            "name": value.name,
+            "owner": value.owner,
+            "visibility": value.visibility,
+            "created_at": value.created_at,
+        }
+    if isinstance(value, UserPresence):
+        return {
+            "user_id": value.user_id,
+            "status": value.status,
+            "last_seen": value.last_seen,
+            "metadata": value.metadata,
+        }
+    if isinstance(value, ACLEntry):
+        return {
+            "channel": value.channel,
+            "user_id": value.user_id,
+            "permission": value.permission,
+            "granted_at": value.granted_at,
+            "granted_by": value.granted_by,
+        }
+    if isinstance(value, list):
+        return [_wire_value(item) for item in value]
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class _WireResult:
+    """Base for response documents.
+
+    ``to_dict`` walks the fields in declaration order, which is the wire
+    order, and converts nested contract values.  ``_omit_none`` names the
+    optional fields that are left out of the document when unset.
+    """
+
+    _omit_none: ClassVar[frozenset[str]] = frozenset()
+
+    def to_dict(self) -> dict[str, Any]:
+        document: dict[str, Any] = {}
+        for item in fields(self):
+            value = getattr(self, item.name)
+            if value is None and item.name in self._omit_none:
+                continue
+            document[item.name] = _wire_value(value)
+        return document
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,8 +96,10 @@ class PublishRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class PublishResult:
+class PublishResult(_WireResult):
     """Response of ``POST /v1/publish``."""
+
+    _omit_none: ClassVar[frozenset[str]] = frozenset({"warning"})
 
     message_id: str
     warning: str | None = None
@@ -53,7 +120,7 @@ class QueryRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class QueryResult:
+class QueryResult(_WireResult):
     """Response of ``GET /v1/query``."""
 
     messages: list[Message]
@@ -71,7 +138,7 @@ class ChannelsRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class ChannelsResult:
+class ChannelsResult(_WireResult):
     """Response of ``GET /v1/channels``.
 
     ``channels`` is a list of names when ``detail`` is false and a list of
@@ -91,14 +158,14 @@ class ChannelCreateRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class ChannelResult:
+class ChannelResult(_WireResult):
     """Response carrying one channel's metadata."""
 
     channel: ChannelMeta
 
 
 @dataclass(frozen=True, slots=True)
-class ACLResult:
+class ACLResult(_WireResult):
     """Response of ``GET /v1/channels/<channel>/acl``."""
 
     acl: list[ACLEntry]
@@ -128,7 +195,7 @@ class ACLAddRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class DeleteChannelResult:
+class DeleteChannelResult(_WireResult):
     """Response of ``DELETE /v1/channels/<channel>``."""
 
     deleted: int
@@ -136,7 +203,7 @@ class DeleteChannelResult:
 
 
 @dataclass(frozen=True, slots=True)
-class DeleteMessageResult:
+class DeleteMessageResult(_WireResult):
     """Response of ``DELETE /v1/messages/<message_id>``."""
 
     deleted: bool
@@ -161,16 +228,20 @@ class QueueAckRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class QueueClaimResult:
+class QueueClaimResult(_WireResult):
     """Response of ``POST /v1/queue/claim``."""
+
+    _omit_none: ClassVar[frozenset[str]] = frozenset({"result"})
 
     claimed: bool
     result: ClaimResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class QueueAckResult:
+class QueueAckResult(_WireResult):
     """Response of ``POST /v1/queue/ack``."""
+
+    _omit_none: ClassVar[frozenset[str]] = frozenset({"result"})
 
     acked: bool
     result: ClaimResult | None = None
@@ -184,7 +255,7 @@ class QueueStatusRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class QueueStatusResult:
+class QueueStatusResult(_WireResult):
     """Response of ``GET /v1/queue/status``."""
 
     found: bool
@@ -207,14 +278,14 @@ class PresenceListRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class PresenceResult:
+class PresenceResult(_WireResult):
     """Response of ``GET /v1/presence``."""
 
     agents: list[UserPresence]
 
 
 @dataclass(frozen=True, slots=True)
-class PresenceAgentResult:
+class PresenceAgentResult(_WireResult):
     """Response of ``GET /v1/presence/<user_id>``."""
 
     user_id: str
@@ -231,7 +302,7 @@ class RegistryLookupRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class RegistryLookupResult:
+class RegistryLookupResult(_WireResult):
     """Response of ``GET /v1/registry/lookup``."""
 
     found: bool
@@ -239,7 +310,7 @@ class RegistryLookupResult:
 
 
 @dataclass(frozen=True, slots=True)
-class AuthCheckResult:
+class AuthCheckResult(_WireResult):
     """Response of ``GET /v1/auth/check``."""
 
     auth_mode: str
@@ -247,7 +318,7 @@ class AuthCheckResult:
 
 
 @dataclass(frozen=True, slots=True)
-class HealthResult:
+class HealthResult(_WireResult):
     """Response of ``GET /health``."""
 
     status: str = "ok"
@@ -262,7 +333,7 @@ class AdminCleanupRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class AdminCleanupResult:
+class AdminCleanupResult(_WireResult):
     """Response of ``POST /v1/admin/channels/cleanup``."""
 
     channels_deleted: int
@@ -280,7 +351,7 @@ class AdminCompactRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class AdminCompactResult:
+class AdminCompactResult(_WireResult):
     """Response of ``POST /v1/admin/compact``."""
 
     channel: str
@@ -288,8 +359,47 @@ class AdminCompactResult:
 
 
 @dataclass(frozen=True, slots=True)
-class ErrorResult:
+class ErrorResult(_WireResult):
     """Error body shared by every bus route."""
 
     error: str
     message: str
+
+
+@dataclass(frozen=True, slots=True)
+class PresenceHeartbeatResult(_WireResult):
+    """Response of ``POST /v1/presence/heartbeat``."""
+
+    ok: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ACLSetResult(_WireResult):
+    """Response of ``PUT /v1/channels/<channel>/acl``."""
+
+    status: str = "ok"
+    count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ACLAddEntry(_WireResult):
+    """The entry echoed by ``POST /v1/channels/<channel>/acl``."""
+
+    channel: str
+    user_id: str
+    permission: str
+
+
+@dataclass(frozen=True, slots=True)
+class ACLAddResult(_WireResult):
+    """Response of ``POST /v1/channels/<channel>/acl``."""
+
+    status: str = "ok"
+    entry: ACLAddEntry | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ACLRemoveResult(_WireResult):
+    """Response of ``DELETE /v1/channels/<channel>/acl/<user_id>``."""
+
+    status: str = "ok"

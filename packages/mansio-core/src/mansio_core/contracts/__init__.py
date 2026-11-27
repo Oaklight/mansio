@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from mansio_core.contracts.bus import (
+    ACLAddEntry,
     ACLAddRequest,
+    ACLAddResult,
     ACLEntrySpec,
+    ACLRemoveResult,
     ACLResult,
     ACLSetRequest,
+    ACLSetResult,
     AdminCleanupRequest,
     AdminCleanupResult,
     AdminCompactRequest,
@@ -22,6 +26,7 @@ from mansio_core.contracts.bus import (
     HealthResult,
     PresenceAgentResult,
     PresenceHeartbeatRequest,
+    PresenceHeartbeatResult,
     PresenceListRequest,
     PresenceResult,
     PublishRequest,
@@ -69,10 +74,14 @@ from mansio_core.contracts.sse import (
 )
 
 __all__ = [
+    "ACLAddEntry",
     "ACLAddRequest",
+    "ACLAddResult",
     "ACLEntrySpec",
+    "ACLRemoveResult",
     "ACLResult",
     "ACLSetRequest",
+    "ACLSetResult",
     "AdminCleanupRequest",
     "AdminCleanupResult",
     "AdminCompactRequest",
@@ -95,6 +104,7 @@ __all__ = [
     "PUBLISH_REQUIRED",
     "PresenceAgentResult",
     "PresenceHeartbeatRequest",
+    "PresenceHeartbeatResult",
     "PresenceListRequest",
     "PresenceResult",
     "PublishRequest",
