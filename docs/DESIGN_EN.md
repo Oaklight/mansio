@@ -721,10 +721,17 @@ separate from the agent-facing HTTP frontend:
 admin/
 ├── server.py      # AdminServer — routes, lifecycle, REST API
 ├── auth.py        # Password login and session cookies
-├── metrics.py     # In-process throughput collection
-├── static.py      # Static asset serving
-└── admin.html     # Single-page dashboard UI
+├── view.py        # AdminView — admin response documents
+├── static.py      # Admin HTML loader and asset whitelist
+├── admin.html     # Dashboard skeleton (markup only)
+└── assets/        # admin.css, theme-init.js, app/api/util/state/auth/refresh.js,
+                   # and one ES module per tab under views/
 ```
+
+UI assets are served from `/assets/<file>` through a fixed whitelist: an
+unknown name, a traversal segment or an unknown suffix is rejected before
+any package resource is read. The page loads the ES modules directly, so
+`admin.html` carries no inline CSS or JS.
 
 Route groups: session (`/api/login`, `/api/logout`, `/api/auth-check`),
 inspection (`/api/stats`, `/api/stats/throughput`, `/api/channels`,
