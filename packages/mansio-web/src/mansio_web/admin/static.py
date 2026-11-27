@@ -3,6 +3,10 @@
 The HTML and its css/js files ship as package data under ``assets/``.  The
 asset map is a fixed whitelist: an unknown name is rejected before any
 package resource is read, so a request cannot walk out of the assets tree.
+
+Files are read on first use and cached by path for the process lifetime;
+there is no invalidation because package assets do not change at runtime.
+Importing this module does not touch the package data.
 """
 
 from __future__ import annotations
@@ -12,13 +16,9 @@ from typing import Final
 
 _PACKAGE = __package__ or __name__
 
-_ADMIN_HTML: Final[str] = (
-    importlib.resources.files(_PACKAGE).joinpath("admin.html").read_text("utf-8")
-)
-
 _JS = "text/javascript; charset=utf-8"
 
-_ASSET_TYPES: Final[dict[str, str]] = {
+ASSET_TYPES: Final[dict[str, str]] = {
     "admin.css": "text/css; charset=utf-8",
     "api.js": _JS,
     "app.js": _JS,
@@ -40,16 +40,26 @@ _ASSET_TYPES: Final[dict[str, str]] = {
     "views/users.js": _JS,
 }
 
-
-def _read_asset(name: str) -> str:
-    path = name.split("/")
-    return importlib.resources.files(_PACKAGE).joinpath("assets", *path).read_text("utf-8")
+_CACHE: dict[str, str] = {}
 
 
-ADMIN_HTML: Final[str] = _ADMIN_HTML
-ADMIN_ASSETS: Final[dict[str, tuple[str, str]]] = {
-    name: (_read_asset(name), content_type) for name, content_type in _ASSET_TYPES.items()
-}
+def _read(name: str) -> str:
+    """Read one package resource."""
+    return importlib.resources.files(_PACKAGE).joinpath(*name.split("/")).read_text("utf-8")
+
+
+def _cached(name: str) -> str:
+    """Read one package resource once, caching its text for the process."""
+    cached = _CACHE.get(name)
+    if cached is None:
+        cached = _read(name)
+        _CACHE[name] = cached
+    return cached
+
+
+def get_admin_html() -> str:
+    """Return the admin HTML shell, reading it on first use."""
+    return _cached("admin.html")
 
 
 def get_asset(name: str) -> tuple[str, str] | None:
@@ -58,4 +68,7 @@ def get_asset(name: str) -> tuple[str, str] | None:
     ``name`` is matched against the fixed map before any file access, so
     traversal segments and unknown suffixes return ``None``.
     """
-    return ADMIN_ASSETS.get(name)
+    content_type = ASSET_TYPES.get(name)
+    if content_type is None:
+        return None
+    return _cached(f"assets/{name}"), content_type
