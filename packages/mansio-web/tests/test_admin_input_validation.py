@@ -72,3 +72,39 @@ class TestAdminMessagesLimitValidation:
             f"GET /api/messages (no channel): expected 400, got {resp.status_code}"
         )
         http.close()
+
+
+class TestAdminPublishValidation:
+    """POST /api/messages uses the same publish contract as /v1/publish."""
+
+    def _post(self, admin_url: str, body: dict):
+        http = HttpClient()
+        try:
+            return http.post(f"{admin_url}/api/messages", json=body)
+        finally:
+            http.close()
+
+    def _body(self, **overrides) -> dict:
+        body = {
+            "channel": "general",
+            "sender": "admin-agent",
+            "msg_type": "text",
+            "payload": "hi",
+        }
+        body.update(overrides)
+        return body
+
+    def test_whitespace_sender_rejected(self, admin_url: str) -> None:
+        resp = self._post(admin_url, self._body(sender="   "))
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["message"] == "Sender must be a non-empty string"
+
+    def test_non_string_payload_rejected(self, admin_url: str) -> None:
+        resp = self._post(admin_url, self._body(payload=123))
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["message"] == "Payload must be a non-empty string"
+
+    def test_valid_message_accepted(self, admin_url: str) -> None:
+        resp = self._post(admin_url, self._body())
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["success"] is True

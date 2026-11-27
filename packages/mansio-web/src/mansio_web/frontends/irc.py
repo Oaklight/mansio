@@ -96,6 +96,12 @@ class _IrcBridgeBot(irc.bot.SingleServerIRCBot):
         sender = event.source.nick
         text = event.arguments[0] if event.arguments else ""
 
+        # The wire contract rejects an empty payload, so publishing one would
+        # store a message that no SSE subscriber can parse.  Drop it here.
+        if not text.strip():
+            logger.debug("IRC→mansio: dropping empty PRIVMSG on %s", irc_channel)
+            return
+
         # Don't bridge our own messages
         if sender == connection.get_nickname():
             return

@@ -446,12 +446,16 @@ supertoken-only.
 
 ##### Input Validation
 
-The Frontend layer validates message payloads on publish:
+All HTTP publish entry points (`/v1/publish` and the admin `/api/messages`)
+parse the body through the same contract:
 - Empty or whitespace-only payloads are rejected (**400 Bad Request**)
 - Non-string payloads are rejected (**400 Bad Request**)
 - Empty or whitespace-only senders are rejected (**400 Bad Request**)
 - `parent_id` and `intent` must be strings or null (**400 Bad Request** otherwise)
 - Query `limit` parameters must be ≥ 1 (**400 Bad Request** otherwise)
+
+The IRC bridge applies the payload rule by dropping an empty or
+whitespace-only PRIVMSG instead of publishing it.
 
 Every validation failure uses one error body:
 `{"error": "Bad Request", "message": "<reason>"}`. This includes a JSON

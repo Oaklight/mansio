@@ -202,6 +202,27 @@ class TestIrcToMansio:
         assert bus.query("random") == []
         assert bus.query("tasks") == []
 
+    @pytest.mark.parametrize("text", ["", "   "])
+    def test_pubmsg_ignores_empty_payload(self, text: str) -> None:
+        """An empty PRIVMSG is not published: the wire contract rejects it."""
+        fe = IrcFrontend(channels=["tasks"])
+        bus = Bus(backend=MemoryBackend())
+        fe.attach(bus)
+
+        bot = _IrcBridgeBot(fe, [("localhost", 6667)], "mansio-bot")
+
+        event = MagicMock()
+        event.target = "#tasks"
+        event.source.nick = "alice"
+        event.arguments = [text]
+
+        connection = MagicMock()
+        connection.get_nickname.return_value = "mansio-bot"
+
+        bot.on_pubmsg(connection, event)
+
+        assert bus.query("tasks") == []
+
 
 # ── mansio → IRC Bridging Tests ──────────────────────────────────
 
