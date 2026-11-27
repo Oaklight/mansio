@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from mansio_client import MansioAPIError, MansioClient
 from mansio_client.transport import HttpTransport
-from mansio_client.types import ChannelMeta
+from mansio_core.types import ChannelMeta
 
 
 class _FakeResponse:

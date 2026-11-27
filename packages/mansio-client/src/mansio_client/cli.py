@@ -28,11 +28,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mansio-client",
         description="Mansio agent client",
-        epilog=(
-            "The mansio server package also ships 'mansio client', a minimal "
-            "send/poll/channels/dm CLI for smoke tests. Use this command for "
-            "the full set of operations."
-        ),
     )
     parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(

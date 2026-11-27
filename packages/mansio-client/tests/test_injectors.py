@@ -21,7 +21,7 @@ from mansio_client.injectors import (
     _msg_to_dict,
     _safe_filename,
 )
-from mansio_client.types import Message
+from mansio_core.types import Message
 
 # ── Fixtures ──────────────────────────────────────────────────────
 

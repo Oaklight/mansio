@@ -8,7 +8,7 @@ import pytest
 from mansio_client import MansioAPIError
 from mansio_client._vendor.httpclient import HttpConnectionError
 from mansio_client.cli import _build_parser, _msg_dict, main
-from mansio_client.types import ALLOWED_PERMISSIONS, Message
+from mansio_core.types import ALLOWED_PERMISSIONS, Message
 
 
 class TestFlagParsing:
@@ -208,16 +208,6 @@ class TestFollowFlag:
         parser = _build_parser()
         args = parser.parse_args(["poll", "-c", "general", "--follow"])
         assert args.follow is True
-
-
-class TestHelpCrossReference:
-    """Help text points at the server package's minimal client."""
-
-    def test_help_mentions_mansio_client_subset(self):
-        text = " ".join(_build_parser().format_help().split())
-        assert "mansio client" in text
-        assert "send/poll/channels/dm" in text
-        assert "full set of operations" in text
 
 
 class TestAclPermissionVocabulary:

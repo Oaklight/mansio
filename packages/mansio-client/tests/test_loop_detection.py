@@ -13,7 +13,7 @@ import mansio_client.loop as client_mod
 import pytest
 from mansio_client import LoopSuspected, MansioClient
 from mansio_client.client import _LoopGuard
-from mansio_client.types import Message
+from mansio_core.types import Message
 
 
 class _FakeTransport:

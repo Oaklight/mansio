@@ -1,8 +1,7 @@
-"""Command-line interface for mansio server and client.
+"""Command-line interface for the mansio server.
 
 Subcommands:
     mansio serve   — start Bus + AdminServer (+ optional HttpFrontend)
-    mansio client  — send/poll/list/dm via a remote HttpFrontend
 """
 
 from __future__ import annotations
@@ -212,76 +211,6 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use SSL/TLS for IRC connection",
     )
-
-    # ── client ────────────────────────────────────────────────────
-    client = sub.add_parser(
-        "client",
-        help="Interact with a remote mansio server",
-        description=(
-            "Minimal client for smoke-testing a server. The separate "
-            "'mansio-client' command is the full SDK CLI "
-            "(read/check/note/memory/channel/ACL)."
-        ),
-        epilog=(
-            "Both CLIs accept --server/--user-id/--token and fall back to "
-            "MANSIO_URL/MANSIO_USER_ID/MANSIO_TOKEN."
-        ),
-    )
-    client_sub = client.add_subparsers(dest="action")
-
-    # Shared arguments for all client actions
-    _client_common = argparse.ArgumentParser(add_help=False)
-    _client_common.add_argument(
-        "-s",
-        "--server",
-        default=os.environ.get("MANSIO_URL"),
-        help="Server URL (or MANSIO_URL env)",
-    )
-    _client_common.add_argument(
-        "-u",
-        "--user-id",
-        "--user",
-        dest="user",
-        default=os.environ.get("MANSIO_USER_ID"),
-        help="User ID (or MANSIO_USER_ID env); --user is deprecated",
-    )
-    _client_common.add_argument(
-        "--token",
-        "--api-token",
-        dest="api_token",
-        default=os.environ.get("MANSIO_TOKEN"),
-        help="Bearer token (or MANSIO_TOKEN env); --api-token is deprecated",
-    )
-
-    # client send
-    send = client_sub.add_parser("send", parents=[_client_common], help="Send a message")
-    send.add_argument("-c", "--channel", required=True, help="Target channel")
-    send.add_argument("-t", "--type", default="chat", dest="msg_type", help="Message type")
-    send.add_argument("message", help="Message content")
-
-    # client poll
-    poll = client_sub.add_parser("poll", parents=[_client_common], help="Poll messages")
-    poll.add_argument("-c", "--channel", required=True, help="Channel to poll")
-    poll.add_argument(
-        "-n",
-        "--limit",
-        type=int,
-        default=10,
-        help="Max messages to return (default: 10)",
-    )
-    poll.add_argument(
-        "--follow",
-        action="store_true",
-        help="Keep listening for new messages via SSE",
-    )
-
-    # client channels
-    client_sub.add_parser("channels", parents=[_client_common], help="List channels")
-
-    # client dm
-    dm = client_sub.add_parser("dm", parents=[_client_common], help="Send a direct message")
-    dm.add_argument("--to", required=True, dest="to_user", help="Recipient user ID")
-    dm.add_argument("message", help="Message content")
 
     return parser
 
@@ -735,20 +664,7 @@ def main(argv: list[str] | None = None) -> None:
         argv: Argument list (defaults to sys.argv[1:]).
     """
     args = parse_args(argv)
-
-    if args.command == "serve":
-        _cmd_serve(args)
-    elif args.command == "client":
-        print(
-            "error: `mansio client` is deprecated and no longer sends requests. "
-            "Install the mansio-client package and use "
-            "`mansio-client send|poll|channels|dm` instead.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    else:
-        _build_parser().print_help()
-        sys.exit(1)
+    _cmd_serve(args)
 
 
 def _fail(message: str) -> NoReturn:

@@ -6,7 +6,7 @@ import mansio_client.coalesce as client_mod
 import pytest
 from mansio_client import MansioClient
 from mansio_client.client import _Coalescer
-from mansio_client.types import Message
+from mansio_core.types import Message
 
 
 def _msg(message_id: str) -> Message:

@@ -20,7 +20,7 @@ from mansio_client.mcp import (
     main,
     serve,
 )
-from mansio_client.types import (
+from mansio_core.types import (
     ALLOWED_PERMISSIONS,
     ACLEntry,
     ChannelMeta,
