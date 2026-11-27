@@ -4,11 +4,13 @@ Adapters expose a Bus over different protocols (HTTP, WebSocket, IRC, etc.).
 Multiple adapters can attach to the same Bus simultaneously.
 """
 
+from typing import Any
+
 from mansio_web.adapters.base import ServerAdapter
 from mansio_web.adapters.http import HttpAdapter
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """Lazy import for optional adapters (avoids hard dependency on extras)."""
     if name == "IrcAdapter":
         from mansio_web.adapters.irc import IrcAdapter
