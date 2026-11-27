@@ -60,6 +60,13 @@ from mansio_core.contracts.parsers import (
     parse_queue_status,
     parse_registry_lookup,
 )
+from mansio_core.contracts.sse import (
+    StreamEvent,
+    message_from_dict,
+    message_to_dict,
+    parse_stream_event,
+    stream_event_to_json,
+)
 
 __all__ = [
     "ACLAddRequest",
@@ -102,6 +109,9 @@ __all__ = [
     "QueueStatusResult",
     "RegistryLookupRequest",
     "RegistryLookupResult",
+    "StreamEvent",
+    "message_from_dict",
+    "message_to_dict",
     "parse_acl_add",
     "parse_acl_set",
     "parse_admin_cleanup",
@@ -116,4 +126,6 @@ __all__ = [
     "parse_queue_claim",
     "parse_queue_status",
     "parse_registry_lookup",
+    "parse_stream_event",
+    "stream_event_to_json",
 ]
