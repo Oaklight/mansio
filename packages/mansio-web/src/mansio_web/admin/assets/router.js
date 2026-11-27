@@ -55,9 +55,42 @@ export function navigate(name, options = {}, { replace = false } = {}) {
     }
 }
 
+/**
+ * Resolve a hash to the route to render.
+ *
+ * An unknown screen name or an id that is not a valid percent sequence
+ * redirects to DEFAULT_ROUTE.  DEFAULT_ROUTE is in KNOWN, so the fallback
+ * always resolves to itself and the redirect cannot loop.
+ *
+ * @param {string} [hash]
+ * @returns {{route: Route, redirect: boolean}}
+ */
+export function resolveHash(hash = window.location.hash) {
+    const raw = hash.replace(/^#\/?/, '');
+    const [pathPart = ''] = raw.split('?');
+    const segments = pathPart.split('/').filter(Boolean);
+    const unknownScreen = segments.length > 0 && !KNOWN.has(segments[0]);
+    let malformedId = false;
+    if (segments[1]) {
+        try {
+            decodeURIComponent(segments[1]);
+        } catch {
+            malformedId = true;
+        }
+    }
+    if (!unknownScreen && !malformedId) {
+        return { route: parseHash(hash), redirect: false };
+    }
+    return { route: parseHash(href(DEFAULT_ROUTE)), redirect: true };
+}
+
 /** Subscribe to route changes; renders the current route once. */
 export function startRouter(onRoute) {
-    const run = () => onRoute(parseHash());
+    const run = () => {
+        const { route, redirect } = resolveHash();
+        if (redirect) window.history.replaceState(null, '', href(DEFAULT_ROUTE));
+        onRoute(route);
+    };
     window.addEventListener('hashchange', run);
     run();
 }

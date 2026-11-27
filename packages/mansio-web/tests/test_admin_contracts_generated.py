@@ -14,6 +14,7 @@ GENERATOR = REPO / "scripts" / "gen_admin_contracts.py"
 JS_TESTS = [
     Path(__file__).resolve().parent / "js" / "contracts.test.js",
     Path(__file__).resolve().parent / "js" / "router.test.js",
+    Path(__file__).resolve().parent / "js" / "ui.test.js",
 ]
 
 

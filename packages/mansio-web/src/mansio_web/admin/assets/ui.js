@@ -77,6 +77,18 @@ export function icon(name, size = 16) {
 }
 
 /**
+ * Mark the nav link for *name* as the only active one.
+ * Does nothing when the nav has not been rendered yet.
+ * @param {string|undefined|null} name
+ * @param {ParentNode} [root]
+ */
+export function setActiveNav(name, root = document) {
+    for (const link of root.querySelectorAll('.nav-link')) {
+        link.classList.toggle('active', link.dataset.nav === name);
+    }
+}
+
+/**
  * Create an element.
  * @param {string} tag
  * @param {Object} [props]
