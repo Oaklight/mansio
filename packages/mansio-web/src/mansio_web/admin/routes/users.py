@@ -9,7 +9,7 @@ from mansio_core.contracts.admin import parse_user_create, parse_user_token_crea
 
 from mansio_web._vendor.httpserver import App
 
-from . import RouteContext
+from . import RouteContext, json_body
 
 
 def register(app: App, ctx: RouteContext) -> None:
@@ -34,7 +34,7 @@ def _register_user_routes(app: App, ctx: RouteContext) -> None:
                 "message": "Token store not configured",
             }, 503
         try:
-            payload = parse_user_create(request.json() if request.body else {})
+            payload = parse_user_create(json_body(request) if request.body else {})
         except ContractError as err:
             return err.as_error(), 400
         if token_store.user_exists(payload.user_id):
@@ -81,7 +81,7 @@ def _register_user_token_routes(app: App, ctx: RouteContext) -> None:
         if not token_store.user_exists(user_id):
             return {"error": "Not Found", "message": f"User '{user_id}' not found"}, 404
         try:
-            label = parse_user_token_create(request.json() if request.body else {})
+            label = parse_user_token_create(json_body(request) if request.body else {})
         except ContractError as err:
             return err.as_error(), 400
         entry = token_store.create_token(user_id=user_id, label=label)

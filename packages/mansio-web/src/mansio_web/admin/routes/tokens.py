@@ -9,7 +9,7 @@ from mansio_core.contracts.admin import parse_token_create
 
 from mansio_web._vendor.httpserver import App
 
-from . import RouteContext
+from . import RouteContext, json_body
 
 
 def register(app: App, ctx: RouteContext) -> None:
@@ -29,7 +29,7 @@ def register(app: App, ctx: RouteContext) -> None:
                 "message": "Token store not configured",
             }, 503
         try:
-            payload = parse_token_create(request.json() if request.body else {})
+            payload = parse_token_create(json_body(request) if request.body else {})
         except ContractError as err:
             return err.as_error(), 400
         if payload.supertoken:

@@ -253,6 +253,19 @@ class TestAdminAPI:
         admin.stop()
         bus.close()
 
+    @pytest.fixture
+    def admin_api(self, tmp_path):
+        from mansio_core.token_store import TokenStore
+        from mansio_web.admin import AdminServer
+
+        token_store = TokenStore(str(tmp_path / "admin.db"))
+        bus = SQLiteBus(":memory:")
+        admin = AdminServer(bus, port=0, token_store=token_store)
+        info = admin.start()
+        yield info.url, token_store, bus
+        admin.stop()
+        bus.close()
+
     def _get(self, url, path):
         req = urllib.request.Request(url + path)
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -361,6 +374,7 @@ class TestAdminAPI:
                 "payload": "hello from admin",
             },
         )
+        assert set(result) == {"success", "message_id"}
         assert result["success"] is True
         assert result["message_id"]
 
@@ -376,6 +390,36 @@ class TestAdminAPI:
             pytest.fail("Should have raised")
         except urllib.error.HTTPError as e:
             assert e.code == 400
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/messages",
+            "/api/prefixes",
+            "/api/users",
+            "/api/users/alice/tokens",
+            "/api/tokens",
+        ],
+    )
+    @pytest.mark.parametrize(
+        "payload",
+        [b"not json", b"\xff\xfe"],
+        ids=["malformed-json", "invalid-utf8"],
+    )
+    def test_undecodable_json_is_400(self, admin_api, path, payload):
+        """Every admin body route maps a decode failure to the shared 400 envelope."""
+        url, token_store, _ = admin_api
+        token_store.create_token(user_id="alice", label="seed")
+        req = urllib.request.Request(
+            url + path,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            urllib.request.urlopen(req, timeout=5)
+        assert excinfo.value.code == 400
+        body = json.loads(excinfo.value.read())
+        assert body == {"error": "Bad Request", "message": "Request body must be valid JSON"}
 
     def test_get_subscriptions_empty(self, server_url):
         url, _ = server_url

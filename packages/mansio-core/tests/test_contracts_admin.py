@@ -13,6 +13,7 @@ from mansio_core.contracts.admin import (
     AdminPrefixCreatedResult,
     AdminPrefixDeletedResult,
     AdminPrefixesResult,
+    AdminPublishResult,
     AdminStatsResult,
     AdminSubscriptionsResult,
     AdminSystemResult,
@@ -173,6 +174,12 @@ class TestAdminResponseDocuments:
         assert AdminMessagesResult(count=1, messages=[{"id": "m"}]).to_dict() == {
             "count": 1,
             "messages": [{"id": "m"}],
+        }
+
+    def test_publish(self) -> None:
+        assert AdminPublishResult(message_id="m-1").to_dict() == {
+            "success": True,
+            "message_id": "m-1",
         }
 
     def test_subscriptions(self) -> None:
