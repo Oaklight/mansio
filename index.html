@@ -305,9 +305,10 @@ flowchart TB
     </table>
   </div>
   <div class="callout">
-    目标列里两项目前<strong>不存在</strong>，不再画成已定结构：<code>ports</code> 层（只有 <code>Transport</code> 在 core；
-    <code>Frontend</code> 协议在 <code>mansio_web/frontends/base.py</code>，只有 web 自己用）与
-    <code>*.schema.json</code>（没有任何 schema 文件）。是否要这两项，待决定；决定前它们不计入达成度。
+    <code>ports</code> 层目前<strong>不存在</strong>，不再画成已定结构：只有 <code>Transport</code> 在 core；
+    <code>Frontend</code> 协议在 <code>mansio_web/frontends/base.py</code>，只有 web 自己用（是否迁 core 待定）。
+    <strong>JSON Schema 已决定不手写</strong>：契约以 DTO 为源，需要机器可读 schema 时由 DTO 自动生成——
+    当前唯一的生成物是 admin 的 <code>contracts.js</code>（<code>gen_admin_contracts.py --check</code>）。
   </div>
   <div class="panel">
     <table>
@@ -435,7 +436,7 @@ flowchart LR
   B --> D["领域对象&lt;br/&gt;Message · ChannelMeta · ACLEntry"]
   D --> Z["contracts.serialize&lt;br/&gt;Response · StreamEvent"]
   Z --> R
-  K --- S["*.schema.json&lt;br/&gt;供文档与前端生成类型"]
+  K -.->|"生成"| S["生成物：admin contracts.js&lt;br/&gt;未来 schema 同源生成（不手写）"]
   class K,Z,D good
   classDef good fill:#e8f5e9,stroke:#1a8f3c,color:#14532d
 </pre>
