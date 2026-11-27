@@ -318,6 +318,23 @@ class TestAdminAPI:
         assert data["count"] == 2
         assert len(data["messages"]) == 2
 
+    def test_get_messages_keeps_seven_key_projection(self, server_url):
+        """Admin messages never gained parent_id/thread_id/intent."""
+        url, bus = server_url
+        parent_id = bus.publish("chat", "alice", "text", "parent")
+        child_id = bus.publish("chat", "alice", "text", "child", parent_id=parent_id)
+        data = self._get(url, "/api/messages?channel=chat")
+        child = next(m for m in data["messages"] if m["id"] == child_id)
+        assert list(child) == [
+            "id",
+            "channel",
+            "sender",
+            "msg_type",
+            "payload",
+            "timestamp",
+            "metadata",
+        ]
+
     def test_get_messages_requires_channel(self, server_url):
         url, _ = server_url
         try:

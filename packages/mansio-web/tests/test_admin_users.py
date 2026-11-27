@@ -83,7 +83,7 @@ class TestListUsers:
         http = HttpClient()
         resp = _get(http, url, "/api/users")
         assert resp.status_code == 200
-        assert resp.json()["users"] == []
+        assert resp.json() == {"users": [], "enabled": True}
         http.close()
 
     def test_lists_registered_users(self, admin_api):
@@ -97,6 +97,25 @@ class TestListUsers:
         assert "alice" in ids
         assert "bob-agent" in ids
         http.close()
+
+
+class TestListUsersNoAuth:
+    def test_reports_enabled_false(self):
+        """--no-auth keeps ``enabled`` in the body (master sent false)."""
+        bus = Bus(backend=MemoryBackend())
+        admin = AdminServer(bus, port=0)
+        info = admin.start()
+        try:
+            http = HttpClient()
+            resp = _get(http, info.url, "/api/users")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body == {"users": [], "enabled": False}
+            assert list(body) == ["users", "enabled"]
+            http.close()
+        finally:
+            admin.stop()
+            bus.close()
 
 
 class TestGetUser:
