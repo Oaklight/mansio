@@ -9,7 +9,7 @@ changed, and a callback exception never reaches the send path.
 
 from __future__ import annotations
 
-import mansio_client.client as client_mod
+import mansio_client.loop as client_mod
 import pytest
 from mansio_client import LoopSuspected, MansioClient
 from mansio_client.client import _LoopGuard

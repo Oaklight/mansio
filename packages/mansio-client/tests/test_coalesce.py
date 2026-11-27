@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import mansio_client.client as client_mod
+import mansio_client.coalesce as client_mod
 import pytest
 from mansio_client import MansioClient
 from mansio_client.client import _Coalescer
