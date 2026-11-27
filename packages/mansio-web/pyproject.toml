@@ -48,6 +48,7 @@ dev = [
     "twine>=6.1.0",
 ]
 test = [
+    "hypothesis>=6.100.0",
     "pytest>=8.0.0",
     "pytest-cov>=6.0.0",
 ]
