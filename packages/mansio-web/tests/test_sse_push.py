@@ -16,6 +16,7 @@ import time
 
 import pytest
 from mansio_core import Bus, MemoryBackend
+from mansio_core.contracts import parse_stream_event
 from mansio_web import MansioServer
 from mansio_web._vendor.httpclient import Client as HttpClient
 from mansio_web._vendor.sse import SSEClient
@@ -463,3 +464,46 @@ class TestSseErrors:
         resp = http.get(f"{server_url}/v1/subscribe?channels=")
         assert resp.status_code == 400
         http.close()
+
+
+class TestStreamEventContract:
+    """The server's ``data:`` line is a valid mansio_core StreamEvent."""
+
+    def test_live_event_matches_contract(self, server_with_bus: tuple) -> None:
+        url, bus = server_with_bus
+        received: list = []
+        done = threading.Event()
+
+        def collect() -> None:
+            sse_url = f"{url}/v1/subscribe?channel=contract-test"
+            client = SSEClient(sse_url, timeout=10, max_retries=0)
+            try:
+                for event in client:
+                    received.append(event)
+                    done.set()
+                    break
+            except Exception:
+                pass
+            finally:
+                client.close()
+
+        thread = threading.Thread(target=collect, daemon=True)
+        thread.start()
+        time.sleep(0.5)
+
+        msg_id = bus.publish(
+            "contract-test",
+            "agent-x",
+            "chat",
+            "contract!",
+            metadata={"k": "v"},
+            intent="FYI_ONLY",
+        )
+
+        assert done.wait(timeout=5), "SSE event not received"
+        stream_event = parse_stream_event(received[0].data)
+        assert stream_event.channel == "contract-test"
+        assert stream_event.message.id == msg_id
+        assert stream_event.message.payload == "contract!"
+        assert stream_event.message.metadata == {"k": "v"}
+        assert stream_event.message.intent == "FYI_ONLY"

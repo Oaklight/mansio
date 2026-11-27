@@ -581,7 +581,7 @@ class Frontend(Protocol):
 
 主要的 Frontend 实现，也是 Agent 唯一连接的入口，提供：
 - **REST API**（`/v1/` 前缀）— 发布、查询、列出通道、通道元数据与 ACL、删除消息与通道、工作队列的 claim/ack/status、在线状态、注册表查询、管理端清理与压缩
-- **SSE（Server-Sent Events）**— 通过 `/v1/subscribe` 与 `/v1/channels/<channel>/subscribe` 实现实时消息流。可选的 `exclude_own=true` 查询参数会丢弃当前认证调用方自己发送的消息，对实时投递和 Last-Event-ID 重放同样生效；supertoken 与 no-auth 连接没有绑定的用户标识，该参数对它们无效
+- **SSE（Server-Sent Events）**— 通过 `/v1/subscribe` 与 `/v1/channels/<channel>/subscribe` 实现实时消息流。每条 `data:` 行是一个 `StreamEvent`（`{"channel": ..., "message": ...}`），由 `mansio_core.contracts` 负责解析与序列化。可选的 `exclude_own=true` 查询参数会丢弃当前认证调用方自己发送的消息，对实时投递和 Last-Event-ID 重放同样生效；supertoken 与 no-auth 连接没有绑定的用户标识，该参数对它们无效
 - **认证** — 基于 `TokenStore` 的 bearer token 校验，以及 §3.5.3 描述的通道名、payload 与访问控制检查
 - `/health` — 无需认证的存活探针
 

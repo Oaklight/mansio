@@ -7,7 +7,6 @@ Uses vendored zerodep modules:
 
 from __future__ import annotations
 
-import json
 import logging
 import socket
 import threading
@@ -15,6 +14,7 @@ import urllib.parse
 from collections.abc import Callable
 from typing import Literal, NamedTuple, overload
 
+from mansio_core.contracts import ContractError, parse_stream_event
 from mansio_core.types import ACLEntry, ChannelMeta, ClaimResult, Message, UserPresence
 
 from mansio_web._vendor.httpclient import Client as HttpClient
@@ -654,16 +654,12 @@ class HttpTransport:
     def _dispatch_sse_event(self, data: str) -> None:
         """Parse SSE event data and dispatch to callbacks."""
         try:
-            event = json.loads(data)
-        except json.JSONDecodeError:
+            event = parse_stream_event(data)
+        except ContractError:
             return
 
-        channel = event.get("channel")
-        msg_data = event.get("message")
-        if not channel or not msg_data:
-            return
-
-        msg = self._dict_to_msg(msg_data)
+        channel = event.channel
+        msg = event.message
 
         with self._sse_lock:
             subs = list((self._sse_callbacks.get(channel) or {}).values())
