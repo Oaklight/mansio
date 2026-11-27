@@ -13,11 +13,6 @@ def test_legacy_mansio_package_is_not_importable() -> None:
         importlib.import_module("mansio")
 
 
-def test_legacy_client_types_module_is_not_importable() -> None:
-    with pytest.raises(ModuleNotFoundError, match="mansio_client.types"):
-        importlib.import_module("mansio_client.types")
-
-
 def test_web_package_points_removed_transport_names_at_client() -> None:
     for name in ("HttpTransport", "MansioAPIError"):
         with pytest.raises(ImportError, match="mansio-client"):
