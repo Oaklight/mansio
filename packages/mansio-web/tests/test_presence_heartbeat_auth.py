@@ -90,3 +90,49 @@ class TestNoAuthModeMayActForAnyUser:
         status, body = _heartbeat(server_url, "", "agent-y")
 
         assert status == 200, body
+
+
+def _post_heartbeat_body(url: str, payload: bytes | None):
+    """POST raw bytes to the heartbeat route and return (status, body)."""
+    req = urllib.request.Request(
+        f"{url}/v1/presence/heartbeat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read() or b"{}")
+
+
+class TestHeartbeatValidationEnvelope:
+    """Every heartbeat validation failure uses the uniform error envelope."""
+
+    def test_missing_user_id(self, server_url):
+        status, body = _post_heartbeat_body(server_url, b"{}")
+
+        assert status == 400
+        assert body == {"error": "Bad Request", "message": "user_id required"}
+
+    def test_non_string_user_id(self, server_url):
+        status, body = _post_heartbeat_body(server_url, b'{"user_id": 5}')
+
+        assert status == 400
+        assert body == {"error": "Bad Request", "message": "user_id required"}
+
+    def test_missing_body(self, server_url):
+        status, body = _post_heartbeat_body(server_url, b"")
+
+        assert status == 400
+        assert body == {"error": "Bad Request", "message": "JSON body required"}
+
+    def test_invalid_metadata(self, server_url):
+        status, body = _post_heartbeat_body(server_url, b'{"user_id": "agent-y", "metadata": []}')
+
+        assert status == 400
+        assert body == {
+            "error": "Bad Request",
+            "message": "metadata must be a JSON object or null",
+        }
