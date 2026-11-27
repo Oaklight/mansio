@@ -719,7 +719,8 @@ separate from the agent-facing HTTP frontend:
 
 ```
 admin/
-├── server.py      # AdminServer — routes, lifecycle, REST API
+├── server.py      # AdminServer — lifecycle, middleware, route composition
+├── routes/        # one module per URL group; register(app, RouteContext)
 ├── auth.py        # Password login and session cookies
 ├── view.py        # AdminView — admin response documents
 ├── static.py      # Admin HTML loader and asset whitelist

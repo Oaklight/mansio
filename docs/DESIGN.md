@@ -630,7 +630,8 @@ client = MansioClient("http://mansio:8742", "agent-1", token="mst-xxx")
 
 ```
 admin/
-├── server.py      # AdminServer —— 路由、生命周期、REST API
+├── server.py      # AdminServer —— 生命周期、中间件、路由组装
+├── routes/        # 每个 URL 组一个模块；register(app, RouteContext)
 ├── auth.py        # 密码登录与会话 cookie
 ├── view.py        # AdminView —— 管理端响应文档
 ├── static.py      # Admin HTML 加载与资源白名单
