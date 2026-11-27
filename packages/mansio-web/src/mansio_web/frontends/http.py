@@ -693,8 +693,11 @@ class HttpFrontend:
             }
 
         @self._app.get("/v1/channels")
-        async def channels(request: Request) -> dict:
-            want_detail = parse_channels(request.query_params).detail
+        async def channels(request: Request) -> dict | tuple:
+            try:
+                want_detail = parse_channels(request.query_params).detail
+            except ContractError as err:
+                return _bad_request(err)
 
             auth_result = request.state.auth_result
 
