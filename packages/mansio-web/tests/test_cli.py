@@ -27,7 +27,6 @@ from mansio_web.cli import (
     _redact_token,
     _resolve_admin_auth,
     _resolve_token_db_path,
-    main,
     parse_args,
 )
 from mansio_web.frontends import HttpFrontend
@@ -146,184 +145,6 @@ class TestParseArgsServe:
         assert args.irc_ssl is False
 
 
-class TestParseArgsClient:
-    """Tests for client subcommand argument parsing."""
-
-    def test_client_send(self):
-        args = parse_args(
-            [
-                "client",
-                "send",
-                "-s",
-                "http://localhost:8742",
-                "-u",
-                "my-agent",
-                "-c",
-                "tasks",
-                "hello world",
-            ]
-        )
-        assert args.command == "client"
-        assert args.action == "send"
-        assert args.server == "http://localhost:8742"
-        assert args.user == "my-agent"
-        assert args.channel == "tasks"
-        assert args.msg_type == "chat"
-        assert args.message == "hello world"
-
-    def test_client_send_custom_type(self):
-        args = parse_args(
-            [
-                "client",
-                "send",
-                "-s",
-                "http://x:8742",
-                "-u",
-                "aaa",
-                "-c",
-                "ch",
-                "-t",
-                "notice",
-                "msg",
-            ]
-        )
-        assert args.msg_type == "notice"
-
-    def test_client_poll(self):
-        args = parse_args(
-            [
-                "client",
-                "poll",
-                "-s",
-                "http://localhost:8742",
-                "-u",
-                "my-agent",
-                "-c",
-                "tasks",
-            ]
-        )
-        assert args.action == "poll"
-        assert args.channel == "tasks"
-        assert args.limit == 10
-        assert args.follow is False
-
-    def test_client_poll_follow(self):
-        args = parse_args(
-            [
-                "client",
-                "poll",
-                "-s",
-                "http://x:8742",
-                "-u",
-                "aaa",
-                "-c",
-                "ch",
-                "--follow",
-            ]
-        )
-        assert args.follow is True
-
-    def test_client_poll_limit(self):
-        args = parse_args(
-            [
-                "client",
-                "poll",
-                "-s",
-                "http://x:8742",
-                "-u",
-                "aaa",
-                "-c",
-                "ch",
-                "-n",
-                "50",
-            ]
-        )
-        assert args.limit == 50
-
-    def test_client_channels(self):
-        args = parse_args(
-            [
-                "client",
-                "channels",
-                "-s",
-                "http://localhost:8742",
-                "-u",
-                "my-agent",
-            ]
-        )
-        assert args.action == "channels"
-
-    def test_client_dm(self):
-        args = parse_args(
-            [
-                "client",
-                "dm",
-                "-s",
-                "http://localhost:8742",
-                "-u",
-                "alice",
-                "--to",
-                "bob",
-                "hey bob!",
-            ]
-        )
-        assert args.action == "dm"
-        assert args.to_user == "bob"
-        assert args.message == "hey bob!"
-
-    def test_client_user_id_alias(self):
-        args = parse_args(["client", "channels", "-s", "http://x:8742", "--user-id", "alice"])
-        assert args.user == "alice"
-
-    def test_client_legacy_user_and_api_token(self):
-        args = parse_args(
-            [
-                "client",
-                "channels",
-                "-s",
-                "http://x:8742",
-                "--user",
-                "alice",
-                "--api-token",
-                "mst-legacy",
-            ]
-        )
-        assert args.user == "alice"
-        assert args.api_token == "mst-legacy"
-
-    def test_client_token_alias(self):
-        args = parse_args(
-            [
-                "client",
-                "channels",
-                "-s",
-                "http://x:8742",
-                "-u",
-                "alice",
-                "--token",
-                "mst-1",
-            ]
-        )
-        assert args.api_token == "mst-1"
-
-    def test_client_env_fallbacks(self, monkeypatch):
-        monkeypatch.setenv("MANSIO_URL", "http://env:8742")
-        monkeypatch.setenv("MANSIO_USER_ID", "env-agent")
-        monkeypatch.setenv("MANSIO_TOKEN", "mst-env")
-        args = parse_args(["client", "channels"])
-        assert args.server == "http://env:8742"
-        assert args.user == "env-agent"
-        assert args.api_token == "mst-env"
-
-    def test_client_command_exits_with_deprecation(self, capsys):
-        with pytest.raises(SystemExit) as exc:
-            main(["client", "send", "-u", "aaa", "-c", "ch", "msg"])
-        assert exc.value.code == 2
-        err = capsys.readouterr().err
-        assert "`mansio client` is deprecated" in err
-        assert "mansio-client send|poll|channels|dm" in err
-
-
 # ── Helpers ───────────────────────────────────────────────────────
 
 
@@ -399,7 +220,6 @@ class TestCliSubprocess:
         )
         assert result.returncode == 0
         assert "serve" in result.stdout
-        assert "client" in result.stdout
 
     def test_serve_help(self):
         result = subprocess.run(
@@ -413,23 +233,6 @@ class TestCliSubprocess:
         assert "--nats" in result.stdout
         assert "--host" in result.stdout
         assert "--admin-password" in result.stdout
-
-    def test_client_help(self):
-        result = subprocess.run(
-            [sys.executable, "-m", "mansio_web.cli", "client", "--help"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        assert "send" in result.stdout
-        assert "poll" in result.stdout
-        assert "channels" in result.stdout
-        assert "dm" in result.stdout
-        # Cross-reference the full SDK CLI from the client package.
-        text = " ".join(result.stdout.split())
-        assert "mansio-client" in text
-        assert "full SDK CLI" in text
-        assert "MANSIO_URL" in text
 
 
 # ── Integration Tests ─────────────────────────────────────────────
@@ -452,50 +255,6 @@ def http_server_url():
     yield url
 
     server.shutdown()
-
-
-class TestClientDeprecated:
-    """``mansio client`` is a stub that points at the mansio-client package."""
-
-    def test_send_exits_2_with_migration_hint(self, capsys) -> None:
-        with pytest.raises(SystemExit) as exc:
-            main(
-                [
-                    "client",
-                    "send",
-                    "-s",
-                    "http://127.0.0.1:1",
-                    "-u",
-                    "test-agent",
-                    "-c",
-                    "ch",
-                    "msg",
-                ]
-            )
-        assert exc.value.code == 2
-        err = capsys.readouterr().err
-        assert "`mansio client` is deprecated" in err
-        assert "mansio-client send|poll|channels|dm" in err
-
-    def test_subprocess_reports_the_migration(self) -> None:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "mansio_web.cli",
-                "client",
-                "channels",
-                "-s",
-                "http://127.0.0.1:1",
-                "-u",
-                "test-agent",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 2
-        assert "`mansio client` is deprecated" in result.stderr
-        assert "mansio-client send|poll|channels|dm" in result.stderr
 
 
 class TestMansioClientCliFollow:

@@ -11,7 +11,7 @@ import json
 
 from mansio_client import MansioClient
 from mansio_client.transport import HttpTransport, _Subscription
-from mansio_client.types import Message
+from mansio_core.types import Message
 
 
 def _msg(message_id: str, sender: str, payload: str) -> Message:
