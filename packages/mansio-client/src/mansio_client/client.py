@@ -1,7 +1,7 @@
 """Lightweight MansioClient for remote agent access.
 
 Connects to a mansio server via HTTP/HTTPS. No server-side dependencies
-— uses only HttpTransport for communication.
+— uses the transport factory for communication.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from mansio_client.loop import (
     _LoopGuard,
 )
 from mansio_client.semantic import SemanticMixin
-from mansio_client.transport import HttpTransport
+from mansio_client.transport import create_transport
 
 _log = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ class MansioClient(CursorMixin, LoopMixin, CoalesceMixin, SemanticMixin):
         self._validate_user_id(user_id)
         self._user_id = user_id
         self._display_name = display_name or user_id
-        self._transport: Transport = HttpTransport(url, user_id=user_id, token=token)
+        self._transport: Transport = create_transport(url, user_id=user_id, token=token)
         self._cursors: dict[str, str] = {}
         self._persisted: dict[str, str] = {}
         self._coalescers: dict[str, _Coalescer] = {}
