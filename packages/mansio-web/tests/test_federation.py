@@ -27,21 +27,21 @@ from mansio_client import MansioClient
 from mansio_client.federation import FederationLink
 from mansio_core import Bus, MemoryBackend
 from mansio_web import MansioServer
-from mansio_web.frontends import HttpFrontend
+from mansio_web.adapters import HttpAdapter
 
 
 def _start_server():
     """Start a MansioServer on a random port, return (url, server)."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
+    adapter = HttpAdapter(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
 
-    host, port = frontend.address
+    host, port = adapter.address
     url = f"http://{host}:{port}"
     return url, server
 
@@ -388,9 +388,9 @@ def _free_port() -> int:
 def _start_server_on(port: int, bus: Bus | None = None):
     """Start a MansioServer on *port*, reusing *bus* if given."""
     bus = bus if bus is not None else Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=port, allow_unauthenticated=True)
+    adapter = HttpAdapter(host="127.0.0.1", port=port, allow_unauthenticated=True)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)

@@ -1,7 +1,7 @@
-"""Tests for IRC frontend — IrcFrontend.
+"""Tests for IRC adapter — IrcAdapter.
 
 Verifies:
-- Frontend protocol compliance (attach, serve_forever, shutdown)
+- Adapter protocol compliance (attach, serve_forever, shutdown)
 - Channel mapping (auto and explicit)
 - Message bridging: IRC→mansio and mansio→IRC
 - Echo prevention (IRC-originated messages not echoed back)
@@ -18,7 +18,7 @@ from mansio_core import Bus, MemoryBackend
 # Guard: skip all tests if irc package is not installed
 irc_bot = pytest.importorskip("irc.bot", reason="irc package not installed")
 
-from mansio_web.frontends.irc import IrcFrontend, _IrcBridgeBot  # noqa: E402
+from mansio_web.adapters.irc import IrcAdapter, _IrcBridgeBot  # noqa: E402
 
 # ── Channel Mapping Tests ────────────────────────────────────────
 
@@ -28,83 +28,83 @@ class TestChannelMapping:
 
     def test_auto_mapping_adds_hash(self) -> None:
         """Channels auto-map to #<name> on IRC."""
-        fe = IrcFrontend(channels=["tasks", "sync"])
-        assert fe._mansio_to_irc == {"tasks": "#tasks", "sync": "#sync"}
-        assert fe._irc_to_mansio == {"#tasks": "tasks", "#sync": "sync"}
+        adapter = IrcAdapter(channels=["tasks", "sync"])
+        assert adapter._mansio_to_irc == {"tasks": "#tasks", "sync": "#sync"}
+        assert adapter._irc_to_mansio == {"#tasks": "tasks", "#sync": "sync"}
 
     def test_explicit_mapping_overrides_auto(self) -> None:
         """channel_map overrides auto-mapping for specified channels."""
-        fe = IrcFrontend(
+        adapter = IrcAdapter(
             channels=["tasks", "sync"],
             channel_map={"tasks": "#project-tasks"},
         )
-        assert fe._mansio_to_irc["tasks"] == "#project-tasks"
-        assert fe._mansio_to_irc["sync"] == "#sync"
-        assert fe._irc_to_mansio["#project-tasks"] == "tasks"
+        assert adapter._mansio_to_irc["tasks"] == "#project-tasks"
+        assert adapter._mansio_to_irc["sync"] == "#sync"
+        assert adapter._irc_to_mansio["#project-tasks"] == "tasks"
 
     def test_channel_map_only(self) -> None:
         """channel_map entries not in channels list are still mapped."""
-        fe = IrcFrontend(channel_map={"extra": "#extra-channel"})
-        assert fe._mansio_to_irc["extra"] == "#extra-channel"
-        assert fe._irc_to_mansio["#extra-channel"] == "extra"
+        adapter = IrcAdapter(channel_map={"extra": "#extra-channel"})
+        assert adapter._mansio_to_irc["extra"] == "#extra-channel"
+        assert adapter._irc_to_mansio["#extra-channel"] == "extra"
 
     def test_empty_channels(self) -> None:
         """No channels configured — empty mappings."""
-        fe = IrcFrontend()
-        assert fe._mansio_to_irc == {}
-        assert fe._irc_to_mansio == {}
+        adapter = IrcAdapter()
+        assert adapter._mansio_to_irc == {}
+        assert adapter._irc_to_mansio == {}
 
     def test_combined_channels_and_map(self) -> None:
         """Channels + channel_map with disjoint entries."""
-        fe = IrcFrontend(
+        adapter = IrcAdapter(
             channels=["a"],
             channel_map={"b": "#bravo"},
         )
-        assert fe._mansio_to_irc == {"a": "#a", "b": "#bravo"}
-        assert fe._irc_to_mansio == {"#a": "a", "#bravo": "b"}
+        assert adapter._mansio_to_irc == {"a": "#a", "b": "#bravo"}
+        assert adapter._irc_to_mansio == {"#a": "a", "#bravo": "b"}
 
 
-# ── Frontend Protocol Tests ──────────────────────────────────────
+# ── Adapter Protocol Tests ──────────────────────────────────────
 
 
-class TestFrontendProtocol:
-    """Test Frontend protocol compliance."""
+class TestAdapterProtocol:
+    """Test Adapter protocol compliance."""
 
     def test_attach_stores_bus(self) -> None:
         """attach() stores the bus reference."""
-        fe = IrcFrontend(channels=["test"])
+        adapter = IrcAdapter(channels=["test"])
         bus = Bus(backend=MemoryBackend())
-        fe.attach(bus)
-        assert fe._bus is bus
+        adapter.attach(bus)
+        assert adapter._bus is bus
 
     def test_double_attach_raises(self) -> None:
         """attach() raises RuntimeError if already attached."""
-        fe = IrcFrontend(channels=["test"])
+        adapter = IrcAdapter(channels=["test"])
         bus = Bus(backend=MemoryBackend())
-        fe.attach(bus)
+        adapter.attach(bus)
         with pytest.raises(RuntimeError, match="already attached"):
-            fe.attach(bus)
+            adapter.attach(bus)
 
     def test_serve_without_attach_raises(self) -> None:
         """serve_forever() raises RuntimeError if not attached."""
-        fe = IrcFrontend(channels=["test"])
+        adapter = IrcAdapter(channels=["test"])
         with pytest.raises(RuntimeError, match="Must call attach"):
-            fe.serve_forever()
+            adapter.serve_forever()
 
     def test_address_returns_host_port(self) -> None:
         """address property returns configured (host, port)."""
-        fe = IrcFrontend(irc_host="irc.example.com", irc_port=6697)
-        assert fe.address == ("irc.example.com", 6697)
+        adapter = IrcAdapter(irc_host="irc.example.com", irc_port=6697)
+        assert adapter.address == ("irc.example.com", 6697)
 
     def test_repr_detached(self) -> None:
         """repr shows detached state."""
-        fe = IrcFrontend(
+        adapter = IrcAdapter(
             irc_host="irc.example.com",
             irc_port=6667,
             nickname="testbot",
             channels=["a", "b"],
         )
-        r = repr(fe)
+        r = repr(adapter)
         assert "irc.example.com:6667" in r
         assert "testbot" in r
         assert "2 ch" in r
@@ -112,15 +112,15 @@ class TestFrontendProtocol:
 
     def test_repr_attached(self) -> None:
         """repr shows attached state."""
-        fe = IrcFrontend(channels=["test"])
-        fe.attach(Bus(backend=MemoryBackend()))
-        assert "attached" in repr(fe)
+        adapter = IrcAdapter(channels=["test"])
+        adapter.attach(Bus(backend=MemoryBackend()))
+        assert "attached" in repr(adapter)
 
     def test_shutdown_without_bot_is_safe(self) -> None:
         """shutdown() is safe to call before serve_forever() or multiple times."""
-        fe = IrcFrontend(channels=["test"])
-        fe.shutdown()  # should not raise
-        fe.shutdown()  # safe to call twice
+        adapter = IrcAdapter(channels=["test"])
+        adapter.shutdown()  # should not raise
+        adapter.shutdown()  # safe to call twice
 
 
 # ── IRC → mansio Bridging Tests ──────────────────────────────────
@@ -131,12 +131,12 @@ class TestIrcToMansio:
 
     def test_pubmsg_publishes_to_bus(self) -> None:
         """Public IRC message is published to the mapped mansio channel."""
-        fe = IrcFrontend(channels=["tasks"])
+        adapter = IrcAdapter(channels=["tasks"])
         bus = Bus(backend=MemoryBackend())
-        fe.attach(bus)
+        adapter.attach(bus)
 
         # Create bot with mocked connection
-        bot = _IrcBridgeBot(fe, [("localhost", 6667)], "mansio-bot")
+        bot = _IrcBridgeBot(adapter, [("localhost", 6667)], "mansio-bot")
 
         # Simulate a PUBMSG event
         event = MagicMock()
@@ -161,11 +161,11 @@ class TestIrcToMansio:
 
     def test_pubmsg_ignores_own_messages(self) -> None:
         """Bot's own messages are not bridged to mansio."""
-        fe = IrcFrontend(channels=["tasks"])
+        adapter = IrcAdapter(channels=["tasks"])
         bus = Bus(backend=MemoryBackend())
-        fe.attach(bus)
+        adapter.attach(bus)
 
-        bot = _IrcBridgeBot(fe, [("localhost", 6667)], "mansio-bot")
+        bot = _IrcBridgeBot(adapter, [("localhost", 6667)], "mansio-bot")
 
         event = MagicMock()
         event.target = "#tasks"
@@ -182,11 +182,11 @@ class TestIrcToMansio:
 
     def test_pubmsg_ignores_unmapped_channel(self) -> None:
         """Messages from unmapped IRC channels are ignored."""
-        fe = IrcFrontend(channels=["tasks"])
+        adapter = IrcAdapter(channels=["tasks"])
         bus = Bus(backend=MemoryBackend())
-        fe.attach(bus)
+        adapter.attach(bus)
 
-        bot = _IrcBridgeBot(fe, [("localhost", 6667)], "mansio-bot")
+        bot = _IrcBridgeBot(adapter, [("localhost", 6667)], "mansio-bot")
 
         event = MagicMock()
         event.target = "#random"  # not mapped
@@ -205,11 +205,11 @@ class TestIrcToMansio:
     @pytest.mark.parametrize("text", ["", "   "])
     def test_pubmsg_ignores_empty_payload(self, text: str) -> None:
         """An empty PRIVMSG is not published: the wire contract rejects it."""
-        fe = IrcFrontend(channels=["tasks"])
+        adapter = IrcAdapter(channels=["tasks"])
         bus = Bus(backend=MemoryBackend())
-        fe.attach(bus)
+        adapter.attach(bus)
 
-        bot = _IrcBridgeBot(fe, [("localhost", 6667)], "mansio-bot")
+        bot = _IrcBridgeBot(adapter, [("localhost", 6667)], "mansio-bot")
 
         event = MagicMock()
         event.target = "#tasks"
@@ -232,12 +232,12 @@ class TestMansioToIrc:
 
     def test_bus_message_forwarded_to_irc(self) -> None:
         """Messages published to bus are forwarded to IRC channel."""
-        fe = IrcFrontend(channels=["tasks"])
+        adapter = IrcAdapter(channels=["tasks"])
         bus = Bus(backend=MemoryBackend())
-        fe.attach(bus)
+        adapter.attach(bus)
 
         connection = MagicMock()
-        fe._setup_bus_subscriptions(connection)
+        adapter._setup_bus_subscriptions(connection)
 
         # Publish a message to the bus (not from IRC)
         bus.publish(
@@ -252,12 +252,12 @@ class TestMansioToIrc:
 
     def test_irc_originated_message_not_echoed(self) -> None:
         """Messages with source=irc metadata are not forwarded back to IRC."""
-        fe = IrcFrontend(channels=["tasks"])
+        adapter = IrcAdapter(channels=["tasks"])
         bus = Bus(backend=MemoryBackend())
-        fe.attach(bus)
+        adapter.attach(bus)
 
         connection = MagicMock()
-        fe._setup_bus_subscriptions(connection)
+        adapter._setup_bus_subscriptions(connection)
 
         # Publish a message that originated from IRC
         bus.publish(
@@ -273,14 +273,14 @@ class TestMansioToIrc:
 
     def test_multiple_channels_subscribed(self) -> None:
         """All mapped channels get bus subscriptions."""
-        fe = IrcFrontend(channels=["tasks", "sync"])
+        adapter = IrcAdapter(channels=["tasks", "sync"])
         bus = Bus(backend=MemoryBackend())
-        fe.attach(bus)
+        adapter.attach(bus)
 
         connection = MagicMock()
-        fe._setup_bus_subscriptions(connection)
+        adapter._setup_bus_subscriptions(connection)
 
-        assert len(fe._sub_ids) == 2
+        assert len(adapter._sub_ids) == 2
 
         bus.publish(channel="tasks", sender="agent-a", msg_type="text", payload="task msg")
         bus.publish(channel="sync", sender="agent-b", msg_type="text", payload="sync msg")
@@ -293,19 +293,19 @@ class TestMansioToIrc:
 
     def test_reconnect_clears_old_subscriptions(self) -> None:
         """Calling _setup_bus_subscriptions again clears old subs first."""
-        fe = IrcFrontend(channels=["tasks"])
+        adapter = IrcAdapter(channels=["tasks"])
         bus = Bus(backend=MemoryBackend())
-        fe.attach(bus)
+        adapter.attach(bus)
 
         conn1 = MagicMock()
-        fe._setup_bus_subscriptions(conn1)
-        assert len(fe._sub_ids) == 1
+        adapter._setup_bus_subscriptions(conn1)
+        assert len(adapter._sub_ids) == 1
 
         # Simulate reconnect: setup called again with new connection
         conn2 = MagicMock()
-        fe._setup_bus_subscriptions(conn2)
+        adapter._setup_bus_subscriptions(conn2)
         # Should still be 1, not 2 (old sub cleared)
-        assert len(fe._sub_ids) == 1
+        assert len(adapter._sub_ids) == 1
 
         # Publish should only forward once (to conn2, not conn1)
         bus.publish(channel="tasks", sender="agent-a", msg_type="text", payload="msg")
@@ -314,16 +314,16 @@ class TestMansioToIrc:
 
     def test_shutdown_unsubscribes_from_bus(self) -> None:
         """shutdown() removes all bus subscriptions."""
-        fe = IrcFrontend(channels=["tasks", "sync"])
+        adapter = IrcAdapter(channels=["tasks", "sync"])
         bus = Bus(backend=MemoryBackend())
-        fe.attach(bus)
+        adapter.attach(bus)
 
         connection = MagicMock()
-        fe._setup_bus_subscriptions(connection)
-        assert len(fe._sub_ids) == 2
+        adapter._setup_bus_subscriptions(connection)
+        assert len(adapter._sub_ids) == 2
 
-        fe.shutdown()
-        assert len(fe._sub_ids) == 0
+        adapter.shutdown()
+        assert len(adapter._sub_ids) == 0
 
 
 # ── Bot Event Tests ──────────────────────────────────────────────
@@ -334,11 +334,11 @@ class TestBotEvents:
 
     def test_on_welcome_joins_channels(self) -> None:
         """Bot joins all mapped IRC channels on connect."""
-        fe = IrcFrontend(channels=["tasks", "sync"])
+        adapter = IrcAdapter(channels=["tasks", "sync"])
         bus = Bus(backend=MemoryBackend())
-        fe.attach(bus)
+        adapter.attach(bus)
 
-        bot = _IrcBridgeBot(fe, [("localhost", 6667)], "mansio-bot")
+        bot = _IrcBridgeBot(adapter, [("localhost", 6667)], "mansio-bot")
 
         connection = MagicMock()
         connection.server = "localhost"
@@ -354,9 +354,9 @@ class TestBotEvents:
 
     def test_on_nicknameinuse_appends_underscore(self) -> None:
         """Nickname collision appends underscore."""
-        fe = IrcFrontend(channels=["tasks"])
+        adapter = IrcAdapter(channels=["tasks"])
 
-        bot = _IrcBridgeBot(fe, [("localhost", 6667)], "mansio-bot")
+        bot = _IrcBridgeBot(adapter, [("localhost", 6667)], "mansio-bot")
 
         connection = MagicMock()
         connection.get_nickname.return_value = "mansio-bot"
@@ -370,17 +370,17 @@ class TestBotEvents:
 
 
 class TestImportGuard:
-    """Test lazy import behavior in frontends package."""
+    """Test lazy import behavior in adapters package."""
 
-    def test_lazy_import_irc_frontend(self) -> None:
-        """IrcFrontend is importable from mansio_web.frontends."""
-        from mansio_web.frontends import IrcFrontend
+    def test_lazy_import_irc_adapter(self) -> None:
+        """IrcAdapter is importable from mansio_web.adapters."""
+        from mansio_web.adapters import IrcAdapter
 
-        assert IrcFrontend is not None
+        assert IrcAdapter is not None
 
     def test_lazy_import_unknown_raises(self) -> None:
         """Unknown attributes raise AttributeError."""
         with pytest.raises(AttributeError, match="has no attribute"):
-            from mansio_web import frontends
+            from mansio_web import adapters
 
-            frontends.__getattr__("NonExistentFrontend")
+            adapters.__getattr__("NonExistentAdapter")

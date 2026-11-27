@@ -1,7 +1,7 @@
 """Core types, protocols, bus, backends and authorization for mansio.
 
 This package has no runtime dependencies and no knowledge of HTTP or the
-admin panel.  Network frontends live in :mod:`mansio_web`.
+admin panel.  Network adapters live in :mod:`mansio_web`.
 """
 
 from __future__ import annotations

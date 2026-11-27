@@ -1,4 +1,4 @@
-"""HTTP and IRC frontends, admin panel and server orchestration.
+"""HTTP and IRC adapters, admin panel and server orchestration.
 
 The core bus lives in :mod:`mansio_core`; this package owns everything that
 speaks a network protocol or renders a page.  The client transport lives in
@@ -11,13 +11,13 @@ from typing import Any
 
 __version__ = "0.3.0.dev1"
 
-from mansio_web.frontends.base import Frontend
-from mansio_web.frontends.http import HttpFrontend
+from mansio_web.adapters.base import ServerAdapter
+from mansio_web.adapters.http import HttpAdapter
 from mansio_web.server import MansioServer
 
 __all__ = [
-    "Frontend",
-    "HttpFrontend",
+    "ServerAdapter",
+    "HttpAdapter",
     "MansioServer",
 ]
 

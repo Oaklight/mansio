@@ -1,7 +1,7 @@
-"""Base protocol for server-side frontends.
+"""Base protocol for server-side adapters.
 
-A Frontend is a protocol adapter that exposes a Bus over a specific
-transport protocol (HTTP, WebSocket, IRC, etc.). Multiple frontends
+A server adapter exposes a Bus over a specific
+transport protocol (HTTP, WebSocket, IRC, etc.). Multiple adapters
 can attach to the same Bus, allowing different client types to
 coexist on one MansioServer.
 """
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from mansio_core.bus import Bus
 
 
-class Frontend(Protocol):
+class ServerAdapter(Protocol):
     """Server-side protocol adapter interface.
 
     Implementations expose the Bus's publish/query/subscribe
@@ -26,15 +26,15 @@ class Frontend(Protocol):
         3. shutdown() — stop accepting, clean up
 
     Example:
-        >>> frontend = HttpFrontend(host="0.0.0.0", port=8741, token_store=tokens)
-        >>> frontend.attach(bus)
-        >>> frontend.serve_forever()  # blocks
+        >>> adapter = HttpAdapter(host="0.0.0.0", port=8741, token_store=tokens)
+        >>> adapter.attach(bus)
+        >>> adapter.serve_forever()  # blocks
     """
 
     def attach(self, bus: Bus) -> None:
-        """Bind this frontend to a Bus instance.
+        """Bind this adapter to a Bus instance.
 
-        Must be called before serve_forever(). The frontend will
+        Must be called before serve_forever(). The adapter will
         delegate all publish/query/subscribe operations to this bus.
 
         Args:
@@ -56,14 +56,14 @@ class Frontend(Protocol):
     def shutdown(self) -> None:
         """Stop accepting connections and release resources.
 
-        Safe to call multiple times. After shutdown, the frontend
+        Safe to call multiple times. After shutdown, the adapter
         cannot be restarted — create a new instance instead.
         """
         ...
 
     @property
     def address(self) -> tuple[str, int]:
-        """Return the (host, port) this frontend is listening on.
+        """Return the (host, port) this adapter is listening on.
 
         Raises:
             RuntimeError: If not yet serving.

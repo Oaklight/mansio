@@ -9,24 +9,24 @@ import pytest
 from mansio_core import Bus, MemoryBackend
 from mansio_core.token_store import TokenStore
 from mansio_web import MansioServer
-from mansio_web.frontends import HttpFrontend
+from mansio_web.adapters import HttpAdapter
 
 
 @pytest.fixture()
 def mansio_server(tmp_path):
-    """Start a mansio server with HTTP frontend, yield (url, token_store, bus, server)."""
+    """Start a mansio server with HTTP adapter, yield (url, token_store, bus, server)."""
     db_path = str(tmp_path / "test-tokens.db")
     token_store = TokenStore(db_path)
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0, token_store=token_store)
+    adapter = HttpAdapter(host="127.0.0.1", port=0, token_store=token_store)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
 
-    host, port = frontend.address
+    host, port = adapter.address
     url = f"http://{host}:{port}"
 
     yield url, token_store, bus, server
@@ -39,15 +39,15 @@ def mansio_server(tmp_path):
 def server_url(tmp_path):
     """Start a mansio server without token auth, yield URL."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
+    adapter = HttpAdapter(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
 
-    host, port = frontend.address
+    host, port = adapter.address
     yield f"http://{host}:{port}"
 
     server.shutdown()

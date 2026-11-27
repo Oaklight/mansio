@@ -59,10 +59,10 @@ class AdminInfo:
 
 
 class AdminServer:
-    """Admin panel HTTP server implementing the Frontend protocol.
+    """Admin panel HTTP server implementing the Adapter protocol.
 
     Can be used standalone (legacy ``bus`` in constructor) or as a
-    Frontend via ``attach(bus)`` + ``serve_forever()``.
+    Adapter via ``attach(bus)`` + ``serve_forever()``.
 
     Args:
         bus: Optional Bus instance. If provided, ``attach(bus)`` is
@@ -111,10 +111,10 @@ class AdminServer:
         if bus is not None:
             self.attach(bus)
 
-    # ── Frontend protocol ─────────────────────────────────────────
+    # ── Adapter protocol ─────────────────────────────────────────
 
     def attach(self, bus: Bus) -> None:
-        """Bind this frontend to a Bus instance.
+        """Bind this adapter to a Bus instance.
 
         Must be called before ``serve_forever()`` or ``start()``.
         Sets up all admin API routes that depend on the bus.
@@ -156,7 +156,7 @@ class AdminServer:
 
     @property
     def address(self) -> tuple[str, int]:
-        """Return the (host, port) this frontend is listening on.
+        """Return the (host, port) this adapter is listening on.
 
         Raises:
             RuntimeError: If not yet serving.

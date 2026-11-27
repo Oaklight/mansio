@@ -1,8 +1,8 @@
-"""HTTP frontend route modules.
+"""HTTP adapter route modules.
 
 Each module exposes ``register(app, ctx)`` and owns one contiguous URL
 group.  The frozen :class:`RouteContext` carries everything the handlers
-need, so no route reaches back into ``HttpFrontend``.  ``HttpFrontend``
+need, so no route reaches back into ``HttpAdapter``.  ``HttpAdapter``
 stays the composition root and calls the registers in a fixed order.
 """
 

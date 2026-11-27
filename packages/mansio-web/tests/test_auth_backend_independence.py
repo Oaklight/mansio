@@ -2,7 +2,7 @@
 
 TokenStore opens its own SQLite file and never touches the message
 backend, so nothing about it depends on which Backend a server uses.
-These tests wire an HttpFrontend to the Maildir backend (no external
+These tests wire an HttpAdapter to the Maildir backend (no external
 service required) and, when a NATS server is reachable, to the NATS
 backend, and drive each one through the same auth-enforcement checks
 already exercised against MemoryBackend elsewhere in the suite.
@@ -23,20 +23,20 @@ from mansio_core import Bus
 from mansio_core.backends.maildir import MaildirBackend
 from mansio_core.token_store import TokenStore
 from mansio_web import MansioServer
-from mansio_web.frontends import HttpFrontend
+from mansio_web.adapters import HttpAdapter
 
 
 def _start_server(bus: Bus, token_store: TokenStore):
-    """Start an HttpFrontend over *bus*, yield (url, server) once bound."""
-    frontend = HttpFrontend(host="127.0.0.1", port=0, token_store=token_store)
+    """Start an HttpAdapter over *bus*, yield (url, server) once bound."""
+    adapter = HttpAdapter(host="127.0.0.1", port=0, token_store=token_store)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
 
-    host, port = frontend.address
+    host, port = adapter.address
     return f"http://{host}:{port}", server
 
 

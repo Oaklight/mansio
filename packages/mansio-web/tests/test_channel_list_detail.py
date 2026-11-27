@@ -12,7 +12,7 @@ from mansio_core.backends.memory import _infer_channel_type as mem_infer
 from mansio_core.backends.sqlite import SQLiteBackend
 from mansio_core.backends.sqlite import _infer_channel_type as sql_infer
 from mansio_web import MansioServer
-from mansio_web.frontends import HttpFrontend
+from mansio_web.adapters import HttpAdapter
 
 # ── Channel type inference ────────────────────────────────────────
 
@@ -171,7 +171,7 @@ class TestBusChannelsDetail:
 
 @pytest.fixture()
 def detail_server_url():
-    """Start a MansioServer with HttpFrontend, yield URL."""
+    """Start a MansioServer with HttpAdapter, yield URL."""
     bus = Bus(backend=MemoryBackend())
 
     # Seed some data
@@ -179,15 +179,15 @@ def detail_server_url():
     bus.publish("general", "bob", "chat", "hi")
     bus.publish("dm:alice:bob", "alice", "chat", "secret")
 
-    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
+    adapter = HttpAdapter(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
 
-    host, port = frontend.address
+    host, port = adapter.address
     url = f"http://{host}:{port}"
 
     yield url

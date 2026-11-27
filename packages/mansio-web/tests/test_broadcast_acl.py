@@ -1,6 +1,6 @@
 """Broadcast channel write access follows the stored owner and ACL (issue #298).
 
-The HTTP frontend used to reject every user-bound publish to ``broadcast:*``
+The HTTP adapter used to reject every user-bound publish to ``broadcast:*``
 before consulting the channel owner or its ACL, so ``PUT/POST
 /v1/channels/<channel>/acl`` succeeded and then had no effect.  These tests
 pin the intended rule: the channel owner (first publisher) and agents with an

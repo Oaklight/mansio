@@ -1,4 +1,4 @@
-"""Tests for channel name validation in HttpFrontend.
+"""Tests for channel name validation in HttpAdapter.
 
 Verifies:
 - User channel naming rules (length, start/end chars, specials)
@@ -11,7 +11,7 @@ Verifies:
 from __future__ import annotations
 
 import pytest
-from mansio_web.frontends.routes._common import _validate_channel_name
+from mansio_web.adapters.routes._common import _validate_channel_name
 
 
 class TestValidateChannelName:

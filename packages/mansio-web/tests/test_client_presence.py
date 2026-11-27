@@ -52,14 +52,14 @@ class TestPresenceFromActivity:
         client.close()
 
     def test_a_request_past_the_window_refreshes_last_seen(self, mansio_server, monkeypatch):
-        from mansio_web.frontends import http as http_frontend
+        from mansio_web.adapters import http as http_adapter
 
         url, store, bus, _srv = mansio_server
         client = make_client(url, store, "agent-refresh")
         first = _wait_for_presence(bus, "agent-refresh")
         assert first is not None
 
-        monkeypatch.setattr(http_frontend, "_PRESENCE_REFRESH_SECONDS", 0.0)
+        monkeypatch.setattr(http_adapter, "_PRESENCE_REFRESH_SECONDS", 0.0)
         client.channel_list()
         end = time.monotonic() + 3.0
         while time.monotonic() < end:

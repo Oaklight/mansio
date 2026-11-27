@@ -1,4 +1,4 @@
-"""HTTP frontend for mansio — REST API + SSE push.
+"""HTTP adapter for mansio — REST API + SSE push.
 
 Exposes the Bus over HTTP/HTTPS so remote MansioClient instances can
 publish, query, and receive real-time notifications via SSE.
@@ -20,9 +20,9 @@ API Endpoints:
     GET  /health             — health check
 
 Route registration:
-    ``HttpFrontend`` is the composition root.  ``attach()`` installs the
+    ``HttpAdapter`` is the composition root.  ``attach()`` installs the
     middleware, builds one frozen
-    :class:`~mansio_web.frontends.routes.RouteContext`, then calls the
+    :class:`~mansio_web.adapters.routes.RouteContext`, then calls the
     route modules in a fixed order.  That order — middleware → RouteContext
     → registers — defines the public route table, so adding a route means
     editing the matching module, not this class.
@@ -33,7 +33,7 @@ Authentication:
     and the sender field in publish requests must match the token's user_id.
     Supertokens (user_id=NULL) bypass sender checks.
 
-    A frontend with no TokenStore cannot validate anything, so it refuses
+    An adapter with no TokenStore cannot validate anything, so it refuses
     every authenticated endpoint. Serving an open API is possible but never
     implicit: it requires ``allow_unauthenticated=True``, which logs a
     warning at startup.
@@ -56,18 +56,18 @@ from mansio_core.authz import ChannelAuthorizer
 
 from mansio_web._vendor.httpserver import App, JSONResponse, Response, StreamingResponse
 from mansio_web._vendor.structlog import get_logger
-from mansio_web.frontends.routes import RouteContext
-from mansio_web.frontends.routes import auth as auth_routes
-from mansio_web.frontends.routes import channel_admin as channel_admin_routes
-from mansio_web.frontends.routes import channels as channel_routes
-from mansio_web.frontends.routes import health as health_routes
-from mansio_web.frontends.routes import messages as message_routes
-from mansio_web.frontends.routes import presence as presence_routes
-from mansio_web.frontends.routes import publish as publish_routes
-from mansio_web.frontends.routes import queue as queue_routes
-from mansio_web.frontends.routes import registry as registry_routes
-from mansio_web.frontends.routes import sse as sse_routes
-from mansio_web.frontends.routes._common import _error_body
+from mansio_web.adapters.routes import RouteContext
+from mansio_web.adapters.routes import auth as auth_routes
+from mansio_web.adapters.routes import channel_admin as channel_admin_routes
+from mansio_web.adapters.routes import channels as channel_routes
+from mansio_web.adapters.routes import health as health_routes
+from mansio_web.adapters.routes import messages as message_routes
+from mansio_web.adapters.routes import presence as presence_routes
+from mansio_web.adapters.routes import publish as publish_routes
+from mansio_web.adapters.routes import queue as queue_routes
+from mansio_web.adapters.routes import registry as registry_routes
+from mansio_web.adapters.routes import sse as sse_routes
+from mansio_web.adapters.routes._common import _error_body
 
 if TYPE_CHECKING:
     from mansio_core.bus import Bus
@@ -80,13 +80,13 @@ logger = get_logger(__name__)
 # Paths that skip token auth
 _PUBLIC_PATHS = frozenset({"/health", "/v1/auth/check"})
 
-# Returned for every authenticated endpoint when the frontend has no way to
+# Returned for every authenticated endpoint when the adapter has no way to
 # authenticate anyone. Both causes are the same failure from a caller's side —
 # no token can be presented that would work — so they answer alike.
 _NO_TOKEN_STORE_MESSAGE = (
     "This server has no token store, so it cannot authenticate anyone and "
     "refuses all authenticated endpoints. Configure a TokenStore, or pass "
-    "allow_unauthenticated=True to HttpFrontend to serve an open API on purpose."
+    "allow_unauthenticated=True to HttpAdapter to serve an open API on purpose."
 )
 _NO_TOKENS_MESSAGE = (
     "No API tokens configured. Create a token via the admin panel before connecting."
@@ -99,8 +99,8 @@ _NO_TOKENS_MESSAGE = (
 _PRESENCE_REFRESH_SECONDS = 30.0
 
 
-class HttpFrontend:
-    """HTTP frontend — REST API + SSE push notifications.
+class HttpAdapter:
+    """HTTP adapter — REST API + SSE push notifications.
 
     Exposes a Bus over HTTP so remote MansioClient instances
     can connect via HttpTransport.
@@ -112,7 +112,7 @@ class HttpFrontend:
         max_body_bytes: Maximum request body size in bytes. Default 1MB.
         max_query_limit: Maximum query limit parameter. Default 10000.
         token_store: TokenStore used to authenticate API requests. Without
-            one the frontend rejects every authenticated endpoint.
+            one the adapter rejects every authenticated endpoint.
         allow_unauthenticated: Serve the API with no authentication at all,
             treating every caller as a supertoken that may act as any sender.
             For local development and tests only. Warns on startup. Cannot be
@@ -199,7 +199,7 @@ class HttpFrontend:
             )
 
     def attach(self, bus: Bus) -> None:
-        """Bind this frontend to a Bus and register routes.
+        """Bind this adapter to a Bus and register routes.
 
         The order is fixed: middleware, then one frozen RouteContext, then
         the route modules.  That order defines the public route table.
@@ -211,7 +211,7 @@ class HttpFrontend:
             RuntimeError: If already attached.
         """
         if self._bus is not None:
-            raise RuntimeError("Frontend already attached to a bus")
+            raise RuntimeError("Adapter already attached to a bus")
         self._bus = bus
         self._authz = ChannelAuthorizer(bus)
         self._setup_middleware()
@@ -261,7 +261,7 @@ class HttpFrontend:
 
     @property
     def address(self) -> tuple[str, int]:
-        """Return the (host, port) this frontend is bound to."""
+        """Return the (host, port) this adapter is bound to."""
         h = self._app.host or self._host
         p = self._app.port if self._app.port is not None else self._port
         return (h, p)
@@ -275,7 +275,7 @@ class HttpFrontend:
             auth = "no-auth"
         else:
             auth = "auth-unavailable"
-        return f"HttpFrontend({addr}, {status}, {auth})"
+        return f"HttpAdapter({addr}, {status}, {auth})"
 
     # ── Middleware ─────────────────────────────────────────────────
 

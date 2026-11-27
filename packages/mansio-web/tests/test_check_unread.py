@@ -11,22 +11,22 @@ from mansio_client import MansioClient
 from mansio_client.cli import main as cli_main
 from mansio_core import Bus, MemoryBackend
 from mansio_web import MansioServer
-from mansio_web.frontends import HttpFrontend
+from mansio_web.adapters import HttpAdapter
 
 
 @pytest.fixture()
 def server_url():
-    """Start a MansioServer with HttpFrontend, yield URL."""
+    """Start a MansioServer with HttpAdapter, yield URL."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
+    adapter = HttpAdapter(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
 
-    host, port = frontend.address
+    host, port = adapter.address
     url = f"http://{host}:{port}"
 
     yield url

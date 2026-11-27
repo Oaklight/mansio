@@ -19,6 +19,8 @@ from mansio_client import MansioClient
 from mansio_core import Bus, MemoryBackend
 from mansio_core.token_store import TokenStore
 from mansio_web import MansioServer
+from mansio_web.adapters import HttpAdapter
+from mansio_web.adapters.http import _NO_TOKENS_MESSAGE
 from mansio_web.cli import (
     _MAILDIR_TOKEN_DB_NAME,
     _check_network_exposure,
@@ -29,8 +31,6 @@ from mansio_web.cli import (
     _resolve_token_db_path,
     parse_args,
 )
-from mansio_web.frontends import HttpFrontend
-from mansio_web.frontends.http import _NO_TOKENS_MESSAGE
 
 # ── Parse Args ────────────────────────────────────────────────────
 
@@ -240,16 +240,16 @@ class TestCliSubprocess:
 
 @pytest.fixture()
 def http_server_url():
-    """Start a MansioServer with HttpFrontend on a random port, yield URL."""
+    """Start a MansioServer with HttpAdapter on a random port, yield URL."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
+    adapter = HttpAdapter(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
-    host, port = frontend.address
+    host, port = adapter.address
     url = f"http://{host}:{port}"
 
     yield url

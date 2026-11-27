@@ -13,18 +13,18 @@ import pytest
 from mansio_core import Bus, MemoryBackend
 from mansio_core.authz import ChannelAuthorizer
 from mansio_web._vendor.httpserver import App
-from mansio_web.frontends.http import HttpFrontend
-from mansio_web.frontends.routes import RouteContext
-from mansio_web.frontends.routes import auth as auth_routes
-from mansio_web.frontends.routes import channel_admin as channel_admin_routes
-from mansio_web.frontends.routes import channels as channel_routes
-from mansio_web.frontends.routes import health as health_routes
-from mansio_web.frontends.routes import messages as message_routes
-from mansio_web.frontends.routes import presence as presence_routes
-from mansio_web.frontends.routes import publish as publish_routes
-from mansio_web.frontends.routes import queue as queue_routes
-from mansio_web.frontends.routes import registry as registry_routes
-from mansio_web.frontends.routes import sse as sse_routes
+from mansio_web.adapters.http import HttpAdapter
+from mansio_web.adapters.routes import RouteContext
+from mansio_web.adapters.routes import auth as auth_routes
+from mansio_web.adapters.routes import channel_admin as channel_admin_routes
+from mansio_web.adapters.routes import channels as channel_routes
+from mansio_web.adapters.routes import health as health_routes
+from mansio_web.adapters.routes import messages as message_routes
+from mansio_web.adapters.routes import presence as presence_routes
+from mansio_web.adapters.routes import publish as publish_routes
+from mansio_web.adapters.routes import queue as queue_routes
+from mansio_web.adapters.routes import registry as registry_routes
+from mansio_web.adapters.routes import sse as sse_routes
 
 Route = tuple[tuple[str, ...], str]
 
@@ -104,10 +104,10 @@ def _context(bus: Bus) -> RouteContext:
 
 def test_full_route_table_is_the_modules_in_order() -> None:
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(port=0, allow_unauthenticated=True)
+    adapter = HttpAdapter(port=0, allow_unauthenticated=True)
     try:
-        frontend.attach(bus)
-        actual = _routes(frontend._app)
+        adapter.attach(bus)
+        actual = _routes(adapter._app)
     finally:
         bus.close()
 

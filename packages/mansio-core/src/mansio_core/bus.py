@@ -137,7 +137,7 @@ class Bus:
     ) -> str:
         """Publish a message to a channel.
 
-        The Bus is auth-unaware: a frontend authorizes the sender before
+        The Bus is auth-unaware: an adapter authorizes the sender before
         calling this method.
 
         Args:
@@ -238,7 +238,7 @@ class Bus:
     ) -> list[Message]:
         """Retrieve messages from a channel.
 
-        The Bus is auth-unaware: a frontend authorizes the reader first.
+        The Bus is auth-unaware: an adapter authorizes the reader first.
 
         Args:
             channel: Channel to read from.
@@ -605,7 +605,7 @@ class Bus:
         """Delete a channel and all its messages.
 
         Also removes any in-process subscriptions for the channel.
-        The Bus is auth-unaware: a frontend authorizes the delete first.
+        The Bus is auth-unaware: an adapter authorizes the delete first.
 
         Args:
             channel: Channel name to delete.
@@ -632,7 +632,7 @@ class Bus:
     def delete_message(self, message_id: str) -> bool:
         """Delete a single message by ID.
 
-        The Bus is auth-unaware: a frontend checks sender ownership or the
+        The Bus is auth-unaware: an adapter checks sender ownership or the
         delete verb before calling this method.
 
         Args:

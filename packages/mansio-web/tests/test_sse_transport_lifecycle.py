@@ -18,7 +18,7 @@ import pytest
 from mansio_client.transport import HttpTransport
 from mansio_core import Bus, MemoryBackend
 from mansio_web import MansioServer
-from mansio_web.frontends import HttpFrontend
+from mansio_web.adapters import HttpAdapter
 
 #: Generous upper bound for an operation that must not wait on the server's
 #: SSE keepalive; the bug being guarded against took over ten seconds.
@@ -29,15 +29,15 @@ PROMPT_SECONDS = 1.0
 def server_with_bus():
     """Start a server on an OS-assigned port, yield its URL and Bus."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
+    adapter = HttpAdapter(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
 
-    host, port = frontend.address
+    host, port = adapter.address
     yield f"http://{host}:{port}", bus
 
     server.shutdown()
