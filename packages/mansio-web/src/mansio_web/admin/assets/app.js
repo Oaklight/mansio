@@ -12,6 +12,7 @@ import {
     icon,
     loadingState,
     searchField,
+    setActiveNav,
     toast,
 } from './ui.js';
 import * as channels from './views/channels.js';
@@ -101,7 +102,7 @@ function renderSidebar() {
                             el(
                                 'a',
                                 {
-                                    className: `nav-link ${state.route && state.route.name === item.name ? 'active' : ''}`.trim(),
+                                    className: 'nav-link',
                                     href: `#/${item.name}`,
                                     dataset: { nav: item.name },
                                 },
@@ -118,12 +119,7 @@ function renderSidebar() {
         ),
         el('div', { className: 'sidebar-footer', text: 'Mansio admin console' }),
     );
-}
-
-function updateActiveNav(name) {
-    document.querySelectorAll('.nav-link').forEach((link) => {
-        link.classList.toggle('active', link.dataset.nav === name);
-    });
+    setActiveNav(state.route && state.route.name);
 }
 
 function wireTheme() {
@@ -212,7 +208,7 @@ function refresh() {
 
 function updateChrome(route) {
     state.route = route;
-    updateActiveNav(route.name);
+    setActiveNav(route.name);
     const title = TITLES[route.name] || TITLES.overview;
     const breadcrumb = document.getElementById('breadcrumb');
     if (breadcrumb) breadcrumb.textContent = route.id ? `${title} / ${route.id}` : title;
@@ -220,13 +216,6 @@ function updateChrome(route) {
 }
 
 async function renderRoute(route) {
-    const rawName = window.location.hash
-        .replace(/^#\/?/, '')
-        .split(/[/?]/)[0];
-    if (rawName && !Object.prototype.hasOwnProperty.call(VIEWS, rawName)) {
-        window.history.replaceState(null, '', '#/overview');
-        route = parseHash('#/overview');
-    }
     updateChrome(route);
     if (state.auth.required && !state.auth.authenticated) {
         showLoginOverlay();
