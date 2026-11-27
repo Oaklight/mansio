@@ -13,10 +13,10 @@ import threading
 import time
 
 import pytest
+from mansio_client.transport import HttpTransport, MansioAPIError
 from mansio_core import Bus, MemoryBackend
 from mansio_web import MansioServer
 from mansio_web.frontends import HttpFrontend
-from mansio_web.transport_http import HttpTransport, MansioAPIError
 
 
 @pytest.fixture()

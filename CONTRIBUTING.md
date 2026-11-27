@@ -94,8 +94,9 @@ python -m pytest packages/mansio-client/tests/
 ```
 
 To exercise client behavior that would otherwise need a server, either drive
-`HttpTransport` against a `http.server` stub from the standard library, or
-substitute a fake transport into `MansioClient`.
+`HttpTransport` from `mansio_client.transport` against a `http.server` stub from
+the standard library, or set `client._transport` (typed as
+`mansio_core.transport.Transport`) to a fake.
 
 To check your work the way CI does, run the client suite in a throwaway
 environment with only core and the client installed:

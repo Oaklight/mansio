@@ -425,7 +425,7 @@ class TestTransportThreading:
     """HttpTransport.publish() and query() with threading params."""
 
     def test_publish_parent_id(self, server_url):
-        from mansio_web.transport_http import HttpTransport
+        from mansio_client.transport import HttpTransport
 
         t = HttpTransport(server_url)
         root_id = t.publish(_CH, "alice", "text", "root")
@@ -436,7 +436,7 @@ class TestTransportThreading:
         assert reply.thread_id == root_id
 
     def test_query_thread_filter(self, server_url):
-        from mansio_web.transport_http import HttpTransport
+        from mansio_client.transport import HttpTransport
 
         t = HttpTransport(server_url)
         root_id = t.publish(_CH, "alice", "text", "root")

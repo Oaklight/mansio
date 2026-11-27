@@ -42,7 +42,6 @@ from mansio_core.types import (
 )
 from mansio_web import __version__  # noqa: F401
 from mansio_web.server import MansioServer
-from mansio_web.transport_http import HttpTransport, MansioAPIError
 
 __all__ = [
     "ALLOWED_PERMISSIONS",
@@ -62,8 +61,6 @@ __all__ = [
     "MaildirBackend",
     "MetricsCollector",
     "NATSBackend",
-    "HttpTransport",
-    "MansioAPIError",
     "MemoryBackend",
     "MemoryStorage",
     "Message",
@@ -98,9 +95,24 @@ _ROUTES = {
     "mansio.cli": "mansio_web.cli",
     "mansio.frontends": "mansio_web.frontends",
     "mansio.admin": "mansio_web.admin",
-    "mansio.transport_http": "mansio_web.transport_http",
 }
 _ROUTES_BY_LENGTH = sorted(_ROUTES.items(), key=lambda item: -len(item[0]))
+
+# Names that moved out of the server distribution.  The web package cannot
+# re-export the client (import boundary R2), so these raise an ImportError
+# with the new location instead of looking like a typo.
+_MOVED_TO_CLIENT = {
+    "HttpTransport": "from mansio_client.transport import HttpTransport",
+    "MansioAPIError": "from mansio_client.transport import MansioAPIError",
+}
+_MOVED_MODULES = {
+    "mansio.transport_http": "from mansio_client.transport import HttpTransport",
+}
+
+
+def _moved_message(module: str, attr: str | None, hint: str) -> str:
+    name = f"{module}.{attr}" if attr else module
+    return f"{name} moved to the mansio-client package; install mansio-client and use `{hint}`"
 
 
 def _target_for(fullname: str) -> str | None:
@@ -139,6 +151,9 @@ class _AliasFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         path: Any = None,
         target: Any = None,
     ) -> importlib.machinery.ModuleSpec | None:
+        for moved, hint in _MOVED_MODULES.items():
+            if fullname == moved or fullname.startswith(moved + "."):
+                raise ImportError(_moved_message(fullname, None, hint))
         target_name = _target_for(fullname)
         if target_name is None:
             return None
@@ -237,4 +252,9 @@ def __getattr__(name: str):
         from mansio_core.backends.nats import NATSBackend
 
         return NATSBackend
+
+    moved = _MOVED_TO_CLIENT.get(name)
+    if moved is not None:
+        raise ImportError(_moved_message(__name__, name, moved))
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

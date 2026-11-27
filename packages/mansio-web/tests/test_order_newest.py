@@ -182,7 +182,7 @@ class TestHttpFrontendOrder:
     """Test order query parameter via HTTP."""
 
     def test_query_order_newest(self, server_url):
-        from mansio_web import HttpTransport
+        from mansio_client.transport import HttpTransport
 
         transport = HttpTransport(server_url)
         for i in range(5):
@@ -194,7 +194,7 @@ class TestHttpFrontendOrder:
         transport.close()
 
     def test_query_order_oldest_default(self, server_url):
-        from mansio_web import HttpTransport
+        from mansio_client.transport import HttpTransport
 
         transport = HttpTransport(server_url)
         for i in range(5):
@@ -206,7 +206,7 @@ class TestHttpFrontendOrder:
         transport.close()
 
     def test_query_order_invalid(self, server_url):
-        from mansio_web import HttpTransport, MansioAPIError
+        from mansio_client.transport import HttpTransport, MansioAPIError
 
         transport = HttpTransport(server_url)
         transport.publish("test-order-inv", "agent", "text", "msg")
