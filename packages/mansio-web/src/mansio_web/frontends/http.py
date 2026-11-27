@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import re
 import threading
 import time
@@ -61,6 +60,7 @@ from mansio_core.authz import (
 from mansio_core.authz import user_involved as _user_involved
 from mansio_core.contracts import (
     ContractError,
+    StreamEvent,
     parse_acl_add,
     parse_acl_set,
     parse_admin_cleanup,
@@ -75,6 +75,8 @@ from mansio_core.contracts import (
     parse_queue_claim,
     parse_queue_status,
     parse_registry_lookup,
+    parse_stream_event,
+    stream_event_to_json,
 )
 
 from mansio_web._vendor.httpserver import App, JSONResponse, Response, StreamingResponse
@@ -1562,9 +1564,7 @@ def _setup_sse_subscriptions(
                     return
                 if exclude_own and msg.sender == auth_result:
                     return
-                data = json.dumps(
-                    {"channel": target_ch, "message": _msg_to_dict(msg)}, ensure_ascii=False
-                )
+                data = stream_event_to_json(StreamEvent(channel=target_ch, message=msg))
                 loop.call_soon_threadsafe(_safe_enqueue, data)
 
             return _cb
@@ -1635,11 +1635,7 @@ async def _replay_missed_events(session: _SSESession) -> Any:
             if session.exclude_own:
                 missed = [m for m in missed if m.sender != session.auth_result]
         for m in missed:
-            data = json.dumps(
-                {"channel": ch, "message": _msg_to_dict(m)},
-                ensure_ascii=False,
-            )
-            yield _format_sse_event(data, m.id)
+            yield _format_sse_event(stream_event_to_json(StreamEvent(channel=ch, message=m)), m.id)
 
 
 async def _sse_event_generator(session: _SSESession) -> Any:
@@ -1686,11 +1682,10 @@ async def _sse_event_generator(session: _SSESession) -> Any:
                 continue
             if data is None:
                 break
-            # Extract message id from the JSON for the SSE id: field
+            # The SSE id: line carries the message id.
             try:
-                parsed = json.loads(data)
-                event_id = parsed.get("message", {}).get("id", "")
-            except (json.JSONDecodeError, AttributeError):
+                event_id = parse_stream_event(data).message.id
+            except ContractError:
                 event_id = ""
             yield _format_sse_event(data, event_id)
 
