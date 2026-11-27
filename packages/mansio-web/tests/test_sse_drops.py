@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "mansio-client", "src"))
 
 from mansio_core import Bus, MemoryBackend
-from mansio_web.frontends.http import (
+from mansio_web.frontends.routes.sse import (
     _SSE_REPLAY_LIMIT,
     _drain_drop_counter,
     _format_sse_event,

@@ -15,7 +15,7 @@ import re
 
 from hypothesis import given
 from hypothesis import strategies as st
-from mansio_web.frontends.http import _validate_channel_name
+from mansio_web.frontends.routes._common import _validate_channel_name
 
 # Plain channel names: 3-64 chars, lowercase, first char a letter, last char
 # alphanumeric, no colon, no consecutive separators.
