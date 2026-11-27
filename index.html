@@ -309,6 +309,24 @@ flowchart TB
     <code>Frontend</code> 协议在 <code>mansio_web/frontends/base.py</code>，只有 web 自己用）与
     <code>*.schema.json</code>（没有任何 schema 文件）。是否要这两项，待决定；决定前它们不计入达成度。
   </div>
+  <div class="panel">
+    <table>
+      <thead><tr><th>术语</th><th>代码位置</th><th>方向</th><th>职责</th></tr></thead>
+      <tbody>
+        <tr><td>API（HTTP REST + SSE）</td><td><code>mansio_web/frontends/http.py</code> + <code>routes/</code></td><td>入站</td><td>把 Bus 暴露为 HTTP/SSE；<code>Frontend</code> 协议的实现</td></tr>
+        <tr><td>IRC</td><td><code>mansio_web/frontends/irc.py</code></td><td>入站</td><td>同一个 Bus 的第二个 <code>Frontend</code> 实现</td></tr>
+        <tr><td>Admin UI</td><td><code>admin/assets</code> + <code>admin/routes</code></td><td>入站控制面</td><td>管理 API 的浏览器客户端，随 web 包分发；不是 <code>Frontend</code></td></tr>
+        <tr><td><code>mansio serve</code></td><td><code>mansio_web/cli.py</code></td><td>启动</td><td>组装 Bus + Frontend 适配器 + 管理面</td></tr>
+        <tr><td>SDK / CLI / MCP</td><td><code>mansio_client/</code></td><td>出站</td><td>通过 HTTP API 使用服务；MCP 把 SDK 工具化，不是服务端适配器</td></tr>
+        <tr><td>Transport</td><td><code>mansio_core/transport.py</code></td><td>出站端口</td><td>客户端对服务端 API 的抽象，由工厂按 scheme 选择实现</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout">
+    本页的 <code>frontend</code> 只指“入站 wire 适配器”（HTTP/SSE、IRC），由 <code>MansioServer</code> 组装。
+    CLI、SDK、MCP 是客户端；Admin UI 是控制面的浏览器客户端。若继续混淆，可把目录改名为
+    <code>adapters/</code>、协议改名为 <code>ServerAdapter</code>；那只是一次改名，不改变依赖方向。
+  </div>
 </section>
 
 <section id="transport">
