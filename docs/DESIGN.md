@@ -144,7 +144,7 @@ class Backend(ABC):
 
 | 协议 | 方法 | 用途 |
 |------|------|------|
-| `ChannelStore` | `create_channel`、`get_channel`、`list_channels_meta`、`update_channel`、`delete_channel_meta`、`set_acl`、`get_acl`、`add_acl_entry`、`remove_acl_entry`、`check_access` | 显式的 channel 元数据（owner、可见性）与按 Agent 的 ACL |
+| `ChannelStore` | `create_channel`、`get_channel`、`list_channels_meta`、`update_channel`、`delete_channel_meta`、`set_acl`、`get_acl`、`add_acl_entry`、`remove_acl_entry`、`check_access`、`check_access_many` | 显式的 channel 元数据（owner、可见性）与按 Agent 的 ACL |
 | `Deletable` | `delete_channel`、`delete_message` | 删除 channel 与单条消息 |
 | `Presenceable` | `heartbeat`、`users`、`user_status` | Agent 在线状态跟踪 |
 | `Compactable` | `compact` | Channel 压缩（按条数裁剪、按 sender 去重） |
@@ -377,6 +377,8 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 ACL 条目按写入时的原样保存权限字符串——角色名、单个动词或旧等级。预设在校验时展开（`mansio_core/types.py` 的 `expand_permission()`），而不是在创建条目时展开，因此修改 `ROLE_PRESETS` 会追溯性地改变所有使用该预设的既有条目所授予的范围。旧等级按同样的方式解析为别名，已存储的数据无需迁移。
 
 Bus 不暴露任何授权参数：Frontend 在调用 `Bus.publish` / `Bus.query` / 删除方法之前先完成授权。对于普通频道与注册前缀频道，Frontend 策略层会查询频道存储（`Bus.check_access`），因此私有频道的所有者与 ACL 条目对读写生效。`dm:`/`notebook:`/`memory:` 仍按名称结构判定，`broadcast:*` 的写入检查频道所有者以及任何授予 `publish` 的条目（[#298](https://github.com/Oaklight/mansio/issues/298)）。
+
+频道列表在一次批量查询中完成鉴权过滤：`GET /v1/channels` 与其 `?detail=true` 形式对列表中的每个频道调用 `Bus.check_access_many`（SQLite 上每 500 个名称两条语句），而不是逐个频道查询；列表查询与过滤在同一工作线程内完成，因此大列表不会阻塞事件循环。`dm:` 与保留前缀频道仍按名称判定。
 
 **工作队列（`/v1/queue/*`）**：claim 需要该频道的 `publish` 规则；ack 与查询 claim 状态需要读权限。被拒绝的调用方得到的响应与"ack 未成功"或"消息没有队列状态"完全相同，因此不会确认私有消息是否存在。claim 不会为调用方创建 `broadcast:*` 频道。
 

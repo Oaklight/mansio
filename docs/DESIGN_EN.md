@@ -158,7 +158,7 @@ lacks the capability a call needs:
 
 | Protocol | Methods | Purpose |
 |----------|---------|---------|
-| `ChannelStore` | `create_channel`, `get_channel`, `list_channels_meta`, `update_channel`, `delete_channel_meta`, `set_acl`, `get_acl`, `add_acl_entry`, `remove_acl_entry`, `check_access` | Explicit channel metadata (owner, visibility) and per-agent ACL |
+| `ChannelStore` | `create_channel`, `get_channel`, `list_channels_meta`, `update_channel`, `delete_channel_meta`, `set_acl`, `get_acl`, `add_acl_entry`, `remove_acl_entry`, `check_access`, `check_access_many` | Explicit channel metadata (owner, visibility) and per-agent ACL |
 | `Deletable` | `delete_channel`, `delete_message` | Channel and message deletion |
 | `Presenceable` | `heartbeat`, `users`, `user_status` | Agent presence tracking |
 | `Compactable` | `compact` | Channel compaction (trim by count, dedup per sender) |
@@ -431,6 +431,13 @@ registered-prefix channels the frontend policy asks the channel store
 enforced for reads and writes there. `dm:`/`notebook:`/`memory:` keep their structural name rules, and
 `broadcast:*` write checks the channel owner and any entry granting `publish`
 ([#298](https://github.com/Oaklight/mansio/issues/298)).
+
+Channel listings are filtered in one pass: `GET /v1/channels` and its
+`?detail=true` form resolve every listed channel with `Bus.check_access_many`
+(two statements per 500 names on SQLite) instead of one lookup per channel, and
+the list query plus the filter run in a single worker thread, so a large
+listing does not block the event loop. Private-prefix and `dm:` names are still
+decided by name.
 
 **Work queues (`/v1/queue/*`)**: claiming a message requires the `publish` rule
 for the channel, and acknowledging it or reading its claim state requires read

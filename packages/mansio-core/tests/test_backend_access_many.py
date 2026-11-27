@@ -137,6 +137,31 @@ def test_no_channel_store_backend_returns_all_true() -> None:
         bus.close()
 
 
+def test_can_list_channels_matches_can_read(bus: Bus) -> None:
+    from mansio_core.authz import ChannelAuthorizer
+
+    authz = ChannelAuthorizer(bus)
+    names = [
+        *CHANNELS,
+        "dm:reader-agent:stranger",  # unregistered DM, reader is a participant
+        "dm:someone:else",  # unregistered DM, reader is not
+        "notebook:reader-agent",  # reader's own namespace
+        "notebook:other",  # someone else's namespace
+        "_system:agents",  # unregistered public name
+    ]
+    many = authz.can_list_channels(READER, names)
+    assert set(many) == set(names)
+    for name in names:
+        # can_read is the pre-batch single-channel rule; the batch path must agree.
+        assert many[name] == authz.can_read(READER, name), name
+
+    # Unregistered private names are decided by name, not by the store.
+    assert many["dm:reader-agent:stranger"] is True
+    assert many["dm:someone:else"] is False
+    assert many["notebook:reader-agent"] is True
+    assert many["notebook:other"] is False
+
+
 def test_sqlite_chunks_large_list_in_few_statements(tmp_path) -> None:
     backend = SQLiteBackend(str(tmp_path / "bulk.db"))
     bus = Bus(backend)

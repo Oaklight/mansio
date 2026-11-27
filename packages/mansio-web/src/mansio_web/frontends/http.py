@@ -686,6 +686,18 @@ class HttpFrontend:
                 has_more=has_more,
             ).to_dict()
 
+        def _visible_channels_detail(user_id: str) -> list[dict]:
+            """List channel detail for one user, filtered in a single thread hop."""
+            detail = bus.channels_detail()
+            allowed = authz.can_list_channels(user_id, [ch["name"] for ch in detail])
+            return [ch for ch in detail if allowed[ch["name"]]]
+
+        def _visible_channel_names(user_id: str) -> list[str]:
+            """List channel names for one user, filtered in a single thread hop."""
+            names = cast(list[str], bus.channels(detail=False))
+            allowed = authz.can_list_channels(user_id, names)
+            return [name for name in names if allowed[name]]
+
         @self._app.get("/v1/channels")
         async def channels(request: Request) -> dict | tuple:
             try:
@@ -696,18 +708,16 @@ class HttpFrontend:
             auth_result = request.state.auth_result
 
             if want_detail:
-                all_detail = await asyncio.to_thread(bus.channels_detail)
                 if isinstance(auth_result, str):
-                    all_detail = [
-                        ch for ch in all_detail if authz.can_list_channel(auth_result, ch["name"])
-                    ]
+                    all_detail = await asyncio.to_thread(_visible_channels_detail, auth_result)
+                else:
+                    all_detail = await asyncio.to_thread(bus.channels_detail)
                 return ChannelsResult(channels=all_detail).to_dict()
 
-            all_channels = cast(list[str], await asyncio.to_thread(bus.channels, detail=False))
             if isinstance(auth_result, str):
-                all_channels = [
-                    ch for ch in all_channels if authz.can_list_channel(auth_result, ch)
-                ]
+                all_channels = await asyncio.to_thread(_visible_channel_names, auth_result)
+            else:
+                all_channels = cast(list[str], await asyncio.to_thread(bus.channels, detail=False))
             return ChannelsResult(channels=all_channels).to_dict()
 
         self._setup_auth_check_route()

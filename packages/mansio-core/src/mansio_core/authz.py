@@ -10,6 +10,7 @@ no-auth mode bypass these checks at the frontend, because they have no
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from mansio_core.types import is_valid_user_id, normalize_required, permission_allows
@@ -303,7 +304,37 @@ class ChannelAuthorizer:
 
     def can_list_channel(self, user_id: str, channel: str) -> bool:
         """True if *channel* appears in *user_id*'s channel listing."""
-        return self.can_read(user_id, channel)
+        return self.can_list_channels(user_id, [channel])[channel]
+
+    def can_list_channels(self, user_id: str, channels: Sequence[str]) -> dict[str, bool]:
+        """Batch form of :meth:`can_list_channel`.
+
+        Private-prefix and ``dm:`` names are decided by name, exactly as the
+        single-channel form does.  Every other name is resolved in one
+        ``Bus.check_access_many`` call, so listing a channel set costs a fixed
+        number of backend round trips instead of one per channel.
+
+        Args:
+            user_id: Agent whose listing is being filtered.
+            channels: Channel names to decide.
+
+        Returns:
+            Mapping of channel name to the answer
+            :meth:`can_list_channel` would give for that name.
+        """
+        result: dict[str, bool] = {}
+        public: list[str] = []
+        for channel in channels:
+            if is_private_channel(channel):
+                result[channel] = is_channel_member(user_id, channel)
+            else:
+                public.append(channel)
+        if public:
+            try:
+                result.update(self._bus.check_access_many(public, user_id, "read"))
+            except NotImplementedError:
+                result.update({channel: True for channel in public})
+        return result
 
     # ── delete ───────────────────────────────────────────────
 
