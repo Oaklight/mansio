@@ -33,9 +33,9 @@ def register(app: App, ctx: RouteContext) -> None:
     @app.get("/")
     def root(request: Any) -> Response | dict:
         if serve_ui:
-            from ..static import ADMIN_HTML
+            from ..static import get_admin_html
 
-            return Response(ADMIN_HTML, content_type="text/html")
+            return Response(get_admin_html(), content_type="text/html")
         return {
             "name": "Mansio Admin API",
             "version": "1.0.0",
