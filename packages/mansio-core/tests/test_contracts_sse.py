@@ -1,0 +1,158 @@
+"""Tests for the SSE stream-event contract."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from mansio_core.contracts import (
+    ContractError,
+    StreamEvent,
+    message_from_dict,
+    message_to_dict,
+    parse_stream_event,
+    stream_event_to_json,
+)
+from mansio_core.types import Message
+
+
+def _message(**overrides) -> Message:
+    fields = {
+        "id": "msg-1",
+        "channel": "general",
+        "sender": "alice",
+        "msg_type": "text",
+        "payload": "hello",
+        "timestamp": "2026-01-01T00:00:00+00:00",
+    }
+    fields.update(overrides)
+    return Message(**fields)
+
+
+class TestMessageWireObject:
+    def test_optional_fields_are_omitted_when_unset(self) -> None:
+        assert message_to_dict(_message()) == {
+            "id": "msg-1",
+            "channel": "general",
+            "sender": "alice",
+            "msg_type": "text",
+            "payload": "hello",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "metadata": None,
+        }
+
+    def test_optional_fields_are_included_when_set(self) -> None:
+        wire = message_to_dict(
+            _message(
+                metadata={"tags": ["a"]},
+                parent_id="parent",
+                thread_id="root",
+                intent="FYI_ONLY",
+            )
+        )
+        assert wire["metadata"] == {"tags": ["a"]}
+        assert wire["parent_id"] == "parent"
+        assert wire["thread_id"] == "root"
+        assert wire["intent"] == "FYI_ONLY"
+
+    def test_round_trip(self) -> None:
+        original = _message(metadata={"k": "v"}, parent_id="p", intent="REQUIRES_RESPONSE")
+        assert message_from_dict(message_to_dict(original)) == original
+
+    def test_parse_accepts_absent_optional_fields(self) -> None:
+        message = message_from_dict(
+            {
+                "id": "m",
+                "channel": "c",
+                "sender": "s",
+                "msg_type": "t",
+                "payload": "p",
+                "timestamp": "ts",
+            }
+        )
+        assert message.metadata is None
+        assert message.parent_id is None
+
+    def test_extra_fields_are_ignored(self) -> None:
+        message = message_from_dict(
+            {
+                "id": "m",
+                "channel": "c",
+                "sender": "s",
+                "msg_type": "t",
+                "payload": "p",
+                "timestamp": "ts",
+                "future_field": 1,
+            }
+        )
+        assert message.id == "m"
+
+    @pytest.mark.parametrize(
+        ("wire", "match"),
+        [
+            ([], "'message' must be a JSON object"),
+            ({"channel": "c"}, "requires 'id'"),
+            ({"id": "", "channel": "c"}, "requires 'id'"),
+            ({"id": 1}, "requires 'id'"),
+            (
+                {"id": "m", "channel": "c", "sender": "s", "msg_type": "t", "payload": "p"},
+                "requires 'timestamp'",
+            ),
+            (
+                {
+                    "id": "m",
+                    "channel": "c",
+                    "sender": "s",
+                    "msg_type": "t",
+                    "payload": "p",
+                    "timestamp": "ts",
+                    "parent_id": 1,
+                },
+                "'parent_id' must be a string",
+            ),
+            (
+                {
+                    "id": "m",
+                    "channel": "c",
+                    "sender": "s",
+                    "msg_type": "t",
+                    "payload": "p",
+                    "timestamp": "ts",
+                    "metadata": [],
+                },
+                "'metadata' must be a JSON object",
+            ),
+        ],
+    )
+    def test_invalid_message_objects(self, wire, match: str) -> None:
+        with pytest.raises(ContractError, match=match):
+            message_from_dict(wire)
+
+
+class TestStreamEventDocument:
+    def test_serialize_shape(self) -> None:
+        event = StreamEvent(channel="general", message=_message())
+        document = json.loads(stream_event_to_json(event))
+        assert document == {"channel": "general", "message": message_to_dict(_message())}
+
+    def test_unicode_is_not_escaped(self) -> None:
+        event = StreamEvent(channel="general", message=_message(payload="你好"))
+        assert "你好" in stream_event_to_json(event)
+
+    def test_round_trip(self) -> None:
+        event = StreamEvent(channel="general", message=_message(intent="FYI_ONLY"))
+        assert parse_stream_event(stream_event_to_json(event)) == event
+
+    @pytest.mark.parametrize(
+        ("data", "match"),
+        [
+            ("{", "must be valid JSON"),
+            ("[]", "must be a JSON object"),
+            ('{"message": {}}', "requires 'channel'"),
+            ('{"channel": "", "message": {}}', "requires 'channel'"),
+            ('{"channel": "c"}', "requires 'message'"),
+        ],
+    )
+    def test_invalid_envelopes(self, data: str, match: str) -> None:
+        with pytest.raises(ContractError, match=match):
+            parse_stream_event(data)
