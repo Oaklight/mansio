@@ -34,7 +34,7 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
 )
 from mansio_client import MansioClient
-from mansio_client.types import Message
+from mansio_core.types import Message
 
 USER_ID = "alice"
 CHANNELS = ("alpha", "beta")
