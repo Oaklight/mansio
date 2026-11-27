@@ -130,14 +130,14 @@
     <table>
       <thead><tr><th>位置</th><th>规模</th><th>症状</th><th>目标阶段</th></tr></thead>
       <tbody>
-        <tr><td><code>mansio_web/adapters/http.py</code></td><td>360 行组装根 + <code>routes/</code> 1476 行（24 条路由）</td><td><span class="pill good">已拆分</span> M4e：10 个 <code>register(app, ctx)</code> 模块 + <code>_common</code>；<code>http.py</code> 只剩生命周期、中间件与按序注册，冻结 <code>RouteContext</code></td><td>M4e 已完成</td></tr>
+        <tr><td><code>mansio_web/adapters/http.py</code></td><td>360 行组装根 + <code>routes/</code> 1489 行（24 条路由）</td><td><span class="pill good">已拆分</span> M4e：10 个 <code>register(app, ctx)</code> 模块 + <code>_common</code>；<code>http.py</code> 只剩生命周期、中间件与按序注册，冻结 <code>RouteContext</code></td><td>M4e 已完成</td></tr>
         <tr><td>admin UI</td><td>55 行骨架 + 4151 行资产（19 文件）</td><td><span class="pill good">已重构</span> M4b：Slack 式侧栏 + 内容 + 详情、组件词汇、契约生成视图；M4c 把 26 条后端路由移入 10 个 <code>routes/*.py</code> 模块</td><td>M4b / M4c 已完成</td></tr>
         <tr><td><code>mansio_web/admin/server.py</code></td><td>332 行 · 组装根</td><td><span class="pill good">已拆分</span> M4c：路由移入 <code>admin/routes/</code> 的 10 个模块（<code>routes/</code> 共 482 行，含 <code>RouteContext</code>），各暴露 <code>register(app, ctx)</code>；<code>server.py</code> 只作组装根（冻结 <code>RouteContext</code>）</td><td>M4c 已完成</td></tr>
-        <tr><td>transport</td><td>协议 190 · 实现 745 · 工厂 101</td><td><span class="pill good">已修复</span> M2c 收拢协议与唯一实现；#403 起构造走 <code>create_transport(url)</code>，按 URL scheme 注册实现，<code>MansioClient</code> 不再 import <code>HttpTransport</code>；<code>mansio client</code> 已随 M4d 删除</td><td>M2c 已完成</td></tr>
+        <tr><td>transport</td><td>协议 190 · 实现 806 · 工厂 101</td><td><span class="pill good">已修复</span> M2c 收拢协议与唯一实现；#403 起构造走 <code>create_transport(url)</code>，按 URL scheme 注册实现，<code>MansioClient</code> 不再 import <code>HttpTransport</code>；<code>mansio client</code> 已随 M4d 删除</td><td>M2c 已完成</td></tr>
         <tr><td><code>shared/</code></td><td>949 行（已删除）</td><td><span class="pill good">已消除</span> M1 把类型与传输协议并入 <code>mansio-core</code>；复制与 <code>sync-check</code> 一并删除</td><td>M1 已完成</td></tr>
         <tr><td><code>bus.py</code></td><td>Bus 813 行</td><td><span class="pill good">已修复</span> M1 把 <code>metrics</code> 移入 core 中性模块，Bus 不再导入 admin</td><td>M1 已完成</td></tr>
         <tr><td><code>admin/ POST /api/messages</code></td><td>1 条写路径</td><td><span class="pill good">已修复</span> #385 起 admin 发布走 <code>parse_publish</code>，IRC 丢弃空 PRIVMSG</td><td>已完成</td></tr>
-        <tr><td><code>client.py</code></td><td>464 行 + 5 个 mixin（共 688 行）· 39 个公开成员</td><td><span class="pill good">已拆分</span> <code>MansioClient</code> 由 5 个 mixin 组合；公开成员的名称、参数与默认值逐一比对未变</td><td>已完成</td></tr>
+        <tr><td><code>client.py</code></td><td>501 行 + 5 个 mixin（共 688 行）· 39 个公开成员</td><td><span class="pill good">已拆分</span> <code>MansioClient</code> 由 5 个 mixin 组合；公开成员的名称、参数与默认值逐一比对未变</td><td>已完成</td></tr>
         <tr><td><code>authz → Bus.check_access</code></td><td>一次批量调用</td><td><span class="pill good">已修复</span> #393a/#393b：<code>check_access_many</code> 进入 <code>ChannelStore</code>，SQLite 每 500 个名称两条语句；列表查询与过滤在同一工作线程内完成；<code>dm:</code>/<code>notebook:</code>/<code>memory:</code> 仍按名称判定</td><td>已完成</td></tr>
         <tr><td><code>mcp.py</code></td><td>1126 行 · 32 个工具</td><td><span class="pill good">不拆分</span> 工具注册计划由 toolregistry 项目承接；本仓库不为此拆文件</td><td>不拆（外部化）</td></tr>
       </tbody>
@@ -158,8 +158,8 @@
 flowchart TB
   subgraph PKG["当前：3 个发布包（M1–M4e 已合并）"]
     CORE["mansio-core · 自研 8.5k 行 · 运行时依赖 0&lt;br/&gt;contracts 1535（bus + admin DTO · parse_* · SSE）&lt;br/&gt;types 193 · transport 190（协议）&lt;br/&gt;bus 813 · authz 386 · protocols 533&lt;br/&gt;backends 4.2k · token_store 415 · metrics 122"]
-    WEB["mansio 包 = 仅 mansio_web（M4d 删除别名）&lt;br/&gt;自研 4.5k 行 + admin UI 4.2k&lt;br/&gt;adapters 2.3k（http 360 + routes 1476）&lt;br/&gt;admin 1.4k · cli 677"]
-    CLI["mansio-client · 自研 4.6k 行&lt;br/&gt;client 464 + mixins 688 · mcp 1126&lt;br/&gt;transport 846（含工厂） · cli 397 · federation 529&lt;br/&gt;injectors 327 · types.py 已删除（M4d）"]
+    WEB["mansio 包 = 仅 mansio_web（M4d 删除别名）&lt;br/&gt;自研 4.5k 行 + admin UI 4.2k&lt;br/&gt;adapters 2.3k（http 360 + routes 1489）&lt;br/&gt;admin 1.4k · cli 677"]
+    CLI["mansio-client · 自研 4.6k 行&lt;br/&gt;client 501 + mixins 688 · mcp 1126&lt;br/&gt;transport 907（含工厂） · cli 397 · federation 529&lt;br/&gt;injectors 327 · types.py 已删除（M4d）"]
   end
   WEB -->|"一个运行时依赖"| CORE
   CLI -->|"一个运行时依赖"| CORE
@@ -221,7 +221,7 @@ flowchart TB
     K --> T
     P --> T
     A --> T
-    SP -.->|仅类型| P
+    SP -.->|函数内延迟导入| P
     BE --> P
     BE --> A
     BE --> T
@@ -229,16 +229,17 @@ flowchart TB
     B --> P
     B --> M
     B --> SP
+    B --> T
   end
   subgraph WEB["mansio-web（发布名 mansio）"]
-    WH["adapters 2265&lt;br/&gt;http 组装根 360 + routes 1476&lt;br/&gt;24 条路由"]
+    WH["adapters 2278&lt;br/&gt;http 组装根 360 + routes 1489&lt;br/&gt;24 条路由"]
     WA["admin 1445 + 资产 4206"]
     WC["cli 677"]
     WB["adapters/base 71&lt;br/&gt;ServerAdapter 协议（仅 web 使用）"]
   end
   subgraph CLIENT["mansio-client"]
-    CC["client 464 + mixins 688"]
-    CT["transport/http 745 + 工厂 101"]
+    CC["client 501 + mixins 688"]
+    CT["transport/http 806 + 工厂 101"]
     CM["mcp 1126"]
     CCLI["cli 397"]
   end
@@ -249,6 +250,7 @@ flowchart TB
   WC --> B
   CC --> T
   CC --> TR
+  CC --> K
   CM --> T
   CCLI --> T
   CT --> K
@@ -279,8 +281,8 @@ flowchart TB
     SDK["SDK / CLI / MCP"]
     IMPL["transport/http"]
   end
-  DELIV -->|"import contracts / authz"| LEAF
-  DELIV -->|"注入 Bus / TokenStore"| BUS
+  DELIV -->|"adapters/admin：contracts / authz"| LEAF
+  DELIV -->|"serve CLI 组装：Bus / backends / TokenStore"| BUS
   SDK -->|"import types / contracts / Transport"| LEAF
   SDK --> TR
   IMPL -.->|"实现"| TR
@@ -342,9 +344,9 @@ flowchart TB
 <pre class="mermaid">
 flowchart LR
   SDK["mansio-client&lt;br/&gt;MansioClient / CLI / MCP"]
-  TR["mansio_client/transport/http.py 745&lt;br/&gt;HTTP + SSE 实现"]
+  TR["mansio_client/transport/http.py 806&lt;br/&gt;HTTP + SSE 实现"]
   TP["mansio_core/transport.py 190&lt;br/&gt;Transport + WarningSource"]
-  HTTPF["HttpAdapter 360 + routes 1476"]
+  HTTPF["HttpAdapter 360 + routes 1489"]
   SDK -->|"使用协议"| TP
   SDK -->|"create_transport(url)"| TR
   TR -.->|"实现"| TP
@@ -581,10 +583,10 @@ flowchart LR
         <tr><td><code>.../mansio_core/authz.py</code> 386</td><td>结构规则 + 频道存储 + ACL + 批量列表判定</td><td><code>ChannelAuthorizer</code>, <code>dm_participants</code></td></tr>
         <tr><td><code>.../mansio_core/types.py</code> 193 · <code>metrics.py</code> 122</td><td>领域类型与指标（单一源）</td><td><code>Message</code>, <code>MetricsCollector</code></td></tr>
         <tr><td><code>.../mansio_core/backends/</code> 4.2k</td><td>四种存储</td><td><code>SQLiteBackend</code> 等</td></tr>
-        <tr><td><code>.../mansio_web/adapters/</code> 2265</td><td><code>http.py</code> 360（生命周期 + 中间件 + 按序注册）+ <code>routes/</code> 1476（10 个 register 模块）</td><td><code>HttpAdapter</code>, <code>RouteContext</code></td></tr>
+        <tr><td><code>.../mansio_web/adapters/</code> 2278</td><td><code>http.py</code> 360（生命周期 + 中间件 + 按序注册）+ <code>routes/</code> 1489（10 个 register 模块）</td><td><code>HttpAdapter</code>, <code>RouteContext</code></td></tr>
         <tr><td><code>.../mansio_web/admin/</code> 1.4k + UI 4.2k</td><td>控制台（骨架 + assets）+ <code>routes/</code> + auth + AdminView</td><td><code>AdminServer</code>, <code>AdminView</code></td></tr>
-        <tr><td><code>.../mansio_client/transport/</code> 846</td><td>HTTP+SSE 实现（745）+ 按 scheme 选择的工厂（101）</td><td><code>HttpTransport</code>, <code>create_transport</code></td></tr>
-        <tr><td><code>packages/mansio-client/src/mansio_client/client.py</code> 464 + mixins 688</td><td>SDK 门面 + 5 个 mixin：游标、语义 API、合批、循环检测</td><td><code>MansioClient</code></td></tr>
+        <tr><td><code>.../mansio_client/transport/</code> 907</td><td>HTTP+SSE 实现（806）+ 按 scheme 选择的工厂（101）</td><td><code>HttpTransport</code>, <code>create_transport</code></td></tr>
+        <tr><td><code>packages/mansio-client/src/mansio_client/client.py</code> 501 + mixins 688</td><td>SDK 门面 + 5 个 mixin：游标、语义 API、合批、循环检测</td><td><code>MansioClient</code></td></tr>
         <tr><td><code>.../mansio_client/mcp.py</code> 1126</td><td>32 个 MCP 工具</td><td><code>_TOOLS</code>, <code>_DISPATCH</code></td></tr>
       </tbody>
     </table>
