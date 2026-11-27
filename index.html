@@ -549,7 +549,7 @@ flowchart LR
       <tbody>
         <tr><td><code>.../mansio_core/contracts/</code> 1430</td><td>bus + admin 请求/响应 DTO · <code>parse_*</code> · <code>StreamEvent</code></td><td><code>PublishRequest</code>, <code>AdminUsersResult</code></td></tr>
         <tr><td><code>packages/mansio-core/src/mansio_core/bus.py</code> 798</td><td>路由与编排；不承担授权</td><td><code>Bus</code>, <code>SQLiteBus</code></td></tr>
-        <tr><td><code>.../mansio_core/protocols.py</code> 533</td><td>后端接口契约</td><td><code>Backend</code> + 6 能力 Protocol</td></tr>
+        <tr><td><code>.../mansio_core/protocols.py</code> 533</td><td>后端接口契约</td><td><code>Backend</code> + 5 能力 Protocol（<code>Transport</code> 在 transport.py）</td></tr>
         <tr><td><code>.../mansio_core/transport.py</code> 178</td><td>客户端 Transport 协议（M2c 完成）</td><td><code>Transport</code></td></tr>
         <tr><td><code>.../mansio_core/authz.py</code> 386</td><td>结构规则 + 频道存储 + ACL + 批量列表判定</td><td><code>ChannelAuthorizer</code>, <code>dm_participants</code></td></tr>
         <tr><td><code>.../mansio_core/types.py</code> 193 · <code>metrics.py</code> 122</td><td>领域类型与指标（单一源）</td><td><code>Message</code>, <code>MetricsCollector</code></td></tr>
