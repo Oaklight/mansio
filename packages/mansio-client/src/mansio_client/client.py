@@ -15,7 +15,7 @@ from typing import Literal, overload
 from uuid import uuid4
 
 from mansio_core.contracts import WarningEvent
-from mansio_core.transport import Transport
+from mansio_core.transport import Transport, WarningSource
 from mansio_core.types import (
     ACLEntry,
     ChannelMeta,
@@ -118,7 +118,8 @@ class MansioClient(CursorMixin, LoopMixin, CoalesceMixin, SemanticMixin):
         # transport keeps warnings of its own.
         self._warnings: deque[WarningEvent] = deque(maxlen=_WARNING_HISTORY)
         self._warnings_lock = threading.Lock()
-        self._transport.warning_callback = self._on_transport_warning
+        if isinstance(self._transport, WarningSource):
+            self._transport.warning_callback = self._on_transport_warning
         self._cursors: dict[str, str] = {}
         self._persisted: dict[str, str] = {}
         self._coalescers: dict[str, _Coalescer] = {}

@@ -11,6 +11,7 @@ from mansio_client._vendor.sse import EventSource
 from mansio_client.client import MansioClient
 from mansio_client.transport.http import WARNING_HISTORY, HttpTransport
 from mansio_core.contracts import WarningEvent, warning_event_to_json
+from mansio_core.transport import WarningSource
 
 _MESSAGE_DATA = json.dumps(
     {
@@ -107,13 +108,22 @@ class _StubTransport:
     warning_callback: Callable[[WarningEvent], None] | None = None
 
 
-def test_client_owns_warning_history(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
-    stub = _StubTransport()
-    monkeypatch.setattr("mansio_client.client.create_transport", lambda *args, **kwargs: stub)
+class _PlainTransport:
+    """A transport with no warning support at all."""
+
+
+def _client_with(monkeypatch: pytest.MonkeyPatch, transport: object) -> MansioClient:
+    monkeypatch.setattr("mansio_client.client.create_transport", lambda *args, **kwargs: transport)
     monkeypatch.setattr(MansioClient, "_announce", lambda self: None)
     monkeypatch.setattr(MansioClient, "_restore_cursors", lambda self: None)
+    return MansioClient("http://localhost:8742", "agent-a")
 
-    client = MansioClient("http://localhost:8742", "agent-a")
+
+def test_client_owns_warning_history(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
+    stub = _StubTransport()
+    client = _client_with(monkeypatch, stub)
+
+    assert isinstance(stub, WarningSource)
     callback = stub.warning_callback
     assert callback == client._on_transport_warning
     assert callback is not None
@@ -125,3 +135,14 @@ def test_client_owns_warning_history(monkeypatch: pytest.MonkeyPatch, caplog) ->
 
     assert client.recent_warnings == (warning,)
     assert "SSE warning: truncated" in caplog.text
+
+
+def test_client_without_warning_source_still_constructs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _PlainTransport()
+    client = _client_with(monkeypatch, stub)
+
+    assert not isinstance(stub, WarningSource)
+    assert not hasattr(stub, "warning_callback")
+    assert client.recent_warnings == ()

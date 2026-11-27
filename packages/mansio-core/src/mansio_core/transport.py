@@ -11,9 +11,10 @@ only the HTTP API provides.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal, Protocol, overload
+from typing import TYPE_CHECKING, Literal, Protocol, overload, runtime_checkable
 
 if TYPE_CHECKING:
+    from mansio_core.contracts.sse import WarningEvent
     from mansio_core.types import ACLEntry, ChannelMeta, ClaimResult, Message, UserPresence
 
 
@@ -176,3 +177,14 @@ class Transport(Protocol):
     def close(self) -> None:
         """Release resources."""
         ...
+
+
+@runtime_checkable
+class WarningSource(Protocol):
+    """A transport that can deliver typed SSE warnings.
+
+    ``Transport`` deliberately does not require warning support. The
+    HTTP/SSE transport implements both this protocol and ``Transport``.
+    """
+
+    warning_callback: Callable[[WarningEvent], None] | None
