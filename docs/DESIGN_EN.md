@@ -723,10 +723,28 @@ admin/
 ├── auth.py        # Password login and session cookies
 ├── view.py        # AdminView — admin response documents
 ├── static.py      # Admin HTML loader and asset whitelist
-├── admin.html     # Dashboard skeleton (markup only)
-└── assets/        # admin.css, theme-init.js, app/api/util/state/auth/refresh.js,
-                   # and one ES module per tab under views/
+├── admin.html     # Console shell (markup only)
+└── assets/        # admin.css, theme-init.js, contracts/models/api/app/auth/
+                   # router/state/format/ui.js, and views/ (one per screen)
 ```
+
+The page is a routed console: a persistent sidebar (Workspace, Traffic,
+Identity, System), a main pane and a right detail pane for the selected
+channel or user. Routes are hash-based — `#/channels/<name>`,
+`#/messages?channel=…`, `#/users/<id>` — so deep links, reload, back/forward
+and the login round-trip keep the target; an unknown hash falls back to
+Overview.
+
+`contracts.js` is generated from `mansio_core.contracts` by
+`scripts/gen_admin_contracts.py` (`--check` fails when stale); every response
+is parsed before a view sees it, and `models.js` turns nested rows into typed
+view models. `ui.js` is the component vocabulary (cards, stat grids, tables,
+lists, detail panes, status pills, empty/error/loading states, a
+focus-trapping modal, aria-live toasts); assets build DOM nodes with
+`createElement`/`textContent` and never assign dynamic `innerHTML`. Handlers
+are attached with `addEventListener` — there are no inline `onclick`
+attributes and no `window` bindings. Modals trap focus and close on Esc, and
+the sidebar is plain anchors, so it is keyboard-navigable.
 
 UI assets are served from `/assets/<file>` through a fixed whitelist: an
 unknown name, a traversal segment or an unknown suffix is rejected before

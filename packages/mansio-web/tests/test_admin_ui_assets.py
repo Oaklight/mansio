@@ -45,6 +45,16 @@ class TestAdminHtml:
         assert 'src="/assets/theme-init.js"' in body
         assert 'src="/assets/app.js"' in body
 
+    @pytest.mark.parametrize("handler", ["onclick=", "onchange=", "oninput=", "onsubmit="])
+    def test_has_no_inline_event_handlers(self, handler):
+        body = (ASSETS_DIR.parent / "admin.html").read_text("utf-8")
+        assert handler not in body
+
+    def test_has_no_window_handler_bindings(self):
+        app = (ASSETS_DIR / "app.js").read_text("utf-8")
+        assert "Object.assign(window" not in app
+        assert "onclick" not in app
+
 
 class TestAdminAssets:
     @pytest.mark.parametrize("name", sorted(ADMIN_ASSETS))
@@ -80,6 +90,24 @@ class TestAssetWhitelist:
             if path.is_file()
         }
         assert on_disk == set(ADMIN_ASSETS)
+
+
+class TestNoDynamicMarkup:
+    _BANNED = (
+        re.compile(r"\.innerHTML\s*="),
+        re.compile(r"\.outerHTML\s*="),
+        re.compile(r"insertAdjacentHTML\s*\("),
+        re.compile(r"document\.write\s*\("),
+    )
+
+    def test_assets_build_dom_with_nodes_not_strings(self):
+        offenders = []
+        for path in sorted(ASSETS_DIR.rglob("*.js")):
+            text = path.read_text("utf-8")
+            for pattern in self._BANNED:
+                if pattern.search(text):
+                    offenders.append(f"{path.name}: {pattern.pattern}")
+        assert not offenders
 
 
 class TestModuleGraph:
