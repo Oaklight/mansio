@@ -91,12 +91,12 @@
   <div class="eyebrow">MANSIO · Architecture</div>
   <h1>现状与目标并列：问题在哪里</h1>
   <p class="lede">
-    左列是 <code>master @ e2a9425</code> 的实际结构（M1 包拆分、M2a 契约层、M2b SSE 信封已合并），右列是 core/web/transport 重构的目标结构。
+    左列是 <code>master @ 0eb3baf</code> 的实际结构（M1 拆分、M2a 契约、M2b SSE、M2c transport 已合并），右列是 core/web/transport 重构的目标结构。
     每个节点标出文件规模与职责，红色表示层次倒置或重复，橙色表示 god module，绿色表示目标态新增的接口与包。
     合并任一重构 PR 后，本页按迁移阶段更新“现状”一列。
   </p>
   <div class="meta">
-    <span>现状快照：<code>master @ e2a9425</code>（M1、M2a、M2b 已合并）</span>
+    <span>现状快照：<code>master @ 0eb3baf</code>（M1–M2c 已合并）</span>
     <span>目标：<code>core / web / client</code> 三包 + 契约层</span>
     <span>分支：<code>docs_arch</code></span>
     <button id="themeBtn" type="button">深色主题</button>
@@ -123,7 +123,7 @@
 <section id="problems">
   <h2><span class="num">00</span>问题总览</h2>
   <p class="sub">
-    自研代码 17.1k 行（不含 <code>admin.html</code> 1.95k）、测试 21.4k 行、1395 个测试函数；模块级 import 环为 0（已验证）。
+    自研代码 16.4k 行（不含 <code>admin.html</code> 1.95k）、测试 21.6k 行、1414 个测试函数；模块级 import 环为 0（已验证）。
     复杂度不在“层数”，而在下列具体位置。
   </p>
   <div class="panel">
@@ -133,10 +133,10 @@
         <tr><td><code>mansio_web/frontends/http.py</code></td><td>1684 行 · 24 条路由 · 21 个 <code>_setup_*</code></td><td><span class="pill hot">god module</span> 入参校验已移出（<code>contracts</code>）；认证、SSE、队列、ACL、presence 仍共处一个类</td><td>M3</td></tr>
         <tr><td><code>mansio_web/admin/admin.html</code></td><td>1952 行单文件</td><td><span class="pill hot">单文件前端</span> HTML/CSS/JS 耦合，组件无法复用，无法分块测试</td><td>M4</td></tr>
         <tr><td><code>mansio_web/admin/server.py</code></td><td>756 行 · 27 条路由</td><td><span class="pill hot">路由与视图拼装混杂</span> 无类型化 AdminView</td><td>M3</td></tr>
-        <tr><td>transport</td><td>协议 125 · client 749 · server 743</td><td><span class="pill hot">接口=实现</span> M1 已把 <code>Transport</code> 协议抽到 core，但 <code>MansioClient</code> 仍直接依赖 <code>HttpTransport</code>，HTTP+SSE 实现仍有两份</td><td>M2c</td></tr>
+        <tr><td>transport</td><td>协议 178 · 实现 745+22 · 服务端副本已删</td><td><span class="pill good">已修复</span> M2c：SDK 只按 <code>Transport</code> 协议使用，唯一实现位于 <code>mansio_client/transport/</code>；<code>mansio client</code> 改为弃用桩。残留：构造处仍直接 import <code>HttpTransport</code>（待工厂按 scheme 选择）</td><td>M2c 已完成</td></tr>
         <tr><td><code>shared/</code></td><td>949 行（已删除）</td><td><span class="pill good">已消除</span> M1 把类型与传输协议并入 <code>mansio-core</code>；复制与 <code>sync-check</code> 一并删除</td><td>M1 已完成</td></tr>
         <tr><td><code>bus.py</code></td><td>Bus 785 行</td><td><span class="pill good">已修复</span> M1 把 <code>metrics</code> 移入 core 中性模块，Bus 不再导入 admin</td><td>M1 已完成</td></tr>
-        <tr><td><code>admin/ POST /api/messages</code></td><td>1 条写路径</td><td><span class="pill bad">绕过契约</span> 直接 <code>bus.publish</code>，可写入 SSE 解析器拒绝的消息（空 sender、非字符串 payload）；IRC 转发同类</td><td>后续（#383）</td></tr>
+        <tr><td><code>admin/ POST /api/messages</code></td><td>1 条写路径</td><td><span class="pill good">已修复</span> #385 起 admin 发布走 <code>parse_publish</code>，IRC 丢弃空 PRIVMSG</td><td>已完成</td></tr>
         <tr><td><code>client.py</code></td><td>980 行 · 66 个方法</td><td><span class="pill hot">职责堆积</span> 游标、语义 API、合批、循环检测、burst 同处一类</td><td>后续</td></tr>
         <tr><td><code>authz → Bus.check_access</code></td><td>每频道一次后端查询</td><td><span class="pill hot">N+1</span> <code>GET /v1/channels?detail=true</code> 逐频道查询</td><td>后续</td></tr>
         <tr><td><code>mcp.py</code></td><td>1126 行 · 32 个工具</td><td>schema 与 handler 手写注册，可拆但优先级低</td><td>后续</td></tr>
@@ -148,7 +148,7 @@
 <section id="packages">
   <h2><span class="num">01</span>包结构：现状 vs 目标</h2>
   <p class="sub">
-    M1 之后现状 3 个发布包，<code>shared/</code> 并入 core；M2a 把 HTTP 入参契约、M2b 把 SSE 信封并入 <code>contracts</code>；剩余问题是 web 包仍带着客户端的 HTTP 实现副本。
+    M1 之后现状 3 个发布包，<code>shared/</code> 并入 core；M2a 契约、M2b SSE、M2c transport 均已收拢；剩余问题是 <code>frontends/http.py</code> 与 admin 的 god module，以及单文件前端。
   </p>
   <div class="compare">
     <div class="panel">
@@ -157,8 +157,8 @@
 <pre class="mermaid">
 flowchart TB
   subgraph PKG["当前：3 个发布包（M1、M2a、M2b 已合并）"]
-    CORE["mansio-core · 自研 7.7k 行 · 运行时依赖 0&lt;br/&gt;contracts 968（DTO · parse_* · SSE）&lt;br/&gt;types 193 · transport 125（协议）&lt;br/&gt;bus 785 · authz 320 · protocols 508&lt;br/&gt;backends 4.1k · token_store 415 · metrics 122"]
-    WEB["mansio 包 = mansio_web + 兼容别名 mansio&lt;br/&gt;自研 5.2k 行 + admin.html 1952&lt;br/&gt;frontends/http 1684 · admin 3.0k&lt;br/&gt;transport_http 743（客户端副本）· cli 887"]
+    CORE["mansio-core · 自研 7.8k 行 · 运行时依赖 0&lt;br/&gt;contracts 968（DTO · parse_* · SSE）&lt;br/&gt;types 193 · transport 178（协议）&lt;br/&gt;bus 785 · authz 320 · protocols 508&lt;br/&gt;backends 4.1k · token_store 415 · metrics 122"]
+    WEB["mansio 包 = mansio_web + 兼容别名 mansio&lt;br/&gt;自研 4.4k 行 + admin.html 1952&lt;br/&gt;frontends/http 1684 · admin 3.0k · cli 761"]
     CLI["mansio-client · 自研 4.2k 行&lt;br/&gt;client 980 · mcp 1126 · transport 749&lt;br/&gt;cli 397 · federation 529 · injectors 327&lt;br/&gt;types.py 47：重导出 core"]
   end
   WEB -->|"一个运行时依赖"| CORE
@@ -215,19 +215,20 @@ flowchart TB
   end
 
   SDK["MansioClient 980"]
-  TRC["client transport 749&lt;br/&gt;HTTP + SSE 实现"]
-  TRS["mansio_web/transport_http.py 743&lt;br/&gt;服务端副本"]
+  TRC["mansio_client/transport/http.py 745&lt;br/&gt;HTTP + SSE 实现"]
   HTTPF["HttpFrontend 1684&lt;br/&gt;24 条路由 · 21 个 _setup_*"]
   ADMS["AdminServer 756&lt;br/&gt;27 条路由"]
   AUTHZ["ChannelAuthorizer 320"]
   BUS["Bus 785"]
   MET["metrics.py 122&lt;br/&gt;core 中性模块"]
   BE["Backends 4.1k"]
-  TP["mansio_core/transport.py 125&lt;br/&gt;Transport 协议（M1 抽出）"]
+  TP["mansio_core/transport.py 178&lt;br/&gt;Transport 协议"]
 
   MCP --> SDK
   CLIC --> SDK
-  SDK -->|"直接依赖具体类 ✗"| TRC
+  SDK -->|"使用协议"| TP
+  SDK -->|"构造具体类（待工厂）"| TRC
+  TRC -.->|"实现"| TP
   TRC -->|"HTTP + SSE"| HTTPF
   ADMUI --> ADMS
   ADMS --> BUS
@@ -236,11 +237,9 @@ flowchart TB
   AUTHZ --> BUS
   BUS --> MET
   BUS --> BE
-  TRS --> HTTPF
-  SDK -.->|"尚未依赖"| TP
-  class TRC,TRS bad
+  class TP good
   class HTTPF,ADMS hot
-  classDef bad fill:#fde8e8,stroke:#c00,color:#900
+  classDef good fill:#e8f5e9,stroke:#1a8f3c,color:#14532d
   classDef hot fill:#fff4e5,stroke:#b45309,color:#7c2d12
 </pre>
       </div>
@@ -304,7 +303,7 @@ flowchart TB
 <section id="transport">
   <h2><span class="num">03</span>Transport：接口与实现</h2>
   <p class="sub">
-    M1 已把 <code>Transport</code> 协议移入 core，但 HTTP+SSE 实现仍复制两份，<code>MansioClient</code> 仍直接依赖具体类；目标是实现独立成模块，按 URL scheme 选择。
+    M2c 已完成：协议在 core，唯一 HTTP+SSE 实现在 client，服务端副本删除；未来新增传输只需增加一个实现模块。
   </p>
   <div class="compare">
     <div class="panel">
@@ -313,20 +312,16 @@ flowchart TB
 <pre class="mermaid">
 flowchart LR
   SDK["mansio-client&lt;br/&gt;MansioClient / CLI / MCP"]
-  TR["mansio_client/transport.py 749&lt;br/&gt;HTTP + SSE 写死"]
-  TP["mansio_core/transport.py 125&lt;br/&gt;Transport 协议（M1 抽出）"]
-  TRS["mansio_web/transport_http.py 743&lt;br/&gt;客户端 HTTP 实现副本"]
-  CLIS["mansio client 子命令&lt;br/&gt;send / poll / channels / dm"]
-  HTTPF["HttpFrontend 2043"]
-  SDK -->|"直接依赖具体类 ✗"| TR
-  CLIS --> TRS
+  TR["mansio_client/transport/http.py 745&lt;br/&gt;HTTP + SSE 实现"]
+  TP["mansio_core/transport.py 178&lt;br/&gt;Transport 协议"]
+  CLIS["mansio client&lt;br/&gt;弃用桩（exit 2）"]
+  HTTPF["HttpFrontend 1684"]
+  SDK -->|"使用协议"| TP
+  SDK -->|"构造具体类（待工厂）"| TR
+  TR -.->|"实现"| TP
   TR -->|"HTTP + SSE"| HTTPF
-  TRS -->|"HTTP + SSE"| HTTPF
-  SDK -.->|"尚未依赖"| TP
-  TP -.->|"应被实现"| TR
-  class TR,TRS bad
-  class TP good
-  classDef bad fill:#fde8e8,stroke:#c00,color:#900
+  CLIS -.->|"指向 mansio-client 子命令"| SDK
+  class TR,TP good
   classDef good fill:#e8f5e9,stroke:#1a8f3c,color:#14532d
 </pre>
       </div>
@@ -369,9 +364,9 @@ flowchart LR
     </div>
   </div>
   <div class="callout">
-    目标态删除 <code>mansio_web/transport_http.py</code>。服务端的 <code>mansio client</code> 子命令迁入
-    <code>mansio-client</code> 或弃用——否则 <code>mansio-web</code> 会为了它反向依赖客户端包。新增协议只增加一个实现模块。
-    M1 已完成协议抽取（<code>mansio_core/transport.py</code>）；M2c 负责让 SDK 只依赖协议并删掉副本。
+    M2c 已完成：删除 <code>mansio_web/transport_http.py</code>，实现唯一在 <code>mansio_client/transport/http.py</code>，
+    <code>mansio client</code> 变为 exit 2 的弃用桩。服务端不再为 CLI 反向依赖客户端包；
+    新增传输（WS、in-process）只需实现 <code>Transport</code> 并加一个模块。
   </div>
 </section>
 
@@ -393,9 +388,9 @@ flowchart LR
   B --> S["响应 dict 拼装&lt;br/&gt;*Result DTO 仅作文档（M3）"]
   B -.->|"SSE data: StreamEvent&lt;br/&gt;警告仍是注释"| R
   S --> R
-  ADM["admin /api/messages · IRC 转发&lt;br/&gt;直接 bus.publish，绕过 parse（#383）"] -->|"可写入非法帧"| B
-  class K,E good
-  class S,ADM hot
+  ADM["admin /api/messages · IRC 转发&lt;br/&gt;已走 parse_publish（#385）"] -->|"校验后发布"| B
+  class K,E,ADM good
+  class S hot
   classDef good fill:#e8f5e9,stroke:#1a8f3c,color:#14532d
   classDef hot fill:#fff4e5,stroke:#b45309,color:#7c2d12
 </pre>
@@ -428,7 +423,7 @@ flowchart LR
         <tr><td>HTTP 入参</td><td>15 条路由走 <code>contracts.parse_*</code>（M2a）；频道名与授权策略仍在 web</td><td>每个路由一个 parse 函数，返回 DTO 或 400</td></tr>
         <tr><td>HTTP 响应</td><td>dict 拼装；<code>*Result</code> DTO 仅作文档，未接线</td><td><code>contracts.serialize</code> 构建 Response</td></tr>
         <tr><td>SSE</td><td><code>data:</code> 行走 <code>StreamEvent</code>（M2b）；keepalive 与 dropped/truncated 警告仍是注释</td><td><code>StreamEvent</code> 信封：message / keepalive / dropped / truncated</td></tr>
-        <tr><td>管理端发布</td><td>admin <code>/api/messages</code> 与 IRC 转发直接 <code>bus.publish</code>，未走 <code>parse_publish</code></td><td>同一 <code>parse_publish</code> / 传输契约</td></tr>
+        <tr><td>管理端发布</td><td>admin <code>/api/messages</code> 已走 <code>parse_publish</code>（#385）；IRC 丢弃空 PRIVMSG</td><td>同一 <code>parse_publish</code> / 传输契约</td></tr>
         <tr><td>管理面板 JSON</td><td>临时 dict 拼装</td><td><code>AdminView</code> 契约 + JSON Schema</td></tr>
       </tbody>
     </table>
@@ -545,13 +540,13 @@ flowchart LR
         <tr><td><code>.../mansio_core/contracts/</code> 968</td><td>请求 DTO · <code>parse_*</code> · <code>StreamEvent</code> · <code>ContractError</code></td><td><code>PublishRequest</code>, <code>parse_stream_event</code></td></tr>
         <tr><td><code>packages/mansio-core/src/mansio_core/bus.py</code> 785</td><td>路由与编排；不承担授权</td><td><code>Bus</code>, <code>SQLiteBus</code></td></tr>
         <tr><td><code>.../mansio_core/protocols.py</code> 508</td><td>后端接口契约</td><td><code>Backend</code> + 6 能力 Protocol</td></tr>
-        <tr><td><code>.../mansio_core/transport.py</code> 125</td><td>客户端 Transport 协议（M1 抽出）</td><td><code>Transport</code></td></tr>
+        <tr><td><code>.../mansio_core/transport.py</code> 178</td><td>客户端 Transport 协议（M2c 完成）</td><td><code>Transport</code></td></tr>
         <tr><td><code>.../mansio_core/authz.py</code> 320</td><td>结构规则 + 频道存储 + ACL</td><td><code>ChannelAuthorizer</code>, <code>dm_participants</code></td></tr>
         <tr><td><code>.../mansio_core/types.py</code> 193 · <code>metrics.py</code> 122</td><td>领域类型与指标（单一源）</td><td><code>Message</code>, <code>MetricsCollector</code></td></tr>
         <tr><td><code>.../mansio_core/backends/</code> 4.1k</td><td>四种存储</td><td><code>SQLiteBackend</code> 等</td></tr>
         <tr><td><code>packages/mansio-web/src/mansio_web/frontends/http.py</code> 1684</td><td>HTTP + SSE（入参校验与 SSE 信封已移出）</td><td><code>HttpFrontend</code>, <code>_SSESession</code></td></tr>
         <tr><td><code>.../mansio_web/admin/</code> 3.0k</td><td>面板 UI + API + auth</td><td><code>AdminServer</code>, <code>admin.html</code></td></tr>
-        <tr><td><code>.../mansio_web/transport_http.py</code> 743</td><td>客户端 HTTP 实现的服务端副本（M2c 删除）</td><td><code>HttpTransport</code></td></tr>
+        <tr><td><code>.../mansio_client/transport/http.py</code> 745</td><td>HTTP+SSE 实现（唯一）</td><td><code>HttpTransport</code></td></tr>
         <tr><td><code>packages/mansio-client/src/mansio_client/client.py</code> 980</td><td>SDK：游标、语义 API、合批、循环检测</td><td><code>MansioClient</code></td></tr>
         <tr><td><code>.../mansio_client/mcp.py</code> 1126</td><td>32 个 MCP 工具</td><td><code>_TOOLS</code>, <code>_DISPATCH</code></td></tr>
       </tbody>
@@ -569,7 +564,8 @@ flowchart LR
         <tr><td>M1 ✅</td><td>拆分为 <code>mansio-core</code> / <code>mansio</code>（<code>mansio_web</code> + 别名）/ <code>mansio-client</code>；吸收 <code>shared/</code>；<code>metrics</code> 移入 core。合并于 <code>209ab10</code></td><td>yes</td><td>01/02/06 的现状列（已更新）</td></tr>
         <tr><td>M2a ✅</td><td><code>mansio_core.contracts</code>：请求 DTO + <code>parse_*</code>；15 条路由改走解析；统一 400 信封并写入 docs。合并于 <code>34e4cc7</code></td><td>yes</td><td>01/02/04/06 的现状列（已更新）</td></tr>
         <tr><td>M2b ✅</td><td><code>contracts/sse.py</code>：<code>StreamEvent</code> + message 往返 + parse/serialize；服务端与两个 HTTP transport 共用。警告注释仍待类型化。合并于 <code>e2a9425</code></td><td>yes</td><td>04 的 SSE 行（已更新）</td></tr>
-        <tr><td>M2c 🚧</td><td>Transport 接口/实现分离；删除 <code>transport_http.py</code>；<code>mansio client</code> 迁出或弃用；进入实现</td><td>yes</td><td>03 的现状列</td></tr>
+        <tr><td>M2c ✅</td><td>Transport 协议在 core（178 行），实现移入 <code>mansio_client/transport/</code>，删除服务端副本；<code>mansio client</code> 弃用桩。合并于 <code>0eb3baf</code></td><td>yes</td><td>00/02/03/06 的现状列（已更新）</td></tr>
+        <tr><td>M3 🚧</td><td>M3a 响应 DTO 接线（CI+ARCH）；M3b admin 契约与 AdminView（tester2 门）</td><td>yes</td><td>04/05 的现状列</td></tr>
         <tr><td>M3</td><td>HTTP/admin 路由拆分 + 类型化 AdminView</td><td>yes</td><td>02/05 的现状列</td></tr>
         <tr><td>M4</td><td>前端重构与重新设计（骨架 + css/js 模块）</td><td>no</td><td>05 的现状列</td></tr>
       </tbody>
@@ -583,7 +579,7 @@ flowchart LR
 
 <footer>
   <span>MANSIO · 现状与目标并列（docs_arch）</span>
-  <span>数据来源：master e2a9425 源码、README、docs/DESIGN_EN.md</span>
+  <span>数据来源：master 0eb3baf 源码、README、docs/DESIGN_EN.md</span>
 </footer>
 
 </div>
