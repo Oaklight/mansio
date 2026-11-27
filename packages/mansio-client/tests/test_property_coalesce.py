@@ -34,7 +34,7 @@ from hypothesis.stateful import (
 )
 from mansio_client import MansioClient
 from mansio_client.coalesce import _Coalescer
-from mansio_client.types import Message
+from mansio_core.types import Message
 
 CHANNEL = "ch"
 SETTINGS = settings(max_examples=25, stateful_step_count=20, deadline=None)
