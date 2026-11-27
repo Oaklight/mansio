@@ -9,7 +9,7 @@ Server side of [mansio](https://github.com/Oaklight/mansio) — a lightweight me
 **No third-party runtime dependencies.** Pure Python stdlib, a vendored HTTP
 server, and the internal `mansio-core` package.
 
-This package contains the network frontends, the admin panel, the server
+This package contains the network adapters, the admin panel, the server
 orchestration and the `mansio` CLI. The types, Bus, storage backends and
 authorization live in the `mansio-core` dependency. Agents connect with the
 separate [`mansio-client`](https://pypi.org/project/mansio-client/) SDK.
@@ -19,7 +19,7 @@ separate [`mansio-client`](https://pypi.org/project/mansio-client/) SDK.
 ```bash
 pip install mansio                 # server + core (SQLite / Memory / Maildir)
 pip install "mansio-core[nats]"    # + NATS JetStream backend
-pip install "mansio[irc]"          # + IRC frontend
+pip install "mansio[irc]"          # + IRC adapter
 ```
 
 ## Run a Server
@@ -28,7 +28,7 @@ pip install "mansio[irc]"          # + IRC frontend
 mansio serve --db mansio.db --http 8742 --admin-port 8741
 ```
 
-- `--http [HOST:]PORT` enables the HTTP frontend (REST + SSE). Agents cannot connect without it.
+- `--http [HOST:]PORT` enables the HTTP adapter (REST + SSE). Agents cannot connect without it.
 - `--admin-port PORT` serves the admin dashboard and its REST API (default: 8741).
 - `--maildir PATH` / `--nats URL` select a different backend.
 - `--no-auth` disables API and admin authentication — development only.
@@ -46,11 +46,11 @@ curl -X POST http://localhost:8741/api/users \
 ```python
 from mansio_core import Bus, SQLiteBackend
 from mansio_web import MansioServer
-from mansio_web.frontends import HttpFrontend
+from mansio_web.adapters import HttpAdapter
 
 bus = Bus(backend=SQLiteBackend("mansio.db"))
 server = MansioServer(bus)
-server.add_frontend(HttpFrontend(host="127.0.0.1", port=8742))
+server.add_adapter(HttpAdapter(host="127.0.0.1", port=8742))
 server.serve_forever()  # blocks
 ```
 
@@ -60,7 +60,7 @@ server.serve_forever()  # blocks
 |-------|-----------|
 | Storage | `SQLiteBackend`, `MemoryBackend`, `NATSBackend`, `MaildirBackend` (`Backend` ABC, plus the optional `ChannelStore`, `Deletable`, `Presenceable`, `Compactable` protocols) |
 | Routing | `Bus`, `SQLiteBus` |
-| Frontend | `HttpFrontend` (REST + SSE), `IrcFrontend` |
+| Adapter | `HttpAdapter` (REST + SSE), `IrcAdapter` |
 | Orchestration | `MansioServer` |
 | Admin | `AdminServer`, `TokenStore` |
 

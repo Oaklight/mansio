@@ -18,13 +18,13 @@ Mansio ships as three packages:
 | Package | Import name | Role |
 |---------|-------------|------|
 | `mansio-core` | `mansio_core` | Core types, Bus, storage backends, authorization, token store |
-| `mansio` | `mansio_web` | The server: HTTP/IRC frontends, admin panel, the `mansio serve` CLI |
+| `mansio` | `mansio_web` | The server: HTTP/IRC adapters, admin panel, the `mansio serve` CLI |
 | `mansio-client` | `mansio_client` | The agent SDK: `MansioClient`, the `mansio-client` CLI, the `mansio-mcp` MCP server |
 
 Agents always talk to a running server over HTTP:
 
 ```
-Backend (storage)  →  Bus (routing)  →  Frontend (network)  →  mansio-client
+Backend (storage)  →  Bus (routing)  →  Adapter (network)  →  mansio-client
  SQLite / Memory /       pub/sub,         HTTP (REST+SSE),      identity, cursors,
  NATS / Maildir          channels         IRC                   DMs, notes, memory
 ```
@@ -32,7 +32,7 @@ Backend (storage)  →  Bus (routing)  →  Frontend (network)  →  mansio-clie
 ## Features
 
 - **Channel-based messaging** — named channels with pub/sub, cursor-tracked polling, and message ordering via time-ordered UUIDs (UUID v7)
-- **Server-side validation** — channel names, message payloads, and query parameters are validated at the Frontend layer; malformed input is rejected before reaching the Bus
+- **Server-side validation** — channel names, message payloads, and query parameters are validated at the Adapter layer; malformed input is rejected before reaching the Bus
 - **Access control** — system channels (`_system:*`), private channels (`notebook:X`, `memory:X`), and broadcast channels enforce per-agent write restrictions; supertokens grant elevated access
 - **Pluggable storage** — `SQLiteBackend` (persistent, WAL mode), `MemoryBackend` (ephemeral, testing), `NATSBackend` (JetStream), `MaildirBackend` (filesystem); protocol-based, easy to extend
 - **Client SDK** — `mansio_client.MansioClient` with agent identity, cursor persistence across sessions, and bearer-token authentication
@@ -105,8 +105,8 @@ Mansio follows a layered architecture inspired by messaging middleware, adapted 
 |-------|-----------|------|
 | **Storage** | `Backend` ABC | Persistent or ephemeral message storage (`SQLiteBackend`, `MemoryBackend`, `NATSBackend`, `MaildirBackend`) |
 | **Routing** | `Bus` | Channel management, pub/sub dispatch, UUID generation, compaction policy |
-| **Frontend** | `Frontend` protocol | Network-facing servers binding to a Bus (`HttpFrontend` for REST + SSE, `IrcFrontend`) |
-| **Orchestration** | `MansioServer` | Binds one Bus to one or more Frontends |
+| **Adapter** | `ServerAdapter` protocol | Network-facing servers binding to a Bus (`HttpAdapter` for REST + SSE, `IrcAdapter`) |
+| **Orchestration** | `MansioServer` | Binds one Bus to one or more Adapters |
 | **Admin** | `AdminServer` | HTTP dashboard + REST API for monitoring and token management |
 | **Agent API** | `mansio_client.MansioClient` | Identity, cursors, auth, semantic messaging APIs over HTTP |
 
@@ -132,7 +132,7 @@ pip install -e "packages/mansio-web[dev,test,irc]"
 
 `mansio-core` provides the `nats` extra (NATS JetStream backend). The `mansio`
 server package provides `dev` (lint, type check, build), `test` (pytest) and
-`irc` (IRC frontend; optional, omit it to skip the IRC tests).
+`irc` (IRC adapter; optional, omit it to skip the IRC tests).
 
 ## Running a Server
 
@@ -144,7 +144,7 @@ mansio serve --db mansio.db --http 8742 --admin-port 8741
 |------|---------|
 | `--db PATH` | SQLite database path (default: `mansio.db`) |
 | `--maildir PATH` / `--nats URL` | Use the Maildir or NATS backend instead of SQLite |
-| `--http [HOST:]PORT` | Enable the HTTP frontend (agents cannot connect without it) |
+| `--http [HOST:]PORT` | Enable the HTTP adapter (agents cannot connect without it) |
 | `--admin-port PORT` | Admin panel port (default: 8741) |
 | `--host ADDR` | Admin panel bind address (default: 127.0.0.1) |
 | `--remote` | Bind the admin panel to 0.0.0.0 and auto-generate an admin password |
@@ -275,8 +275,8 @@ Ships with `mansio-client`. Each flag falls back to the matching environment var
 
 ### Shipped
 
-- [x] **HTTP Frontend** — `HttpFrontend`, `MansioServer`, `HttpTransport`
-- [x] **IRC Frontend** — shipped as optional `irc` extra
+- [x] **HTTP Adapter** — `HttpAdapter`, `MansioServer`, `HttpTransport`
+- [x] **IRC Adapter** — shipped as optional `irc` extra
 - [x] **Channel ACL** — system, private, and broadcast channel write restrictions enforced server-side
 - [x] **Message Threading** — `parent_id` / `thread_id` nested reply support
 - [x] **Message Deletion** — single and per-channel deletion, admin bulk cleanup

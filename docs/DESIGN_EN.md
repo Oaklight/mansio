@@ -38,10 +38,10 @@ Mansio is a messaging backbone system designed for LLMs/Agents, providing unifie
 │                    Client SDK Layer                          │
 │              mansio_client.MansioClient                     │
 │  (Stateful wrapper: identity, cursors, channel naming,     │
-│   semantic business API — talks HTTP to a Frontend)        │
+│   semantic business API — talks HTTP to an Adapter)        │
 ├─────────────────────────────────────────────────────────────┤
-│                   Frontend Layer                            │
-│              HttpFrontend │ IrcFrontend                     │
+│                   Adapter Layer                             │
+│              HttpAdapter │ IrcAdapter                       │
 │  (Network-facing servers: REST + SSE, attach to Bus)       │
 ├─────────────────────────────────────────────────────────────┤
 │                       Bus Layer                             │
@@ -56,7 +56,7 @@ Mansio is a messaging backbone system designed for LLMs/Agents, providing unifie
 └─────────────────────────────────────────────────────────────┘
 ```
 
-The Frontend layer defines a `Frontend` protocol with `attach(bus)` / `serve_forever()` / `shutdown()` methods and an `address` property. `HttpFrontend` provides REST endpoints and SSE streaming; `IrcFrontend` bridges channels to an IRC server. `MansioServer` is the orchestrator that binds a Bus to one or more Frontends.
+The Adapter layer defines a `ServerAdapter` protocol with `attach(bus)` / `serve_forever()` / `shutdown()` methods and an `address` property. `HttpAdapter` provides REST endpoints and SSE streaming; `IrcAdapter` bridges channels to an IRC server. `MansioServer` is the orchestrator that binds a Bus to one or more Adapters.
 
 Each layer depends only on the interface of the layer below, never on concrete implementations.
 
@@ -64,7 +64,7 @@ Each layer depends only on the interface of the layer below, never on concrete i
 
 The three packages are separated along the network boundary and the dependency
 direction. `mansio-core` holds the types, protocols, Backend, Bus, authorization
-and token store; `mansio-web` (distribution name `mansio`) holds the Frontends,
+and token store; `mansio-web` (distribution name `mansio`) holds the Adapters,
 the admin panel and the server; `mansio-client` (agent SDK) holds `MansioClient`
 and its HTTP transport. `mansio-web` and `mansio-client` import `mansio-core`;
 `mansio-core` imports neither. `mansio-web` never imports `mansio-client`.
@@ -72,7 +72,7 @@ and its HTTP transport. `mansio-web` and `mansio-client` import `mansio-core`;
 ```
 mansio_client.MansioClient("http://host:8742", user_id, token=…)
   │
-  └── HttpTransport → HttpFrontend → Bus → Backend
+  └── HttpTransport → HttpAdapter → Bus → Backend
         (REST + SSE)    (via MansioServer or `mansio serve`)
 ```
 
@@ -267,9 +267,9 @@ class Bus:
 - ✅ In-process pub/sub (universal baseline)
 - ✅ Throughput metrics collection
 - ✅ Post-publish compaction policy for system channels
-- ❌ No authorization on message operations (Frontend policy layer's responsibility; `check_access` is a policy query, not enforcement)
-- ❌ No authentication (Frontend's responsibility, via `TokenStore`)
-- ❌ No channel-name validation (Frontend's responsibility)
+- ❌ No authorization on message operations (Adapter policy layer's responsibility; `check_access` is a policy query, not enforcement)
+- ❌ No authentication (Adapter's responsibility, via `TokenStore`)
+- ❌ No channel-name validation (Adapter's responsibility)
 - ❌ No agent identity management (Client SDK's responsibility)
 - ❌ No cursor state tracking (Client SDK's responsibility)
 
@@ -336,7 +336,7 @@ returned in plaintext only at creation time.
 
 ##### Enforcement
 
-Authentication is enforced by the Frontend, not the Bus. `HttpFrontend`
+Authentication is enforced by the Adapter, not the Bus. `HttpAdapter`
 validates the `Authorization: Bearer` header against the `TokenStore`; when a
 server runs with `--no-auth` it is constructed without a token store and every
 request is accepted.
@@ -354,7 +354,7 @@ user-created channel names.
 
 #### 3.5.3 Channel Types & Naming
 
-Channel naming rules are enforced at the **Frontend (server) layer**, which validates all channel names on inbound requests using the regex `^(?=[^\W\d_])[\w.-]{1,63}[^\W_]$`, which enforces:
+Channel naming rules are enforced at the **Adapter (server) layer**, which validates all channel names on inbound requests using the regex `^(?=[^\W\d_])[\w.-]{1,63}[^\W_]$`, which enforces:
 
 - 3–64 characters total
 - Must start with a letter (not a digit, underscore, or special character)
@@ -400,8 +400,8 @@ Other agents have read-only access.
 The per-channel ACL entries managed through `/v1/channels/<channel>/acl` are
 stored by the backend's `ChannelStore`. Reading or changing a channel's ACL
 requires the `manage` verb on it (legacy name: `admin`). The structural rules
-above live in `mansio/authz.py` (`ChannelAuthorizer`), shared by frontends; the
-HTTP frontend authenticates the caller and maps a denial to a 403.
+above live in `mansio/authz.py` (`ChannelAuthorizer`), shared by adapters; the
+HTTP adapter authenticates the caller and maps a denial to a 403.
 
 A stored permission is one of:
 
@@ -424,9 +424,9 @@ editing `ROLE_PRESETS` retroactively changes what every existing row using
 that preset grants. The legacy levels are aliases resolved the same way, so
 stored rows need no migration.
 
-The Bus exposes no authorization parameters: frontends authorize the caller
+The Bus exposes no authorization parameters: adapters authorize the caller
 before calling `Bus.publish` / `Bus.query` / delete methods. For plain and
-registered-prefix channels the frontend policy asks the channel store
+registered-prefix channels the adapter policy asks the channel store
 (`Bus.check_access`), so a private channel's owner and ACL entries are
 enforced for reads and writes there. `dm:`/`notebook:`/`memory:` keep their structural name rules, and
 `broadcast:*` write checks the channel owner and any entry granting `publish`
@@ -641,16 +641,16 @@ Agent dies
 Snapshots accumulate in the cursor channel; the Bus's compaction policy keeps
 only the most recent one per agent.
 
-### 3.6 Frontend Layer & MansioServer
+### 3.6 Adapter Layer & MansioServer
 
-The Frontend layer provides the network-facing servers that attach to a Bus.
+The Adapter layer provides the network-facing servers that attach to a Bus.
 
-#### Frontend Protocol
+#### ServerAdapter Protocol
 
 ```python
-class Frontend(Protocol):
+class ServerAdapter(Protocol):
     def attach(self, bus: Bus) -> None:
-        """Bind this frontend to a Bus instance."""
+        """Bind this adapter to a Bus instance."""
         ...
 
     def serve_forever(self) -> None:
@@ -663,38 +663,38 @@ class Frontend(Protocol):
 
     @property
     def address(self) -> tuple[str, int]:
-        """The (host, port) this frontend is listening on."""
+        """The (host, port) this adapter is listening on."""
         ...
 ```
 
-#### HttpFrontend
+#### HttpAdapter
 
-The primary Frontend implementation, and the only one agents connect to. It provides:
+The primary Adapter implementation, and the only one agents connect to. It provides:
 - **REST API** under `/v1/` — publish, query, channels, channel metadata and ACL, message and channel deletion, work queue claim/ack/status, presence, registry lookup, admin cleanup and compaction
 - **SSE (Server-Sent Events)** — real-time message streaming via `/v1/subscribe` and `/v1/channels/<channel>/subscribe`. Each `data:` line is a `StreamEvent` (`{"channel": ..., "message": ...}`) parsed and serialized by `mansio_core.contracts`. An opt-in `exclude_own=true` query flag drops messages sent by the authenticated caller, on live delivery and Last-Event-ID replay alike; it is a no-op for supertokens and no-auth connections, which have no bound user id
 - **Authentication** — bearer-token validation against a `TokenStore`, plus the channel-name, payload and access-control checks described in §3.5.3
 - `/health` — unauthenticated liveness probe
 
 ```python
-HttpFrontend(host="127.0.0.1", port=8742, cors_origin="*",
+HttpAdapter(host="127.0.0.1", port=8742, cors_origin="*",
              max_body_bytes=1_048_576, max_query_limit=10_000,
              token_store=None)
 ```
 
-#### IrcFrontend
+#### IrcAdapter
 
 Bridges mansio channels to an IRC server so that humans can watch and join agent
 conversations from an ordinary IRC client. Requires the optional `irc` extra.
 
 #### MansioServer
 
-The orchestrator that binds a Bus to one or more Frontends. With a single
-frontend it serves in the calling thread; with several, each gets its own
+The orchestrator that binds a Bus to one or more Adapters. With a single
+adapter it serves in the calling thread; with several, each gets its own
 thread:
 
 ```python
 server = MansioServer(bus)
-server.add_frontend(HttpFrontend(host="0.0.0.0", port=8742))
+server.add_adapter(HttpAdapter(host="0.0.0.0", port=8742))
 server.serve_forever()
 ```
 
@@ -722,7 +722,7 @@ importing either name there raises an `ImportError` that points at
 
 The admin panel provides an HTTP dashboard and REST API for bus inspection,
 monitoring and token management. It runs on its own port (default 8741),
-separate from the agent-facing HTTP frontend:
+separate from the agent-facing HTTP adapter:
 
 ```
 admin/
@@ -784,7 +784,7 @@ The Delivery Layer exposes Client SDK capabilities to external consumers.
 
 | Command | Package | Target User | Purpose |
 |---------|---------|-------------|---------|
-| `mansio serve` | `mansio` | Operators | Start Bus + admin panel (+ HTTP/IRC frontends) |
+| `mansio serve` | `mansio` | Operators | Start Bus + admin panel (+ HTTP/IRC adapters) |
 | `mansio-client` | `mansio-client` | LLMs via a bash tool, humans | Full SDK-over-CLI: messaging, notes, memory, channel and ACL management |
 | `mansio-mcp` | `mansio-client` | LLMs via MCP | The client operations as MCP tools over JSON-RPC stdio |
 
@@ -952,7 +952,7 @@ thought_record(
 
 ## 6. Deployment Modes
 
-Every deployment is the same shape — one Bus behind one or more Frontends — and
+Every deployment is the same shape — one Bus behind one or more Adapters — and
 differs only in where the server runs and which backend it uses.
 
 ### 6.1 Local Development
@@ -982,13 +982,13 @@ A process that owns the bus can build the server in code instead of shelling out
 ```python
 bus = Bus(backend=SQLiteBackend("data.db"))
 server = MansioServer(bus)
-server.add_frontend(HttpFrontend(host="127.0.0.1", port=8742))
+server.add_adapter(HttpAdapter(host="127.0.0.1", port=8742))
 server.serve_forever()
 ```
 
 Code in that process can talk to `bus` directly, with no HTTP hop and with
 `subscribe` callbacks firing synchronously; agents elsewhere still connect over
-HTTP. Note that direct Bus access bypasses the Frontend, and with it all channel
+HTTP. Note that direct Bus access bypasses the Adapter, and with it all channel
 validation and access control.
 
 ### 6.4 Distributed Backend
@@ -1020,7 +1020,7 @@ export MANSIO_TOKEN=mst-xxx
 ### 7.2 Server Configuration
 
 The server is configured entirely through `mansio serve` flags: backend
-selection (`--db` / `--maildir` / `--nats`), frontends (`--http`, `--irc` and
+selection (`--db` / `--maildir` / `--nats`), adapters (`--http`, `--irc` and
 its options), admin panel (`--admin-port`, `--host`, `--admin-password`,
 `--remote`, `--no-ui`), authentication (`--no-auth`) and `--log-level`.
 
@@ -1069,15 +1069,15 @@ addition; today every setting is a CLI flag.
 
 **Evolution Path**: When transport and persistence separation is genuinely needed (e.g., MQTT + PostgreSQL), an independent Storage Protocol can be introduced for internal composition within the Backend. The current Backend interface requires no changes.
 
-### D2: Channel Naming Enforced at the Frontend Layer
+### D2: Channel Naming Enforced at the Adapter Layer
 
-**Decision**: Channel naming rules are validated at the Frontend (server) layer. The Bus layer accepts any channel name passed by its callers.
+**Decision**: Channel naming rules are validated at the Adapter (server) layer. The Bus layer accepts any channel name passed by its callers.
 
 **Rationale**: Server-side validation prevents malformed channel names from reaching the Bus regardless of client implementation — a rule enforced only in the SDK would be enforced only for well-behaved clients. The Bus layer remains generic without embedding business semantics.
 
 ### D3: Identity Authentication via user_id + Server-Issued Token
 
-**Decision**: user_id is user-chosen (format-constrained), the token is server-generated and stored hashed in a `TokenStore`, and enforcement lives in the Frontend.
+**Decision**: user_id is user-chosen (format-constrained), the token is server-generated and stored hashed in a `TokenStore`, and enforcement lives in the Adapter.
 
 **Rationale**: Bearer tokens are the standard credential for an HTTP API, are revocable and rotatable per agent without touching the agent's identity, and support cross-session recovery (reconnect with the same user_id + token). A `--no-auth` mode lowers the development/testing barrier.
 

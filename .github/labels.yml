@@ -76,7 +76,7 @@
   description: "Documentation"
 - name: "area:frontend"
   color: "6B4A8A"
-  description: "HTTP/SSE/IRC frontends"
+  description: "HTTP/SSE/IRC adapters"
 - name: "area:sdk"
   color: "6B4A7A"
   description: "mansio-client SDK"

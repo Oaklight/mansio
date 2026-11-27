@@ -8,7 +8,7 @@ root `pyproject.toml` that contains tooling configuration only:
 | Path | Distribution | What it is |
 | --- | --- | --- |
 | `packages/mansio-core/` | `mansio-core` | Types, protocols, bus, backends, authorization, token store, metrics |
-| `packages/mansio-web/` | `mansio` | HTTP/IRC frontends, admin panel, server orchestration, `serve` CLI. Import root: `mansio_web` |
+| `packages/mansio-web/` | `mansio` | HTTP/IRC adapters, admin panel, server orchestration, `serve` CLI. Import root: `mansio_web` |
 | `packages/mansio-client/` | `mansio-client` | The client SDK that agents install to talk to a server |
 
 The three distributions are published independently. `mansio` and
@@ -37,13 +37,13 @@ The suites run separately, because CI runs them in different environments:
 
 ```bash
 python -m pytest packages/mansio-core/tests/    # core suite
-python -m pytest packages/mansio-web/tests/     # server/frontend/admin suite
+python -m pytest packages/mansio-web/tests/     # server/adapter/admin suite
 python -m pytest packages/mansio-client/tests/  # client suite
 ```
 
 Some tests need things that may not be present on your machine and skip
 themselves when they are missing — the NATS backend tests need a `nats-server`
-binary on `PATH`, and the IRC frontend tests need the `irc` extra. A skipped
+binary on `PATH`, and the IRC adapter tests need the `irc` extra. A skipped
 test is not a passing test; if you are changing one of those areas, install what
 it needs and confirm the tests actually ran.
 
@@ -110,7 +110,7 @@ python -m venv /tmp/client-only
 | `boundaries` | Runs `scripts/check_import_boundaries.py` |
 | `lint` | Runs the pre-commit hooks: `ruff` (lint and format), `ty` type check, `complexipy` complexity limit |
 | `test-core` | Runs the core suite with only `mansio-core` installed |
-| `test-web` | Runs the server/frontend/admin suite with core, client and web installed |
+| `test-web` | Runs the server/adapter/admin suite with core, client and web installed |
 | `client-check` | Installs core and the client alone, imports it, runs both CLI entry points and the client suite, and builds all three packages |
 
 Running `pre-commit run --all-files` locally covers everything the `lint` job

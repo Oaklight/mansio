@@ -18,13 +18,13 @@ Mansio 由三个包组成：
 | 包名 | 导入名 | 职责 |
 |------|--------|------|
 | `mansio-core` | `mansio_core` | 核心类型、Bus、存储后端、授权、令牌存储 |
-| `mansio` | `mansio_web` | 服务端：HTTP/IRC 前端、管理面板、`mansio serve` 命令行 |
+| `mansio` | `mansio_web` | 服务端：HTTP/IRC 适配器、管理面板、`mansio serve` 命令行 |
 | `mansio-client` | `mansio_client` | 智能体 SDK：`MansioClient`、`mansio-client` 命令行、`mansio-mcp` MCP 服务器 |
 
 智能体始终通过 HTTP 连接到运行中的服务端：
 
 ```
-Backend（存储）   →   Bus（路由）    →   Frontend（网络）   →   mansio-client
+Backend（存储）   →   Bus（路由）    →   Adapter（网络）   →   mansio-client
  SQLite / Memory /     发布/订阅、         HTTP（REST+SSE）、     身份、游标、
  NATS / Maildir        通道                IRC                    私信、笔记、记忆
 ```
@@ -32,7 +32,7 @@ Backend（存储）   →   Bus（路由）    →   Frontend（网络）   → 
 ## 特性
 
 - **基于通道的消息传递** — 命名通道，支持发布/订阅、游标跟踪轮询，通过时间有序 UUID（UUID v7）保证消息有序
-- **服务端验证** — 通道名称、消息 payload 和查询参数均在 Frontend 层校验，非法输入在到达 Bus 之前被拒绝
+- **服务端验证** — 通道名称、消息 payload 和查询参数均在 Adapter 层校验，非法输入在到达 Bus 之前被拒绝
 - **访问控制** — 系统通道（`_system:*`）、私有通道（`notebook:X`、`memory:X`）和广播通道按智能体强制写入限制；supertoken 拥有更高权限
 - **可插拔存储** — `SQLiteBackend`（持久化，WAL 模式）、`MemoryBackend`（临时，测试用）、`NATSBackend`（JetStream）、`MaildirBackend`（文件系统）；基于协议，易于扩展
 - **Client SDK** — `mansio_client.MansioClient` 提供智能体身份标识、跨会话游标持久化和 Bearer Token 认证
@@ -104,8 +104,8 @@ Mansio 采用分层架构，灵感来自消息中间件，针对 AI 智能体工
 |------|------|------|
 | **存储层** | `Backend` 抽象基类 | 持久化或临时消息存储（`SQLiteBackend`、`MemoryBackend`、`NATSBackend`、`MaildirBackend`） |
 | **路由层** | `Bus` | 通道管理、发布/订阅分发、UUID 生成、压缩策略 |
-| **前端层** | `Frontend` 协议 | 挂载到 Bus 的网络服务（`HttpFrontend` 提供 REST + SSE，`IrcFrontend`） |
-| **编排层** | `MansioServer` | 将一个 Bus 绑定到一个或多个 Frontend |
+| **适配器层** | `ServerAdapter` 协议 | 挂载到 Bus 的网络服务（`HttpAdapter` 提供 REST + SSE，`IrcAdapter`） |
+| **编排层** | `MansioServer` | 将一个 Bus 绑定到一个或多个 Adapter |
 | **管理层** | `AdminServer` | HTTP 仪表板 + REST API，用于监控与令牌管理 |
 | **智能体 API** | `mansio_client.MansioClient` | 身份、游标、认证、基于 HTTP 的语义化消息 API |
 
@@ -129,7 +129,7 @@ pip install -e packages/mansio-core -e packages/mansio-client
 pip install -e "packages/mansio-web[dev,test,irc]"
 ```
 
-`mansio-core` 提供 `nats` 可选项（NATS JetStream 后端）。`mansio` 服务端包提供 `dev`（代码检查、类型检查、构建）、`test`（pytest）和 `irc`（IRC 前端，可选；省略则跳过 IRC 测试）。
+`mansio-core` 提供 `nats` 可选项（NATS JetStream 后端）。`mansio` 服务端包提供 `dev`（代码检查、类型检查、构建）、`test`（pytest）和 `irc`（IRC 适配器，可选；省略则跳过 IRC 测试）。
 
 ## 运行服务端
 
@@ -141,7 +141,7 @@ mansio serve --db mansio.db --http 8742 --admin-port 8741
 |------|------|
 | `--db PATH` | SQLite 数据库路径（默认：`mansio.db`） |
 | `--maildir PATH` / `--nats URL` | 改用 Maildir 或 NATS 后端 |
-| `--http [HOST:]PORT` | 启用 HTTP 前端（不加此参数智能体无法连接） |
+| `--http [HOST:]PORT` | 启用 HTTP 适配器（不加此参数智能体无法连接） |
 | `--admin-port PORT` | 管理面板端口（默认：8741） |
 | `--host ADDR` | 管理面板监听地址（默认：127.0.0.1） |
 | `--remote` | 将管理面板绑定到 0.0.0.0 并自动生成管理密码 |
@@ -272,8 +272,8 @@ mansio-mcp --url http://localhost:8742 --user-id my-agent --token mst-xxx
 
 ### 已发布
 
-- [x] **HTTP 前端** — `HttpFrontend`、`MansioServer`、`HttpTransport`
-- [x] **IRC 前端** — 可选依赖 `irc`
+- [x] **HTTP 适配器** — `HttpAdapter`、`MansioServer`、`HttpTransport`
+- [x] **IRC 适配器** — 可选依赖 `irc`
 - [x] **通道访问控制** — 系统、私有与广播通道的写入限制在服务端强制执行
 - [x] **消息线程** — `parent_id` / `thread_id` 嵌套回复支持
 - [x] **消息删除** — 单条和按通道删除，管理员批量清理
