@@ -58,10 +58,11 @@ def message_from_dict(data: Any) -> Message:
     """Build a :class:`Message` from its wire object.
 
     Every required field must be a non-empty string.  The publish contract
-    enforces the same guarantees, so a message accepted by the HTTP frontend
-    always parses here.  A direct in-process ``Bus.publish`` call bypasses
-    that validation and can still build a message this parser rejects; that
-    path is out of scope for the wire contract.
+    and ``Bus.publish`` enforce the same field guarantees: required fields
+    as non-empty strings, ``parent_id`` and ``intent`` as strings or
+    ``None``, and ``metadata`` as a dict or ``None``, with ``Bus.publish``
+    raising ``ValueError``.  Any message either path produces therefore
+    parses here.
 
     Raises :class:`ContractError` when a required field is missing or the
     wrong type.
