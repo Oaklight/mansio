@@ -634,10 +634,14 @@ admin/
 ├── auth.py        # 密码登录与会话 cookie
 ├── view.py        # AdminView —— 管理端响应文档
 ├── static.py      # Admin HTML 加载与资源白名单
-├── admin.html     # 仪表板骨架（仅标记）
-└── assets/        # admin.css、theme-init.js、app/api/util/state/auth/refresh.js，
-                   # 以及 views/ 下每个标签页一个 ES 模块
+├── admin.html     # 控制台骨架（仅标记）
+└── assets/        # admin.css、theme-init.js、contracts/models/api/app/auth/
+                   # router/state/format/ui.js，以及 views/ 下每屏一个模块
 ```
+
+页面是路由化控制台：常驻侧栏（Workspace、Traffic、Identity、System）、主内容区，以及为所选频道或用户打开的右侧详情栏。路由基于 hash：`#/channels/<name>`、`#/messages?channel=…`、`#/users/<id>`，深链、刷新、前进后退和登录往返都保留目标；未知 hash 回退到 Overview。
+
+`contracts.js` 由 `scripts/gen_admin_contracts.py` 从 `mansio_core.contracts` 生成（过期时 `--check` 失败）；所有响应先经解析再进入视图，`models.js` 把嵌套行转为带类型的视图模型。`ui.js` 是组件词表（卡片、统计格、表格、列表、详情栏、状态标签、空/错误/载入态、带焦点陷阱的模态框、aria-live toast）；资源只用 `createElement`/`textContent` 构建 DOM，不对动态内容赋 `innerHTML`。事件一律 `addEventListener`，没有内联 `onclick`，也没有 `window` 绑定。模态框锁定焦点并在 Esc 关闭，侧栏是普通链接，因此可键盘导航。
 
 UI 资源经固定白名单从 `/assets/<file>` 提供：未知名称、穿越路径段或未知后缀在读取任何包资源之前即被拒绝。页面直接加载 ES 模块，因此 `admin.html` 不含内联 CSS 或 JS。
 
