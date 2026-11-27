@@ -70,7 +70,7 @@ def test_plain_channel_name_mutations_are_rejected(name: str) -> None:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="_USER_CHANNEL_RE uses '$', which also matches before a trailing newline",
+    reason="_USER_CHANNEL_RE uses '$', which also matches before a trailing newline (#384)",
 )
 def test_plain_channel_name_with_trailing_newline_is_rejected() -> None:
     assert _validate_channel_name("abc\n") is not None

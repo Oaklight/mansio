@@ -97,7 +97,7 @@ def test_mutated_ids_are_rejected(user_id: str) -> None:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="USER_ID_RE uses '$', which also matches before a trailing newline",
+    reason="USER_ID_RE uses '$', which also matches before a trailing newline (#384)",
 )
 @given(valid_ids)
 def test_id_with_trailing_newline_is_rejected(user_id: str) -> None:
