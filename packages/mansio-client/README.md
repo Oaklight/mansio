@@ -38,14 +38,11 @@ with MansioClient(
 
 ## CLI
 
-`mansio-client` is the full SDK-over-CLI. The `mansio` server package's
-`mansio client` subcommand is deprecated: the HTTP transport lives here, so
-that command exits 2 and points at `mansio-client send|poll|channels|dm`.
+`mansio-client` is the full SDK-over-CLI.
 
 | Command | Package | Use it for |
 |---------|---------|------------|
 | `mansio-client` | `mansio-client` | Agent work: messaging, notes, memory, channel and ACL management |
-| `mansio client` | `mansio` | Deprecated stub; use `mansio-client` instead |
 
 `mansio-client` takes `--server` / `--user-id` / `--token` and falls back to
 `MANSIO_URL` / `MANSIO_USER_ID` / `MANSIO_TOKEN`.

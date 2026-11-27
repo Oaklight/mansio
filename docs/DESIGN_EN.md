@@ -186,7 +186,7 @@ inheritance is required (the shipped backends list them as bases anyway, for
 documentation):
 
 ```python
-from mansio.protocols import Backend, Deletable
+from mansio_core.protocols import Backend, Deletable
 
 class MyBackend(Backend, Deletable):
     def __init__(self, connection_url: str): ...
@@ -714,9 +714,9 @@ client = MansioClient("http://mansio:8742", "agent-1", token="mst-xxx")
 # → MansioClient holds a Transport; the implementation is HttpTransport
 ```
 
-It is not part of the server distribution: `mansio_web` and the `mansio`
-compatibility package do not export it, and importing either name there raises
-an `ImportError` that points at `mansio_client.transport`.
+It is not part of the server distribution: `mansio_web` does not export it, and
+importing either name there raises an `ImportError` that points at
+`mansio_client.transport`.
 
 ### 3.7 Admin Panel
 
@@ -769,15 +769,15 @@ inspection (`/api/stats`, `/api/stats/throughput`, `/api/channels`,
 The Delivery Layer exposes Client SDK capabilities to external consumers.
 
 ```
-┌────────────────────────────────────────────────────┐
-│              mansio_client.MansioClient            │
-├─────────────────┬─────────────────┬────────────────┤
-│   mansio-mcp    │  mansio-client  │  mansio client │
-│   MCP server    │       CLI       │  CLI (server   │
-│                 │                 │  package)      │
-│  LLM via MCP    │  LLM or human   │  operator      │
-│  tool calls     │  via shell      │  smoke tests   │
-└─────────────────┴─────────────────┴────────────────┘
+┌──────────────────────────────────────┐
+│       mansio_client.MansioClient     │
+├─────────────────┬────────────────────┤
+│   mansio-mcp    │   mansio-client    │
+│   MCP server    │        CLI         │
+│                 │                    │
+│  LLM via MCP    │  LLM or human      │
+│  tool calls     │  via shell         │
+└─────────────────┴────────────────────┘
 ```
 
 #### Entry Points
@@ -785,16 +785,11 @@ The Delivery Layer exposes Client SDK capabilities to external consumers.
 | Command | Package | Target User | Purpose |
 |---------|---------|-------------|---------|
 | `mansio serve` | `mansio` | Operators | Start Bus + admin panel (+ HTTP/IRC frontends) |
-| `mansio client …` | `mansio` | — | Deprecated stub: exits 2 and points at `mansio-client send/poll/channels/dm` |
 | `mansio-client` | `mansio-client` | LLMs via a bash tool, humans | Full SDK-over-CLI: messaging, notes, memory, channel and ACL management |
 | `mansio-mcp` | `mansio-client` | LLMs via MCP | The client operations as MCP tools over JSON-RPC stdio |
 
-`mansio client` no longer performs requests: the HTTP transport was removed
-from the server distribution, and the command now exits 2 with a message
-naming the replacement subcommands. Its remaining parser flags are kept for
-one release so scripts fail with that hint instead of an argparse error.
-`mansio-client` is the full SDK-over-CLI and the command to use for agent
-work. It keeps `-a` / `--agent` as a deprecated spelling of `--user-id` that
+The server distribution ships only `mansio serve`. `mansio-client` is the
+full SDK-over-CLI and the command to use for agent work. It keeps `-a` / `--agent` as a deprecated spelling of `--user-id` that
 always emits a `DeprecationWarning`. `mansio-mcp` takes `--url` /
 `--user-id` / `--token` / `--display-name`, and is the only entry point that
 reads `MANSIO_DISPLAY_NAME`. `MANSIO_AGENT_ID` and the `PIAZZA_*` names are

@@ -18,7 +18,7 @@ Mansio ships as three packages:
 | Package | Import name | Role |
 |---------|-------------|------|
 | `mansio-core` | `mansio_core` | Core types, Bus, storage backends, authorization, token store |
-| `mansio` | `mansio_web` (temporary compatibility alias: `mansio`, kept for one release) | The server: HTTP/IRC frontends, admin panel, the `mansio` CLI |
+| `mansio` | `mansio_web` | The server: HTTP/IRC frontends, admin panel, the `mansio serve` CLI |
 | `mansio-client` | `mansio_client` | The agent SDK: `MansioClient`, the `mansio-client` CLI, the `mansio-mcp` MCP server |
 
 Agents always talk to a running server over HTTP:
@@ -95,9 +95,7 @@ mansio-client dm --to agent-bob "hey!"
 ```
 
 `mansio-client` is the full SDK-over-CLI and the command to use for all client
-work. The `mansio` server package's `mansio client` subcommand is deprecated:
-the HTTP transport moved to `mansio-client`, so the command now exits 2 and
-points at `mansio-client send|poll|channels|dm`.
+work. The `mansio` server package installs only the `mansio serve` command.
 
 ## Architecture
 
@@ -189,7 +187,7 @@ curl -X POST http://localhost:8741/api/tokens \
 In the admin panel, tick **Supertoken** in the Create Token dialog. The token value is returned only once. Programmatic creation remains available:
 
 ```python
-from mansio.token_store import TokenStore
+from mansio_core.token_store import TokenStore
 
 print(TokenStore("mansio.db").create_token(user_id=None, label="admin")["token"])
 ```

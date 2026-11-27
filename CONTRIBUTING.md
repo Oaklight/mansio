@@ -8,7 +8,7 @@ root `pyproject.toml` that contains tooling configuration only:
 | Path | Distribution | What it is |
 | --- | --- | --- |
 | `packages/mansio-core/` | `mansio-core` | Types, protocols, bus, backends, authorization, token store, metrics |
-| `packages/mansio-web/` | `mansio` | HTTP/IRC frontends, admin panel, server orchestration, `serve` CLI. Import roots: `mansio_web` and the temporary compatibility alias `mansio` (kept for one release, then removed) |
+| `packages/mansio-web/` | `mansio` | HTTP/IRC frontends, admin panel, server orchestration, `serve` CLI. Import root: `mansio_web` |
 | `packages/mansio-client/` | `mansio-client` | The client SDK that agents install to talk to a server |
 
 The three distributions are published independently. `mansio` and
@@ -60,10 +60,6 @@ No third-party runtime dependencies. `mansio` and `mansio-client` declare
 exactly one runtime dependency, the first-party `mansio-core` distribution;
 everything else is stdlib or vendored. Test-only dependencies are allowed. Each
 package has its own `_vendor/` directory and `zerodep.lock.json`.
-
-The compatibility package `packages/mansio-web/src/mansio/` is the one
-exception: it routes the old `mansio.*` import paths to the new packages. Do not
-add implementation code there.
 
 ## Release order
 

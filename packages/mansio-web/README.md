@@ -44,8 +44,9 @@ curl -X POST http://localhost:8741/api/users \
 ## Embedding
 
 ```python
-from mansio import Bus, SQLiteBackend, MansioServer
-from mansio.frontends import HttpFrontend
+from mansio_core import Bus, SQLiteBackend
+from mansio_web import MansioServer
+from mansio_web.frontends import HttpFrontend
 
 bus = Bus(backend=SQLiteBackend("mansio.db"))
 server = MansioServer(bus)
@@ -65,11 +66,9 @@ server.serve_forever()  # blocks
 
 ## CLI
 
-`mansio` ships `mansio serve`. The `mansio client` subcommand is deprecated:
-the HTTP transport moved to the separate
-[`mansio-client`](https://pypi.org/project/mansio-client/) package, so the
-command now exits 2 and points at `mansio-client send|poll|channels|dm`. Use
-`mansio-client` for all client work.
+`mansio` ships only `mansio serve`. The client CLI is
+[`mansio-client`](https://pypi.org/project/mansio-client/), in the separate
+`mansio-client` package.
 
 ## Documentation
 

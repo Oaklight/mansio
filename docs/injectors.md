@@ -128,7 +128,7 @@ Implement the `Injector` protocol to create your own:
 
 ```python
 from mansio_client.injectors import Injector
-from mansio_client.types import Message
+from mansio_core.types import Message
 
 class MyInjector:
     def inject(self, message: Message) -> None:
