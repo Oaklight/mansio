@@ -13,7 +13,6 @@ documented rule, not copies of the implementation.
 
 from __future__ import annotations
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from mansio_core.authz import (
@@ -95,10 +94,6 @@ def test_mutated_ids_are_rejected(user_id: str) -> None:
     assert not is_valid_user_id(user_id)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="USER_ID_RE uses '$', which also matches before a trailing newline (#384)",
-)
 @given(valid_ids)
 def test_id_with_trailing_newline_is_rejected(user_id: str) -> None:
     assert not is_valid_user_id(user_id + "\n")

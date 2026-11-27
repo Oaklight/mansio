@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 # hyphens, starting and ending with an alphanumeric.  Token creation (admin
 # API, server CLI) and the client SDK enforce this rule; channel validation
 # uses it for the two segments of a ``dm:<a>:<b>`` name.
-USER_ID_PATTERN = r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$"
+USER_ID_PATTERN = r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]\Z"
 USER_ID_RE = re.compile(USER_ID_PATTERN)
 
 
