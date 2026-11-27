@@ -91,12 +91,12 @@
   <div class="eyebrow">MANSIO · Architecture</div>
   <h1>现状与目标并列：问题在哪里</h1>
   <p class="lede">
-    左列是 <code>master @ dba40c2</code> 的实际结构（M1–M2c、M3a 响应 DTO、M3b admin 契约已合并），右列是 core/web/transport 重构的目标结构。
+    左列是 <code>master @ da1aa35</code> 的实际结构（M1–M3b 与 M4a 前端拆分已合并），右列是 core/web/transport 重构与前端重设计的目标结构。
     每个节点标出文件规模与职责，红色表示层次倒置或重复，橙色表示 god module，绿色表示目标态新增的接口与包。
     合并任一重构 PR 后，本页按迁移阶段更新“现状”一列。
   </p>
   <div class="meta">
-    <span>现状快照：<code>master @ dba40c2</code>（M1–M3b 已合并）</span>
+    <span>现状快照：<code>master @ da1aa35</code>（M1–M3b、M4a 已合并）</span>
     <span>目标：<code>core / web / client</code> 三包 + 契约层</span>
     <span>分支：<code>docs_arch</code></span>
     <button id="themeBtn" type="button">深色主题</button>
@@ -123,7 +123,7 @@
 <section id="problems">
   <h2><span class="num">00</span>问题总览</h2>
   <p class="sub">
-    自研代码 16.9k 行（不含 <code>admin.html</code> 1.95k）、测试 22.2k 行、1467 个测试函数；模块级 import 环为 0（已验证）。
+    自研代码 16.9k 行（不含 admin UI 2.0k）、测试 22.3k 行、1474 个测试函数；模块级 import 环为 0（已验证）。
     复杂度不在“层数”，而在下列具体位置。
   </p>
   <div class="panel">
@@ -131,7 +131,7 @@
       <thead><tr><th>位置</th><th>规模</th><th>症状</th><th>目标阶段</th></tr></thead>
       <tbody>
         <tr><td><code>mansio_web/frontends/http.py</code></td><td>1582 行 · 24 条路由 · 21 个 <code>_setup_*</code></td><td><span class="pill hot">god module</span> 契约与错误体已移出；认证、SSE、队列、ACL、presence 仍共处一个类</td><td>M4</td></tr>
-        <tr><td><code>mansio_web/admin/admin.html</code></td><td>1952 行单文件</td><td><span class="pill hot">单文件前端</span> HTML/CSS/JS 耦合，组件无法复用，无法分块测试</td><td>M4</td></tr>
+        <tr><td>admin UI</td><td>286 行骨架 + 1736 行资产（14 文件）</td><td><span class="pill hot">未重设计</span> M4a 已拆分文件；布局、组件与交互仍是旧页面，inline handler 仍在</td><td>M4b</td></tr>
         <tr><td><code>mansio_web/admin/server.py</code></td><td>657 行 · 27 条路由</td><td><span class="pill hot">路由仍集中单文件</span> 视图组装已移入 <code>view.py</code>（M3b），27 条路由未拆</td><td>M4</td></tr>
         <tr><td>transport</td><td>协议 178 · 实现 745+22 · 服务端副本已删</td><td><span class="pill good">已修复</span> M2c：SDK 只按 <code>Transport</code> 协议使用，唯一实现位于 <code>mansio_client/transport/</code>；<code>mansio client</code> 改为弃用桩。残留：构造处仍直接 import <code>HttpTransport</code>（待工厂按 scheme 选择）</td><td>M2c 已完成</td></tr>
         <tr><td><code>shared/</code></td><td>949 行（已删除）</td><td><span class="pill good">已消除</span> M1 把类型与传输协议并入 <code>mansio-core</code>；复制与 <code>sync-check</code> 一并删除</td><td>M1 已完成</td></tr>
@@ -158,7 +158,7 @@
 flowchart TB
   subgraph PKG["当前：3 个发布包（M1、M2a、M2b 已合并）"]
     CORE["mansio-core · 自研 8.2k 行 · 运行时依赖 0&lt;br/&gt;contracts 1427（bus + admin DTO · parse_* · SSE）&lt;br/&gt;types 193 · transport 178（协议）&lt;br/&gt;bus 785 · authz 320 · protocols 508&lt;br/&gt;backends 4.1k · token_store 415 · metrics 122"]
-    WEB["mansio 包 = mansio_web + 兼容别名 mansio&lt;br/&gt;自研 4.4k 行 + admin.html 1952&lt;br/&gt;frontends/http 1582 · admin 3.2k · cli 761"]
+    WEB["mansio 包 = mansio_web + 兼容别名 mansio&lt;br/&gt;自研 4.4k 行 + admin.html 1952&lt;br/&gt;frontends/http 1582 · admin 3.3k · cli 761"]
     CLI["mansio-client · 自研 4.2k 行&lt;br/&gt;client 980 · mcp 1126 · transport 749&lt;br/&gt;cli 397 · federation 529 · injectors 327&lt;br/&gt;types.py 47：重导出 core"]
   end
   WEB -->|"一个运行时依赖"| CORE
@@ -433,7 +433,7 @@ flowchart LR
 <section id="admin">
   <h2><span class="num">05</span>Admin 前端</h2>
   <p class="sub">
-    M3b 已抽出 <code>AdminView</code> 与 <code>contracts/admin.py</code>；剩余是单文件页面与 27 条路由仍未拆分，目标是骨架、样式、脚本、路由分开。
+    M3b 已抽出 <code>AdminView</code> 与 <code>contracts/admin.py</code>；M4a 把单文件页面拆成骨架 + 14 个资产文件；M4b 正在重设计布局与组件，27 条路由仍在单文件。
   </p>
   <div class="compare">
     <div class="panel">
@@ -441,7 +441,8 @@ flowchart LR
       <div class="scroll">
 <pre class="mermaid">
 flowchart TB
-  H["mansio_web/admin/admin.html 1952 行&lt;br/&gt;页面 + 全部 CSS + 全部 JS"]
+  H["admin.html 286 行骨架（M4a）"]
+  AS["assets/ 1736 行 · 14 文件&lt;br/&gt;admin.css · theme-init · api/util/auth/state&lt;br/&gt;app.js · views/*.js"]
   S["admin/server.py 657 行&lt;br/&gt;27 条路由"]
   VW["admin/view.py 228&lt;br/&gt;AdminView：唯一视图组装点（M3b）"]
   C["mansio_core/contracts/admin.py 327&lt;br/&gt;请求解析 + 响应 DTO"]
@@ -449,6 +450,7 @@ flowchart TB
   M["mansio_core/metrics.py 122&lt;br/&gt;M1 移出 admin"]
   ST["admin/static.py 15"]
   B["Bus 785"]
+  H --> AS
   H --> S
   S --> A
   S --> VW
@@ -551,7 +553,7 @@ flowchart LR
         <tr><td><code>.../mansio_core/types.py</code> 193 · <code>metrics.py</code> 122</td><td>领域类型与指标（单一源）</td><td><code>Message</code>, <code>MetricsCollector</code></td></tr>
         <tr><td><code>.../mansio_core/backends/</code> 4.1k</td><td>四种存储</td><td><code>SQLiteBackend</code> 等</td></tr>
         <tr><td><code>packages/mansio-web/src/mansio_web/frontends/http.py</code> 1582</td><td>HTTP + SSE（契约与信封已移出）</td><td><code>HttpFrontend</code>, <code>_SSESession</code></td></tr>
-        <tr><td><code>.../mansio_web/admin/</code> 3.2k</td><td>面板 UI + API + auth + AdminView</td><td><code>AdminServer</code>, <code>AdminView</code></td></tr>
+        <tr><td><code>.../mansio_web/admin/</code> 3.3k</td><td>面板 UI（骨架 + assets）+ API + auth + AdminView</td><td><code>AdminServer</code>, <code>AdminView</code></td></tr>
         <tr><td><code>.../mansio_client/transport/http.py</code> 745</td><td>HTTP+SSE 实现（唯一）</td><td><code>HttpTransport</code></td></tr>
         <tr><td><code>packages/mansio-client/src/mansio_client/client.py</code> 980</td><td>SDK：游标、语义 API、合批、循环检测</td><td><code>MansioClient</code></td></tr>
         <tr><td><code>.../mansio_client/mcp.py</code> 1126</td><td>32 个 MCP 工具</td><td><code>_TOOLS</code>, <code>_DISPATCH</code></td></tr>
@@ -573,7 +575,8 @@ flowchart LR
         <tr><td>M2c ✅</td><td>Transport 协议在 core（178 行），实现移入 <code>mansio_client/transport/</code>，删除服务端副本；<code>mansio client</code> 弃用桩。合并于 <code>0eb3baf</code></td><td>yes</td><td>00/02/03/06 的现状列（已更新）</td></tr>
         <tr><td>M3a ✅</td><td>19 个 <code>/v1</code> 成功响应改由 <code>*Result.to_dict()</code> 构建；27 个 golden 测试锁字节与键序。合并于 <code>3582fb7</code></td><td>yes</td><td>04/06 的现状列（已更新）</td></tr>
         <tr><td>M3b ✅</td><td>错误体统一 <code>ErrorResult</code>；<code>contracts/admin.py</code> 解析器与响应 DTO；<code>AdminView</code> 唯一组装点；presence 404 加 <code>message</code>。合并于 <code>dba40c2</code></td><td>yes</td><td>04/05/06 的现状列（已更新）</td></tr>
-        <tr><td>M4 🚧</td><td>前端重构与重设计（骨架 + css/js 模块），admin 路由拆分</td><td>no</td><td>05 的现状列</td></tr>
+        <tr><td>M4a ✅</td><td>admin.html 拆为 286 行骨架 + 14 个资产文件；白名单资产服务；行为与字节不变。合并于 <code>da1aa35</code></td><td>yes</td><td>05/06 的现状列（已更新）</td></tr>
+        <tr><td>M4b 🚧</td><td>Slack 式控制台重设计：侧栏 + 内容 + 详情、组件词汇、contracts 生成的类型化视图、移除 inline handler、a11y</td><td>no</td><td>05 的现状列</td></tr>
         <tr><td>M3</td><td>HTTP/admin 路由拆分 + 类型化 AdminView</td><td>yes</td><td>02/05 的现状列</td></tr>
         <tr><td>M4</td><td>前端重构与重新设计（骨架 + css/js 模块）</td><td>no</td><td>05 的现状列</td></tr>
       </tbody>
@@ -587,7 +590,7 @@ flowchart LR
 
 <footer>
   <span>MANSIO · 现状与目标并列（docs_arch）</span>
-  <span>数据来源：master dba40c2 源码、README、docs/DESIGN_EN.md</span>
+  <span>数据来源：master da1aa35 源码、README、docs/DESIGN_EN.md</span>
 </footer>
 
 </div>
