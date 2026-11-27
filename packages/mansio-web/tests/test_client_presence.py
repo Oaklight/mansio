@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from conftest import make_client
+from mansio_web._vendor.httpclient import Client as HttpClient
 
 # ──────────────────────────────────────────────────────────────────
 # Presence: heartbeat / users / user_status
@@ -195,3 +196,16 @@ class TestQueueStatus:
         assert status is not None
         assert status["status"] == "completed"
         client.close()
+
+
+class TestPresenceNotFoundEnvelope:
+    """The unknown-agent 404 now carries the shared error envelope."""
+
+    def test_unknown_user_404_has_error_and_message(self, server_url: str) -> None:
+        http = HttpClient()
+        try:
+            resp = http.get(f"{server_url}/v1/presence/nobody-here")
+        finally:
+            http.close()
+        assert resp.status_code == 404
+        assert resp.json() == {"error": "Not Found", "message": "agent not found"}

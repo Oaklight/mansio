@@ -7,7 +7,6 @@ token management, and optional web UI.
 
 from __future__ import annotations
 
-import re
 import socket
 import threading
 import time
@@ -15,12 +14,19 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mansio_core.contracts import ContractError, parse_publish
-from mansio_core.types import is_valid_user_id
+from mansio_core.contracts.admin import (
+    parse_admin_messages,
+    parse_prefix_create,
+    parse_token_create,
+    parse_user_create,
+    parse_user_token_create,
+)
 
 from mansio_web._vendor.httpserver import App, JSONResponse, Response
 from mansio_web._vendor.structlog import get_logger
 
 from .auth import SessionAuth
+from .view import AdminView
 
 if TYPE_CHECKING:
     from mansio_core.bus import Bus
@@ -79,6 +85,7 @@ class AdminServer:
         auth_token: str | None = None,
     ) -> None:
         self._bus: Bus | None = None
+        self._view: AdminView | None = None
         self._host = "0.0.0.0" if remote else host
         self._port = port
         self._serve_ui = serve_ui
@@ -119,6 +126,7 @@ class AdminServer:
         if self._bus is not None:
             raise RuntimeError("AdminServer already attached to a bus")
         self._bus = bus
+        self._view = AdminView(bus, self._token_store)
         self._setup_routes()
 
     def serve_forever(self) -> None:
@@ -392,59 +400,32 @@ class AdminServer:
 
     def _setup_dashboard_routes(self) -> None:
         """Stats and throughput routes."""
-        bus = self._bus
+        view = self._view
+        assert view is not None
 
         @self._app.get("/api/stats")
         def stats(request: Any) -> dict:
-            s = bus.stats()
-            s["active_subscriptions"] = sum(len(v) for v in bus.subscription_counts().values())
-            return s
+            return view.stats().to_dict()
 
         @self._app.get("/api/stats/throughput")
         def throughput(request: Any) -> dict:
-            window = 60
-            buckets = bus.metrics.get_throughput(window)
-            return {"window_seconds": window, "buckets": buckets}
+            return view.throughput().to_dict()
 
     def _setup_channel_routes(self) -> None:
         """Channel listing and detail routes."""
-        bus = self._bus
+        view = self._view
+        assert view is not None
 
         @self._app.get("/api/channels")
         def channels(request: Any) -> dict:
-            result = []
-            sub_counts = self._bus.subscription_counts()
-            for ch_name in bus.channels():
-                msgs = bus.query(ch_name, limit=1000)
-                senders = {m.sender for m in msgs}
-                last_time = msgs[-1].timestamp if msgs else None
-                result.append(
-                    {
-                        "name": ch_name,
-                        "message_count": len(msgs),
-                        "sender_count": len(senders),
-                        "subscription_count": len(sub_counts.get(ch_name, [])),
-                        "last_message_time": last_time,
-                    }
-                )
-            return {"channels": result}
+            return view.channels().to_dict()
 
         @self._app.get("/api/channels/<name>")
         def channel_detail(request: Any, name: str) -> dict | tuple:
-            msgs = bus.query(name, limit=1000)
-            if not msgs:
+            detail = view.channel_detail(name)
+            if detail is None:
                 return {"error": "Not Found", "message": f"Channel '{name}' not found"}, 404
-            senders = sorted({m.sender for m in msgs})
-            type_counts: dict[str, int] = {}
-            for m in msgs:
-                type_counts[m.msg_type] = type_counts.get(m.msg_type, 0) + 1
-            return {
-                "name": name,
-                "message_count": len(msgs),
-                "senders": senders,
-                "msg_types": [{"msg_type": t, "count": c} for t, c in type_counts.items()],
-                "last_message_time": msgs[-1].timestamp if msgs else None,
-            }
+            return detail.to_dict()
 
     def _setup_message_routes(self) -> None:
         """Message query and publish routes."""
@@ -452,23 +433,13 @@ class AdminServer:
 
         @self._app.get("/api/messages")
         def get_messages(request: Any) -> dict | tuple:
-            channel = (request.query_params.get("channel") or [None])[0]
-            if not channel:
-                return {"error": "Bad Request", "message": "Query param 'channel' required"}, 400
-            sender = (request.query_params.get("sender") or [None])[0]
-            msg_type = (request.query_params.get("msg_type") or [None])[0]
             try:
-                limit = int((request.query_params.get("limit") or ["100"])[0])
-            except ValueError:
-                return {"error": "Bad Request", "message": "'limit' must be an integer"}, 400
-            if limit < 1:
-                return {"error": "Bad Request", "message": "'limit' must be at least 1"}, 400
-
-            msgs = bus.search(channel=channel, sender=sender, msg_type=msg_type, limit=limit)
-            return {
-                "count": len(msgs),
-                "messages": [_msg_dict(m) for m in msgs],
-            }
+                query = parse_admin_messages(request.query_params)
+            except ContractError as err:
+                return err.as_error(), 400
+            view = self._view
+            assert view is not None
+            return view.messages(query).to_dict()
 
         @self._app.post("/api/messages")
         def publish_message(request: Any) -> dict | tuple:
@@ -488,44 +459,32 @@ class AdminServer:
     def _setup_subscription_routes(self) -> None:
         """Subscription listing route."""
 
+        view = self._view
+        assert view is not None
+
         @self._app.get("/api/subscriptions")
         def subscriptions(request: Any) -> dict:
-            counts = self._bus.subscription_counts()
-            ch_list = [
-                {"channel": ch, "subscription_ids": ids, "count": len(ids)}
-                for ch, ids in counts.items()
-            ]
-            total = sum(len(ids) for ids in counts.values())
-            return {"total": total, "channels": ch_list}
+            return view.subscriptions().to_dict()
 
     def _setup_system_routes(self) -> None:
         """System/backend info route."""
-        bus = self._bus
-        token_store = self._token_store
+        view = self._view
+        assert view is not None
 
         @self._app.get("/api/system")
         def system_info(request: Any) -> dict:
-            import mansio_web as mansio
-
-            info: dict = {
-                "version": mansio.__version__,
-                "backend": {},
-                "tokens": {"configured": 0},
-            }
-            info["backend"] = bus.info()
-            if token_store:
-                info["tokens"]["configured"] = len(token_store.list_tokens())
-            return info
+            return view.system().to_dict()
 
     def _setup_prefix_routes(self) -> None:
         """Channel prefix registration routes (admin-only)."""
         token_store = self._token_store
 
+        view = self._view
+        assert view is not None
+
         @self._app.get("/api/prefixes")
         def list_prefixes(request: Any) -> dict:
-            if token_store is None:
-                return {"prefixes": [], "enabled": False}
-            return {"prefixes": token_store.list_prefixes(), "enabled": True}
+            return view.prefixes().to_dict()
 
         @self._app.post("/api/prefixes")
         def register_prefix(request: Any) -> dict | tuple:
@@ -534,25 +493,17 @@ class AdminServer:
                     "error": "Service Unavailable",
                     "message": "Token store not configured",
                 }, 503
-            data = request.json() if request.body else {}
-            prefix = (data.get("prefix") or "").strip().lower()
-            if (
-                not prefix
-                or len(prefix) < 2
-                or len(prefix) > 32
-                or not re.match(r"^[a-z][a-z0-9]{1,31}$", prefix)
-            ):
-                return {
-                    "error": "Bad Request",
-                    "message": "Prefix must be 2-32 lowercase alphanumeric, start with letter",
-                }, 400
-            result = token_store.register_prefix(prefix=prefix, label=data.get("label", ""))
+            try:
+                payload = parse_prefix_create(request.json() if request.body else {})
+            except ContractError as err:
+                return err.as_error(), 400
+            result = token_store.register_prefix(prefix=payload.prefix, label=payload.label)
             if result is None:
                 return {
                     "error": "Bad Request",
-                    "message": f"'{prefix}' is a built-in prefix and cannot be registered",
+                    "message": f"'{payload.prefix}' is a built-in prefix and cannot be registered",
                 }, 400
-            return {"ok": True, "prefix": result}, 201
+            return view.prefix_created(result).to_dict(), 201
 
         @self._app.delete("/api/prefixes/<prefix>")
         def delete_prefix(request: Any, prefix: str) -> dict | tuple:
@@ -562,7 +513,7 @@ class AdminServer:
                     "message": "Token store not configured",
                 }, 503
             if token_store.delete_prefix(prefix):
-                return {"ok": True, "deleted": prefix}
+                return view.prefix_deleted(prefix).to_dict()
             return {
                 "error": "Not Found",
                 "message": f"Prefix '{prefix}' not found or is built-in",
@@ -576,30 +527,13 @@ class AdminServer:
     def _setup_user_list_register_routes(self) -> None:
         """User list and registration routes."""
         token_store = self._token_store
-        bus = self._bus
 
-        def _validate_user_id(user_id: str) -> tuple | None:
-            if not is_valid_user_id(user_id):
-                return {
-                    "error": "Bad Request",
-                    "message": "user_id must be 3-64 chars, lowercase alphanumeric + hyphens",
-                }, 400
-            return None
+        view = self._view
+        assert view is not None
 
         @self._app.get("/api/users")
         def list_users(request: Any) -> dict:
-            if token_store is None:
-                return {"users": [], "enabled": False}
-            users = token_store.list_users()
-            try:
-                presence = {a.user_id: a for a in bus.users(timeout_seconds=120)}
-            except NotImplementedError:
-                presence = {}
-            for u in users:
-                p = presence.get(u["user_id"])
-                u["status"] = p.status if p else "unknown"
-                u["last_seen"] = p.last_seen if p else None
-            return {"users": users}
+            return view.users().to_dict()
 
         @self._app.post("/api/users")
         def register_user(request: Any) -> dict | tuple:
@@ -608,41 +542,33 @@ class AdminServer:
                     "error": "Service Unavailable",
                     "message": "Token store not configured",
                 }, 503
-            data = request.json() if request.body else {}
-            user_id = data.get("user_id", "").strip()
-            if not user_id:
-                return {"error": "Bad Request", "message": "user_id is required"}, 400
-            err = _validate_user_id(user_id)
-            if err:
-                return err
-            if token_store.user_exists(user_id):
-                return {"error": "Conflict", "message": f"User '{user_id}' already exists"}, 409
-            label = data.get("label", "initial token")
-            entry = token_store.create_token(user_id=user_id, label=label)
-            return {"ok": True, "user_id": user_id, "token": entry}, 201
+            try:
+                payload = parse_user_create(request.json() if request.body else {})
+            except ContractError as err:
+                return err.as_error(), 400
+            if token_store.user_exists(payload.user_id):
+                return {
+                    "error": "Conflict",
+                    "message": f"User '{payload.user_id}' already exists",
+                }, 409
+            entry = token_store.create_token(user_id=payload.user_id, label=payload.label)
+            return view.user_registered(payload.user_id, entry).to_dict(), 201
 
     def _setup_user_detail_delete_routes(self) -> None:
         """User detail and deletion routes."""
         token_store = self._token_store
-        bus = self._bus
+
+        view = self._view
+        assert view is not None
 
         @self._app.get("/api/users/<user_id>")
         def get_user(request: Any, user_id: str) -> dict | tuple:
             if token_store is None:
                 return {"error": "Service Unavailable"}, 503
-            tokens = token_store.list_user_tokens(user_id)
-            if not tokens:
+            detail = view.user_detail(user_id)
+            if detail is None:
                 return {"error": "Not Found", "message": f"User '{user_id}' not found"}, 404
-            try:
-                p = bus.user_status(user_id)
-            except NotImplementedError:
-                p = None
-            return {
-                "user_id": user_id,
-                "tokens": tokens,
-                "status": p.status if p else "unknown",
-                "last_seen": p.last_seen if p else None,
-            }
+            return detail.to_dict()
 
         @self._app.delete("/api/users/<user_id>")
         def delete_user(request: Any, user_id: str) -> dict | tuple:
@@ -651,18 +577,20 @@ class AdminServer:
             count = token_store.delete_user(user_id)
             if count == 0:
                 return {"error": "Not Found", "message": f"User '{user_id}' not found"}, 404
-            return {"ok": True, "deleted_tokens": count}
+            return view.user_deleted(count).to_dict()
 
     def _setup_user_token_routes(self) -> None:
         """User token sub-resource routes."""
         token_store = self._token_store
 
+        view = self._view
+        assert view is not None
+
         @self._app.get("/api/users/<user_id>/tokens")
         def list_user_tokens(request: Any, user_id: str) -> dict | tuple:
             if token_store is None:
                 return {"error": "Service Unavailable"}, 503
-            tokens = token_store.list_user_tokens(user_id)
-            return {"user_id": user_id, "tokens": tokens}
+            return view.user_tokens(user_id).to_dict()
 
         @self._app.post("/api/users/<user_id>/tokens")
         def create_user_token(request: Any, user_id: str) -> dict | tuple:
@@ -670,20 +598,23 @@ class AdminServer:
                 return {"error": "Service Unavailable"}, 503
             if not token_store.user_exists(user_id):
                 return {"error": "Not Found", "message": f"User '{user_id}' not found"}, 404
-            data = request.json() if request.body else {}
-            label = data.get("label", "")
+            try:
+                label = parse_user_token_create(request.json() if request.body else {})
+            except ContractError as err:
+                return err.as_error(), 400
             entry = token_store.create_token(user_id=user_id, label=label)
-            return {"ok": True, "token": entry}, 201
+            return view.user_token_created(entry).to_dict(), 201
 
     def _setup_token_routes(self) -> None:
         """Token CRUD routes."""
         token_store = self._token_store
 
+        view = self._view
+        assert view is not None
+
         @self._app.get("/api/tokens")
         def list_tokens(request: Any) -> dict:
-            if token_store is None:
-                return {"tokens": [], "enabled": False}
-            return {"tokens": token_store.list_tokens(), "enabled": True}
+            return view.tokens().to_dict()
 
         @self._app.post("/api/tokens")
         def create_token(request: Any) -> dict | tuple:
@@ -692,29 +623,15 @@ class AdminServer:
                     "error": "Service Unavailable",
                     "message": "Token store not configured",
                 }, 503
-            data = request.json() if request.body else {}
-            supertoken = data.get("supertoken", False)
-            if not isinstance(supertoken, bool):
-                return {
-                    "error": "Bad Request",
-                    "message": "supertoken must be a boolean",
-                }, 400
-            user_id = data.get("user_id")
-            if supertoken:
-                if user_id is not None:
-                    return {
-                        "error": "Bad Request",
-                        "message": "user_id must be omitted when supertoken is true",
-                    }, 400
-                entry = token_store.create_token(user_id=None, label=data.get("label", ""))
-                return {"ok": True, "supertoken": True, "token": entry}, 201
-            if not isinstance(user_id, str) or not user_id.strip():
-                return {
-                    "error": "Bad Request",
-                    "message": "user_id must be a non-empty string",
-                }, 400
-            entry = token_store.create_token(user_id=user_id.strip(), label=data.get("label", ""))
-            return {"ok": True, "token": entry}, 201
+            try:
+                payload = parse_token_create(request.json() if request.body else {})
+            except ContractError as err:
+                return err.as_error(), 400
+            if payload.supertoken:
+                entry = token_store.create_token(user_id=None, label=payload.label)
+                return view.token_created(entry, supertoken=True).to_dict(), 201
+            entry = token_store.create_token(user_id=payload.user_id, label=payload.label)
+            return view.token_created(entry).to_dict(), 201
 
         @self._app.delete("/api/tokens/<token_id>")
         def delete_token(request: Any, token_id: str) -> dict | tuple:
@@ -724,7 +641,7 @@ class AdminServer:
                     "message": "Token store not configured",
                 }, 503
             if token_store.delete_token(token_id):
-                return {"ok": True, "deleted": token_id}
+                return view.token_deleted(token_id).to_dict()
             return {"error": "Not Found", "message": f"Token '{token_id}' not found"}, 404
 
         @self._app.post("/api/tokens/<token_id>/rotate")
@@ -737,20 +654,4 @@ class AdminServer:
             result = token_store.rotate_token(token_id)
             if result is None:
                 return {"error": "Not Found", "message": f"Token '{token_id}' not found"}, 404
-            return {"ok": True, "token": result}
-
-
-# ── Helpers ──────────────────────────────────────────────────────
-
-
-def _msg_dict(m: Any) -> dict:
-    """Serialize a Message to a dict."""
-    return {
-        "id": m.id,
-        "channel": m.channel,
-        "sender": m.sender,
-        "msg_type": m.msg_type,
-        "payload": m.payload,
-        "timestamp": m.timestamp,
-        "metadata": m.metadata,
-    }
+            return view.token_rotated(result).to_dict()

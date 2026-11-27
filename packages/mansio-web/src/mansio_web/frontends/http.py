@@ -200,13 +200,13 @@ def _validate_channel_name(
 ) -> tuple[dict, int] | None:
     """Validate channel name. Returns error tuple or None if OK."""
     if _invalid_dm_name(channel):
-        return {"error": "Bad Request", "message": DM_NAME_EXPECTED}, 400
+        return _error("Bad Request", DM_NAME_EXPECTED, 400)
 
     is_reserved = any(channel.startswith(p) for p in _RESERVED_PREFIXES)
 
     if is_reserved:
         if not _SYSTEM_CHANNEL_RE.match(channel):
-            return {"error": "Bad Request", "message": "Invalid system channel name"}, 400
+            return _error("Bad Request", "Invalid system channel name", 400)
         return None
 
     # Check for custom registered prefix (channel contains colon)
@@ -214,32 +214,30 @@ def _validate_channel_name(
         prefix = channel.split(":")[0]
         if token_store and token_store.is_registered_prefix(prefix):
             if len(channel) < 3 or len(channel) > 64 or channel != channel.lower():
-                return {"error": "Bad Request", "message": "Invalid prefixed channel name"}, 400
+                return _error("Bad Request", "Invalid prefixed channel name", 400)
             return None
-        return {
-            "error": "Bad Request",
-            "message": f"Prefix '{prefix}:' is not registered. Register custom prefixes via admin panel.",
-        }, 400
+        return _error(
+            "Bad Request",
+            f"Prefix '{prefix}:' is not registered. Register custom prefixes via admin panel.",
+            400,
+        )
 
     # Plain user channel — no colons
     if len(channel) < 3 or not _USER_CHANNEL_RE.match(channel):
-        return {
-            "error": "Bad Request",
-            "message": "Channel name must be 3-64 chars, start with letter, end with letter/digit, "
+        return _error(
+            "Bad Request",
+            "Channel name must be 3-64 chars, start with letter, end with letter/digit, "
             "lowercase, no colons (use registered prefixes for namespaced channels)",
-        }, 400
+            400,
+        )
     if not any(c.isalpha() for c in channel):
-        return {
-            "error": "Bad Request",
-            "message": "Channel name must contain at least one letter",
-        }, 400
+        return _error("Bad Request", "Channel name must contain at least one letter", 400)
     if channel != channel.lower():
-        return {"error": "Bad Request", "message": "Channel name must be lowercase"}, 400
+        return _error("Bad Request", "Channel name must be lowercase", 400)
     if _NO_CONSECUTIVE_SPECIALS.search(channel):
-        return {
-            "error": "Bad Request",
-            "message": "Channel name cannot contain consecutive special characters",
-        }, 400
+        return _error(
+            "Bad Request", "Channel name cannot contain consecutive special characters", 400
+        )
 
     return None
 
@@ -265,21 +263,30 @@ def _validate_and_auth_publish(
 
     # Sender identity: token must match the declared sender
     if sender != auth_result:
-        return {
-            "error": "Forbidden",
-            "message": f"Token bound to '{auth_result}', cannot publish as '{sender}'",
-        }, 403
+        return _error(
+            "Forbidden", f"Token bound to '{auth_result}', cannot publish as '{sender}'", 403
+        )
 
     denial = authz.publish_denial(auth_result, channel, msg_type) if authz else None
     if denial:
-        return {"error": "Forbidden", "message": denial}, 403
+        return _error("Forbidden", denial, 403)
 
     return None
 
 
+def _error_body(error: str, message: str) -> dict[str, str]:
+    """Return one of the shared error documents."""
+    return ErrorResult(error=error, message=message).to_dict()
+
+
+def _error(error: str, message: str, status: int) -> tuple[dict[str, str], int]:
+    """Return an error document with its HTTP status."""
+    return _error_body(error, message), status
+
+
 def _bad_request(err: ContractError) -> tuple[dict[str, str], int]:
     """Return a contract error as an HTTP 400 response."""
-    return ErrorResult(error="Bad Request", message=err.message).to_dict(), 400
+    return _error_body("Bad Request", err.message), 400
 
 
 def _json_body(request: Any, message: str = "Request body must be valid JSON") -> Any:
@@ -319,22 +326,22 @@ async def _handle_queue_status(request: Any, bus: Any, authz: ChannelAuthorizer)
         if message is not None and not authz.can_read(auth_result, message.channel):
             # Same body as a message without queue state, so the answer does
             # not confirm that a private message exists.
-            return {"error": "Not Found", "message": "No queue status for this message"}, 404
+            return _error("Not Found", "No queue status for this message", 404)
 
     result = await asyncio.to_thread(bus.queue_status, message_id)
     if result is None:
-        return {"error": "Not Found", "message": "No queue status for this message"}, 404
+        return _error("Not Found", "No queue status for this message", 404)
     return QueueStatusResult(found=True, status=result).to_dict()
 
 
 def _resolve_claimed_by(auth_result: Any, claimed_by: str | None) -> tuple[str, tuple | None]:
     """Resolve claimed_by from the auth context or the parsed request body."""
     if auth_result is False:
-        return "", ({"error": "Unauthorized", "message": "Valid token required"}, 401)
+        return "", (_error("Unauthorized", "Valid token required", 401))
     if isinstance(auth_result, str):
         return auth_result, None
     if not claimed_by:
-        return "", ({"error": "Bad Request", "message": "Missing 'claimed_by'"}, 400)
+        return "", (_error("Bad Request", "Missing 'claimed_by'", 400))
     return claimed_by, None
 
 
@@ -532,20 +539,20 @@ class HttpFrontend:
                     request.state.auth_result = True
                     return None
                 return JSONResponse(
-                    {"error": "Forbidden", "message": _NO_TOKEN_STORE_MESSAGE},
+                    _error_body("Forbidden", _NO_TOKEN_STORE_MESSAGE),
                     status_code=403,
                 )
 
             if not await asyncio.to_thread(token_store.has_tokens):
                 return JSONResponse(
-                    {"error": "Forbidden", "message": _NO_TOKENS_MESSAGE},
+                    _error_body("Forbidden", _NO_TOKENS_MESSAGE),
                     status_code=403,
                 )
 
             auth_header = request.headers.get("authorization", "")
             if not auth_header:
                 return JSONResponse(
-                    {"error": "Unauthorized", "message": "Missing Authorization header"},
+                    _error_body("Unauthorized", "Missing Authorization header"),
                     status_code=401,
                     headers={"WWW-Authenticate": 'Bearer realm="mansio"'},
                 )
@@ -553,7 +560,7 @@ class HttpFrontend:
             parts = auth_header.split(" ", 1)
             if len(parts) != 2 or parts[0].lower() != "bearer":
                 return JSONResponse(
-                    {"error": "Unauthorized", "message": "Expected 'Bearer <token>'"},
+                    _error_body("Unauthorized", "Expected 'Bearer <token>'"),
                     status_code=401,
                     headers={"WWW-Authenticate": 'Bearer realm="mansio"'},
                 )
@@ -561,7 +568,7 @@ class HttpFrontend:
             result = await asyncio.to_thread(token_store.validate, parts[1])
             if result is False:
                 return JSONResponse(
-                    {"error": "Unauthorized", "message": "Invalid or expired token"},
+                    _error_body("Unauthorized", "Invalid or expired token"),
                     status_code=401,
                     headers={"WWW-Authenticate": 'Bearer realm="mansio"'},
                 )
@@ -626,10 +633,9 @@ class HttpFrontend:
                     intent=payload.intent,
                 )
             except ValueError as e:
-                return {
-                    "error": "Not Found" if "not found" in str(e) else "Bad Request",
-                    "message": str(e),
-                }, 404 if "not found" in str(e) else 400
+                status = 404 if "not found" in str(e) else 400
+                error = "Not Found" if status == 404 else "Bad Request"
+                return _error(error, str(e), status)
             warning = await _dm_unregistered_warning(bus, payload.channel, payload.sender)
             return PublishResult(message_id=msg_id, warning=warning).to_dict()
 
@@ -649,10 +655,11 @@ class HttpFrontend:
             # the total message count (issue #251).
             auth_result = request.state.auth_result
             if isinstance(auth_result, str) and not authz.can_read(auth_result, qp.channel):
-                return {
-                    "error": "Forbidden",
-                    "message": f"Token for '{auth_result}' cannot query channel '{qp.channel}'",
-                }, 403
+                return _error(
+                    "Forbidden",
+                    f"Token for '{auth_result}' cannot query channel '{qp.channel}'",
+                    403,
+                )
 
             msgs = await asyncio.to_thread(
                 bus.query,
@@ -756,27 +763,23 @@ class HttpFrontend:
         @self._app.delete("/v1/channels/<channel_name>")
         async def delete_channel(request: Request, channel_name: str = "") -> dict | tuple:
             if not channel_name:
-                return {"error": "Bad Request", "message": "Channel name required"}, 400
+                return _error("Bad Request", "Channel name required", 400)
 
             auth_result = request.state.auth_result
             if isinstance(auth_result, str):
                 denial = authz.delete_channel_denial(auth_result, channel_name)
                 if denial:
-                    return {"error": "Forbidden", "message": denial}, 403
+                    return _error("Forbidden", denial, 403)
 
             try:
                 count = await asyncio.to_thread(bus.delete_channel, channel_name)
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support deletion",
-                }, 501
+                return _error("Not Implemented", "Backend does not support deletion", 501)
 
             if count == 0:
-                return {
-                    "error": "Not Found",
-                    "message": f"Channel '{channel_name}' not found or already empty",
-                }, 404
+                return _error(
+                    "Not Found", f"Channel '{channel_name}' not found or already empty", 404
+                )
 
             return DeleteChannelResult(deleted=count, channel=channel_name).to_dict()
 
@@ -790,7 +793,7 @@ class HttpFrontend:
         @self._app.delete("/v1/messages/<message_id>")
         async def delete_message(request: Request, message_id: str = "") -> dict | tuple:
             if not message_id:
-                return {"error": "Bad Request", "message": "Message ID required"}, 400
+                return _error("Bad Request", "Message ID required", 400)
 
             auth_result = request.state.auth_result
 
@@ -799,31 +802,23 @@ class HttpFrontend:
                 found_msg = await asyncio.to_thread(bus.get_message, message_id)
 
                 if found_msg is None:
-                    return {
-                        "error": "Not Found",
-                        "message": f"Message '{message_id}' not found",
-                    }, 404
+                    return _error("Not Found", f"Message '{message_id}' not found", 404)
 
                 if not authz.can_delete_message(auth_result, found_msg):
-                    return {
-                        "error": "Forbidden",
-                        "message": f"Token for '{auth_result}' cannot delete messages "
+                    return _error(
+                        "Forbidden",
+                        f"Token for '{auth_result}' cannot delete messages "
                         f"from sender '{found_msg.sender}'",
-                    }, 403
+                        403,
+                    )
 
             try:
                 deleted = await asyncio.to_thread(bus.delete_message, message_id)
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support deletion",
-                }, 501
+                return _error("Not Implemented", "Backend does not support deletion", 501)
 
             if not deleted:
-                return {
-                    "error": "Not Found",
-                    "message": f"Message '{message_id}' not found",
-                }, 404
+                return _error("Not Found", f"Message '{message_id}' not found", 404)
 
             return DeleteMessageResult(deleted=True, message_id=message_id).to_dict()
 
@@ -838,10 +833,7 @@ class HttpFrontend:
 
             # Admin only: supertoken (None) or no-auth mode (True)
             if isinstance(auth_result, str):
-                return {
-                    "error": "Forbidden",
-                    "message": "Admin endpoints require a supertoken",
-                }, 403
+                return _error("Forbidden", "Admin endpoints require a supertoken", 403)
 
             try:
                 cleanup = parse_admin_cleanup(_json_body(request))
@@ -879,10 +871,7 @@ class HttpFrontend:
                     total_deleted += count
                     channels_deleted.append(ch)
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support deletion",
-                }, 501
+                return _error("Not Implemented", "Backend does not support deletion", 501)
 
             return AdminCleanupResult(
                 channels_deleted=len(channels_deleted),
@@ -901,10 +890,7 @@ class HttpFrontend:
 
             # Admin only: supertoken (None) or no-auth mode (True)
             if isinstance(auth_result, str):
-                return {
-                    "error": "Forbidden",
-                    "message": "Admin endpoints require a supertoken",
-                }, 403
+                return _error("Forbidden", "Admin endpoints require a supertoken", 403)
 
             try:
                 compact = parse_admin_compact(_json_body(request))
@@ -923,10 +909,7 @@ class HttpFrontend:
                     keep_latest_per_sender=keep_latest_per_sender,
                 )
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support compaction",
-                }, 501
+                return _error("Not Implemented", "Backend does not support compaction", 501)
 
             return AdminCompactResult(channel=channel, messages_removed=removed).to_dict()
 
@@ -952,7 +935,7 @@ class HttpFrontend:
             if isinstance(auth_result, str):
                 denial = await asyncio.to_thread(authz.claim_denial, auth_result, claim.channel)
                 if denial:
-                    return {"error": "Forbidden", "message": denial}, 403
+                    return _error("Forbidden", denial, 403)
 
             result = await asyncio.to_thread(
                 bus.queue_claim, claim.channel, claimed_by, lease_seconds=claim.lease_seconds
@@ -1014,18 +997,16 @@ class HttpFrontend:
             # Supertokens (auth_result is None) and no-auth mode (True)
             # keep acting on behalf of any user, as they do elsewhere.
             if isinstance(auth_result, str) and user_id != auth_result:
-                return {
-                    "error": "Forbidden",
-                    "message": (f"Token bound to '{auth_result}', cannot heartbeat as '{user_id}'"),
-                }, 403
+                return _error(
+                    "Forbidden",
+                    f"Token bound to '{auth_result}', cannot heartbeat as '{user_id}'",
+                    403,
+                )
             metadata = heartbeat.metadata
             try:
                 await asyncio.to_thread(bus.heartbeat, user_id, metadata)
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support presence",
-                }, 501
+                return _error("Not Implemented", "Backend does not support presence", 501)
             return PresenceHeartbeatResult().to_dict()
 
         @self._app.get("/v1/presence")
@@ -1037,10 +1018,7 @@ class HttpFrontend:
             try:
                 agents = await asyncio.to_thread(bus.users, query.timeout)
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support presence",
-                }, 501
+                return _error("Not Implemented", "Backend does not support presence", 501)
             return PresenceResult(agents=agents).to_dict()
 
         @self._app.get("/v1/presence/<user_id>")
@@ -1052,12 +1030,9 @@ class HttpFrontend:
             try:
                 result = await asyncio.to_thread(bus.user_status, user_id, query.timeout)
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support presence",
-                }, 501
+                return _error("Not Implemented", "Backend does not support presence", 501)
             if result is None:
-                return {"error": "agent not found"}, 404
+                return _error("Not Found", "agent not found", 404)
             return PresenceAgentResult(
                 user_id=result.user_id,
                 status=result.status,
@@ -1095,13 +1070,10 @@ class HttpFrontend:
             if isinstance(auth_result, str):
                 denial = authz.create_denial(auth_result, name)
                 if denial:
-                    return {"error": "Forbidden", "message": denial}, 403
+                    return _error("Forbidden", denial, 403)
                 owner = auth_result  # scoped tokens own what they create
             elif not owner:
-                return {
-                    "error": "Bad Request",
-                    "message": "'owner' is required for supertoken/no-auth",
-                }, 400
+                return _error("Bad Request", "'owner' is required for supertoken/no-auth", 400)
 
             visibility = payload.visibility
 
@@ -1110,12 +1082,9 @@ class HttpFrontend:
                     bus.create_channel, name, owner, visibility=visibility
                 )
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support channel management",
-                }, 501
+                return _error("Not Implemented", "Backend does not support channel management", 501)
             except ValueError as exc:
-                return {"error": "Conflict", "message": str(exc)}, 409
+                return _error("Conflict", str(exc), 409)
 
             return ChannelResult(channel=meta).to_dict(), 201
 
@@ -1126,21 +1095,15 @@ class HttpFrontend:
                 # 404, not 403: a denied caller must not learn from the
                 # status code that a private channel exists.  The message is
                 # the same one an unknown channel returns.
-                return {
-                    "error": "Not Found",
-                    "message": f"Channel '{channel}' not found",
-                }, 404
+                return _error("Not Found", f"Channel '{channel}' not found", 404)
 
             try:
                 meta = await asyncio.to_thread(bus.get_channel_meta, channel)
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support channel management",
-                }, 501
+                return _error("Not Implemented", "Backend does not support channel management", 501)
 
             if meta is None:
-                return {"error": "Not Found", "message": f"Channel '{channel}' not found"}, 404
+                return _error("Not Found", f"Channel '{channel}' not found", 404)
 
             return ChannelResult(channel=meta).to_dict()
 
@@ -1166,10 +1129,7 @@ class HttpFrontend:
             try:
                 entries = await asyncio.to_thread(bus.get_acl, channel)
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support channel management",
-                }, 501
+                return _error("Not Implemented", "Backend does not support channel management", 501)
 
             return ACLResult(acl=entries).to_dict()
 
@@ -1217,10 +1177,7 @@ class HttpFrontend:
             try:
                 await asyncio.to_thread(bus.set_acl, channel, entries)
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support channel management",
-                }, 501
+                return _error("Not Implemented", "Backend does not support channel management", 501)
 
             return ACLSetResult(status="ok", count=len(entries)).to_dict()
 
@@ -1261,10 +1218,7 @@ class HttpFrontend:
             try:
                 await asyncio.to_thread(bus.add_acl_entry, entry)
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support channel management",
-                }, 501
+                return _error("Not Implemented", "Backend does not support channel management", 501)
 
             return ACLAddResult(
                 status="ok",
@@ -1294,16 +1248,10 @@ class HttpFrontend:
             try:
                 removed = await asyncio.to_thread(bus.remove_acl_entry, channel, user_id)
             except NotImplementedError:
-                return {
-                    "error": "Not Implemented",
-                    "message": "Backend does not support channel management",
-                }, 501
+                return _error("Not Implemented", "Backend does not support channel management", 501)
 
             if not removed:
-                return {
-                    "error": "Not Found",
-                    "message": f"No ACL entry for '{user_id}' on '{channel}'",
-                }, 404
+                return _error("Not Found", f"No ACL entry for '{user_id}' on '{channel}'", 404)
 
             return ACLRemoveResult().to_dict()
 
@@ -1320,28 +1268,21 @@ class HttpFrontend:
         ) -> StreamingResponse | tuple:
             """Shared SSE handler for all subscribe endpoints."""
             if not ch_list:
-                return {
-                    "error": "Bad Request",
-                    "message": "At least one channel required",
-                }, 400
+                return _error("Bad Request", "At least one channel required", 400)
 
             for ch in ch_list:
                 if _invalid_dm_name(ch):
-                    return {
-                        "error": "Bad Request",
-                        "message": f"{DM_NAME_EXPECTED} (got '{ch}')",
-                    }, 400
+                    return _error("Bad Request", f"{DM_NAME_EXPECTED} (got '{ch}')", 400)
 
             auth_result = request.state.auth_result
             if isinstance(auth_result, str):
                 forbidden = [ch for ch in ch_list if not authz.can_read(auth_result, ch)]
                 if forbidden:
-                    return {
-                        "error": "Forbidden",
-                        "message": (
-                            f"Token for '{auth_result}' cannot subscribe to: {', '.join(forbidden)}"
-                        ),
-                    }, 403
+                    return _error(
+                        "Forbidden",
+                        f"Token for '{auth_result}' cannot subscribe to: {', '.join(forbidden)}",
+                        403,
+                    )
 
             # Parse Last-Event-ID for cursor-based resume
             last_event_id = request.headers.get("last-event-id", "").strip() or None
@@ -1416,10 +1357,7 @@ class HttpFrontend:
         ) -> StreamingResponse | tuple:
             """Per-channel SSE convenience endpoint."""
             if not channel:
-                return {
-                    "error": "Bad Request",
-                    "message": "Channel name required",
-                }, 400
+                return _error("Bad Request", "Channel name required", 400)
             return await _handle_subscribe(request, [channel])
 
 
@@ -1434,10 +1372,9 @@ async def _require_acl_manage(
     if isinstance(auth_result, str) and not await asyncio.to_thread(
         authz.can_manage_acl, auth_result, channel
     ):
-        return {
-            "error": "Forbidden",
-            "message": f"Agent '{auth_result}' lacks manage permission on '{channel}'",
-        }, 403
+        return _error(
+            "Forbidden", f"Agent '{auth_result}' lacks manage permission on '{channel}'", 403
+        )
     return None
 
 
