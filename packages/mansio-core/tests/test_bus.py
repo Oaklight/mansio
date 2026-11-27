@@ -8,6 +8,7 @@ import time
 
 import pytest
 from mansio_core import Bus, MemoryBackend, Message, SQLiteBackend, SQLiteBus
+from mansio_core.contracts.sse import message_from_dict, message_to_dict
 
 
 def _concurrent_open_worker(
@@ -116,6 +117,62 @@ class TestMessage:
             metadata=meta,
         )
         assert msg.metadata == meta
+
+
+# ──────────────────────────────────────────────
+# Bus.publish validation
+# ──────────────────────────────────────────────
+
+
+class TestBusPublishValidation:
+    """Bus.publish enforces the rules message_from_dict expects (#383)."""
+
+    @pytest.fixture()
+    def bus(self):
+        bus = Bus(MemoryBackend())
+        yield bus
+        bus.close()
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"channel": ""}, "channel must be a non-empty string"),
+            ({"channel": 1}, "channel must be a non-empty string"),
+            ({"sender": ""}, "sender must be a non-empty string"),
+            ({"sender": None}, "sender must be a non-empty string"),
+            ({"msg_type": ""}, "msg_type must be a non-empty string"),
+            ({"msg_type": None}, "msg_type must be a non-empty string"),
+            ({"payload": ""}, "payload must be a non-empty string"),
+            ({"payload": None}, "payload must be a non-empty string"),
+            ({"parent_id": 1}, "parent_id must be a string or None"),
+            ({"intent": 1}, "intent must be a string or None"),
+            ({"metadata": []}, "metadata must be a dict or None"),
+        ],
+    )
+    def test_invalid_fields_are_rejected(self, bus, kwargs, message):
+        body = {
+            "channel": "general",
+            "sender": "alice",
+            "msg_type": "text",
+            "payload": "hello",
+            **kwargs,
+        }
+        with pytest.raises(ValueError, match=message):
+            bus.publish(**body)
+
+    def test_published_message_round_trips_through_the_wire_contract(self, bus):
+        msg_id = bus.publish(
+            "general",
+            "alice",
+            "text",
+            "hello",
+            metadata={"tags": ["a"]},
+            parent_id=None,
+            intent="FYI_ONLY",
+        )
+        message = bus.get_message(msg_id)
+        assert message is not None
+        assert message_from_dict(message_to_dict(message)) == message
 
 
 # ──────────────────────────────────────────────

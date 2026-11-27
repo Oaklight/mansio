@@ -157,9 +157,24 @@ class Bus:
         logged and does not abort the publish or reach the other subscribers.
 
         Raises:
-            ValueError: If parent_id references a non-existent message
-                or a message in a different channel.
+            ValueError: If a field has the wrong type or is empty, or if
+                parent_id references a non-existent message or a message in
+                a different channel.
         """
+        for name, value in (
+            ("channel", channel),
+            ("sender", sender),
+            ("msg_type", msg_type),
+            ("payload", payload),
+        ):
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{name} must be a non-empty string")
+        for name, value in (("parent_id", parent_id), ("intent", intent)):
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"{name} must be a string or None")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("metadata must be a dict or None")
+
         # Auto-create channel metadata for sugar prefixes
         if isinstance(self._backend, ChannelStore):
             self._ensure_sugar_channel(channel, sender)
