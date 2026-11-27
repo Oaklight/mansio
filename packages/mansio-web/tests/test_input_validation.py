@@ -359,3 +359,40 @@ class TestPresenceTimeoutValidation:
             resp.status_code
         )
         http.close()
+
+
+class TestPublishSenderAndReferences:
+    """The publish contract requires a sender and string-or-null references."""
+
+    def _publish(self, server_url: str, **overrides):
+        body = {
+            "channel": "general",
+            "sender": "agent-x",
+            "msg_type": "text",
+            "payload": "hi",
+        }
+        body.update(overrides)
+        http = HttpClient()
+        try:
+            return http.post(f"{server_url}/v1/publish", json=body)
+        finally:
+            http.close()
+
+    def test_whitespace_sender_rejected(self, server_url: str) -> None:
+        resp = self._publish(server_url, sender="   ")
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["message"] == "Sender must be a non-empty string"
+
+    def test_non_string_intent_rejected(self, server_url: str) -> None:
+        resp = self._publish(server_url, intent=123)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["message"] == "'intent' must be a string or null"
+
+    def test_non_string_parent_id_rejected(self, server_url: str) -> None:
+        resp = self._publish(server_url, parent_id=123)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["message"] == "'parent_id' must be a string or null"
+
+    def test_null_references_accepted(self, server_url: str) -> None:
+        resp = self._publish(server_url, parent_id=None, intent=None)
+        assert resp.status_code == 200, resp.text

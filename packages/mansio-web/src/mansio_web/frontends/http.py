@@ -61,6 +61,7 @@ from mansio_core.authz import user_involved as _user_involved
 from mansio_core.contracts import (
     ContractError,
     StreamEvent,
+    message_to_dict,
     parse_acl_add,
     parse_acl_set,
     parse_admin_cleanup,
@@ -329,23 +330,8 @@ def _claim_result_to_dict(result: Any) -> dict[str, Any]:
 
 
 def _msg_to_dict(m: Message) -> dict[str, Any]:
-    """Serialize a Message to a dict."""
-    d: dict[str, Any] = {
-        "id": m.id,
-        "channel": m.channel,
-        "sender": m.sender,
-        "msg_type": m.msg_type,
-        "payload": m.payload,
-        "timestamp": m.timestamp,
-        "metadata": m.metadata,
-    }
-    if m.parent_id is not None:
-        d["parent_id"] = m.parent_id
-    if m.thread_id is not None:
-        d["thread_id"] = m.thread_id
-    if m.intent is not None:
-        d["intent"] = m.intent
-    return d
+    """Serialize a Message to its wire dict (shared with the SSE contract)."""
+    return message_to_dict(m)
 
 
 class HttpFrontend:

@@ -142,16 +142,27 @@ def parse_publish(body: Any) -> PublishRequest:
     sender = data["sender"]
     if not isinstance(sender, str) or "\x00" in sender:
         raise ContractError("Sender must be a string without null bytes", field="sender")
+    sender = sender.strip()
+    if not sender:
+        raise ContractError("Sender must be a non-empty string", field="sender")
+
+    parent_id = data.get("parent_id")
+    if parent_id is not None and not isinstance(parent_id, str):
+        raise ContractError("'parent_id' must be a string or null", field="parent_id")
+
+    intent = data.get("intent")
+    if intent is not None and not isinstance(intent, str):
+        raise ContractError("'intent' must be a string or null", field="intent")
 
     return PublishRequest(
         channel=channel.strip(),
-        sender=sender.strip(),
+        sender=sender,
         msg_type=msg_type,
         payload=payload,
         metadata=metadata,
         queue=bool(data.get("queue")),
-        parent_id=data.get("parent_id"),
-        intent=data.get("intent"),
+        parent_id=parent_id,
+        intent=intent,
     )
 
 

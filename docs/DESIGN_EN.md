@@ -449,6 +449,8 @@ supertoken-only.
 The Frontend layer validates message payloads on publish:
 - Empty or whitespace-only payloads are rejected (**400 Bad Request**)
 - Non-string payloads are rejected (**400 Bad Request**)
+- Empty or whitespace-only senders are rejected (**400 Bad Request**)
+- `parent_id` and `intent` must be strings or null (**400 Bad Request** otherwise)
 - Query `limit` parameters must be ≥ 1 (**400 Bad Request** otherwise)
 
 Every validation failure uses one error body:

@@ -4,9 +4,10 @@ Each ``data:`` line of a subscribe stream carries one JSON object::
 
     {"channel": "general", "message": {...}}
 
-:class:`StreamEvent` is that document.  Serializers here are the single
-definition used by the server and by both HTTP transports, so the wire
-format cannot drift between them.  No backend-internal type appears here.
+:class:`StreamEvent` is that document.  ``message_to_dict`` is also the
+REST message serializer (the web frontend delegates to it), and the parse
+functions are what both HTTP transports use, so the wire definitions
+cannot drift.  No backend-internal type appears here.
 """
 
 from __future__ import annotations
@@ -55,6 +56,12 @@ def message_to_dict(message: Message) -> dict[str, Any]:
 
 def message_from_dict(data: Any) -> Message:
     """Build a :class:`Message` from its wire object.
+
+    Every required field must be a non-empty string.  The publish contract
+    enforces the same guarantees, so a message accepted by the HTTP frontend
+    always parses here.  A direct in-process ``Bus.publish`` call bypasses
+    that validation and can still build a message this parser rejects; that
+    path is out of scope for the wire contract.
 
     Raises :class:`ContractError` when a required field is missing or the
     wrong type.
