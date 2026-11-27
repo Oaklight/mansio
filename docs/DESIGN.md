@@ -37,10 +37,10 @@ Mansio 是一个面向 LLM/Agent 的消息中枢系统，为多智能体协作�
 │                    Client SDK Layer                          │
 │              mansio_client.MansioClient                     │
 │  （有状态封装：身份、游标、channel 命名、业务语义 API；        │
-│    通过 HTTP 与 Frontend 通信）                              │
+│    通过 HTTP 与 Adapter 通信）                               │
 ├─────────────────────────────────────────────────────────────┤
-│                    Frontend Layer                            │
-│              HttpFrontend │ IrcFrontend                      │
+│                    Adapter Layer                            │
+│              HttpAdapter │ IrcAdapter                       │
 │  （网络服务层：REST + SSE，挂载到 Bus）                     │
 ├─────────────────────────────────────────────────────────────┤
 │                       Bus Layer                             │
@@ -54,18 +54,18 @@ Mansio 是一个面向 LLM/Agent 的消息中枢系统，为多智能体协作�
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Frontend 层定义了 `Frontend` 协议，包含 `attach(bus)` / `serve_forever()` / `shutdown()` 方法和 `address` 属性。`HttpFrontend` 提供 REST 端点和 SSE 实时流；`IrcFrontend` 把 channel 桥接到 IRC 服务器。`MansioServer` 是将 Bus 绑定到一个或多个 Frontend 的编排器。
+Adapter 层定义了 `ServerAdapter` 协议，包含 `attach(bus)` / `serve_forever()` / `shutdown()` 方法和 `address` 属性。`HttpAdapter` 提供 REST 端点和 SSE 实时流；`IrcAdapter` 把 channel 桥接到 IRC 服务器。`MansioServer` 是将 Bus 绑定到一个或多个 Adapter 的编排器。
 
 每一层只依赖其下一层的接口，不依赖具体实现。
 
 ### 2.2 组件关系
 
-三个包沿网络边界与依赖方向划分。`mansio-core` 包含类型、协议、Backend、Bus、授权与令牌存储；`mansio-web`（发行名 `mansio`）包含 Frontend、管理面板与服务端；`mansio-client`（Agent SDK）包含 `MansioClient` 及其 HTTP 传输层。`mansio-web` 与 `mansio-client` 依赖 `mansio-core`；`mansio-core` 不依赖前两者；`mansio-web` 不导入 `mansio-client`。
+三个包沿网络边界与依赖方向划分。`mansio-core` 包含类型、协议、Backend、Bus、授权与令牌存储；`mansio-web`（发行名 `mansio`）包含 Adapter、管理面板与服务端；`mansio-client`（Agent SDK）包含 `MansioClient` 及其 HTTP 传输层。`mansio-web` 与 `mansio-client` 依赖 `mansio-core`；`mansio-core` 不依赖前两者；`mansio-web` 不导入 `mansio-client`。
 
 ```
 mansio_client.MansioClient("http://host:8742", user_id, token=…)
   │
-  └── HttpTransport → HttpFrontend → Bus → Backend
+  └── HttpTransport → HttpAdapter → Bus → Backend
         （REST + SSE）  （通过 MansioServer 或 `mansio serve`）
 ```
 
@@ -244,9 +244,9 @@ class Bus:
 - ✅ In-process pub/sub（作为通用基线）
 - ✅ 吞吐量指标采集
 - ✅ 发布后对 system channel 执行压缩策略
-- ❌ 不对消息操作做授权（由 Frontend 的策略层负责；`check_access` 是策略查询，不是强制执行）
-- ❌ 不做认证（由 Frontend 通过 `TokenStore` 负责）
-- ❌ 不做 channel 命名验证（由 Frontend 负责）
+- ❌ 不对消息操作做授权（由 Adapter 的策略层负责；`check_access` 是策略查询，不是强制执行）
+- ❌ 不做认证（由 Adapter 通过 `TokenStore` 负责）
+- ❌ 不做 channel 命名验证（由 Adapter 负责）
 - ❌ 不管理 agent 身份（由 Client SDK 负责）
 - ❌ 不追踪 cursor 状态（由 Client SDK 负责）
 
@@ -303,7 +303,7 @@ curl -X POST http://localhost:8741/api/users \
 
 ##### 强制执行
 
-认证由 Frontend 负责，而非 Bus。`HttpFrontend` 用 `TokenStore` 校验 `Authorization: Bearer` 头；当服务端以 `--no-auth` 启动时，它在构造时不带 token store，所有请求一律放行。
+认证由 Adapter 负责，而非 Bus。`HttpAdapter` 用 `TokenStore` 校验 `Authorization: Bearer` 头；当服务端以 `--no-auth` 启动时，它在构造时不带 token store，所有请求一律放行。
 
 绑定了 `user_id` 的令牌只能以该 Agent 身份操作。未绑定 `user_id` 的令牌是 **supertoken**：可以以任意 Agent 身份操作、写入 `broadcast:*` channel，并绕过 `_system:*` 的写入限制。通过 `POST /api/tokens` 且不传 `user_id`、传入 `{"supertoken": true}` 即可创建；管理面板以 **Supertoken** 勾选框提供同一选项。仍可通过代码创建：`TokenStore.create_token(user_id=None)`（[#299](https://github.com/Oaklight/mansio/issues/299)）。
 
@@ -311,7 +311,7 @@ curl -X POST http://localhost:8741/api/users \
 
 #### 3.5.3 Channel 类型与命名
 
-Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 只在本地校验 `user_id`，channel 名由服务端检查，格式非法时返回 **400 Bad Request**。Bus 层保持通用，不校验 channel 名。
+Channel 命名规则在 **Adapter（服务端）层强制执行**。Client SDK 只在本地校验 `user_id`，channel 名由服务端检查，格式非法时返回 **400 Bad Request**。Bus 层保持通用，不校验 channel 名。
 
 ##### 命名规则
 
@@ -361,7 +361,7 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 
 ##### 通道 ACL 条目
 
-通过 `/v1/channels/<channel>/acl` 管理的按通道 ACL 条目由 backend 的 `ChannelStore` 存储。读取或修改某个通道的 ACL 需要该通道上的 `manage` 动词（旧名 `admin`）。上述结构性规则位于 `mansio/authz.py`（`ChannelAuthorizer`），供各 frontend 共用；HTTP frontend 只负责认证调用方并把拒绝映射为 403。
+通过 `/v1/channels/<channel>/acl` 管理的按通道 ACL 条目由 backend 的 `ChannelStore` 存储。读取或修改某个通道的 ACL 需要该通道上的 `manage` 动词（旧名 `admin`）。上述结构性规则位于 `mansio/authz.py`（`ChannelAuthorizer`），供各 adapter 共用；HTTP adapter 只负责认证调用方并把拒绝映射为 403。
 
 存储的权限值可以是：
 
@@ -376,7 +376,7 @@ Channel 命名规则在 **Frontend（服务端）层强制执行**。Client SDK 
 
 ACL 条目按写入时的原样保存权限字符串——角色名、单个动词或旧等级。预设在校验时展开（`mansio_core/types.py` 的 `expand_permission()`），而不是在创建条目时展开，因此修改 `ROLE_PRESETS` 会追溯性地改变所有使用该预设的既有条目所授予的范围。旧等级按同样的方式解析为别名，已存储的数据无需迁移。
 
-Bus 不暴露任何授权参数：Frontend 在调用 `Bus.publish` / `Bus.query` / 删除方法之前先完成授权。对于普通频道与注册前缀频道，Frontend 策略层会查询频道存储（`Bus.check_access`），因此私有频道的所有者与 ACL 条目对读写生效。`dm:`/`notebook:`/`memory:` 仍按名称结构判定，`broadcast:*` 的写入检查频道所有者以及任何授予 `publish` 的条目（[#298](https://github.com/Oaklight/mansio/issues/298)）。
+Bus 不暴露任何授权参数：Adapter 在调用 `Bus.publish` / `Bus.query` / 删除方法之前先完成授权。对于普通频道与注册前缀频道，Adapter 策略层会查询频道存储（`Bus.check_access`），因此私有频道的所有者与 ACL 条目对读写生效。`dm:`/`notebook:`/`memory:` 仍按名称结构判定，`broadcast:*` 的写入检查频道所有者以及任何授予 `publish` 的条目（[#298](https://github.com/Oaklight/mansio/issues/298)）。
 
 频道列表在一次批量查询中完成鉴权过滤：`GET /v1/channels` 与其 `?detail=true` 形式对列表中的每个频道调用 `Bus.check_access_many`（SQLite 上每 500 个名称两条语句），而不是逐个频道查询；列表查询与过滤在同一工作线程内完成，因此大列表不会阻塞事件循环。`dm:` 与保留前缀频道仍按名称判定。
 
@@ -557,16 +557,16 @@ Agent 死亡
 
 快照会在 cursor channel 中累积；Bus 的压缩策略只保留每个 Agent 最新的一条。
 
-### 3.6 Frontend 层与 MansioServer
+### 3.6 Adapter 层与 MansioServer
 
-Frontend 层提供挂载到 Bus 的网络服务。
+Adapter 层提供挂载到 Bus 的网络服务。
 
-#### Frontend 协议
+#### ServerAdapter 协议
 
 ```python
-class Frontend(Protocol):
+class ServerAdapter(Protocol):
     def attach(self, bus: Bus) -> None:
-        """将此 Frontend 绑定到 Bus 实例。"""
+        """将此 Adapter 绑定到 Bus 实例。"""
         ...
 
     def serve_forever(self) -> None:
@@ -583,31 +583,31 @@ class Frontend(Protocol):
         ...
 ```
 
-#### HttpFrontend
+#### HttpAdapter
 
-主要的 Frontend 实现，也是 Agent 唯一连接的入口，提供：
+主要的 Adapter 实现，也是 Agent 唯一连接的入口，提供：
 - **REST API**（`/v1/` 前缀）— 发布、查询、列出通道、通道元数据与 ACL、删除消息与通道、工作队列的 claim/ack/status、在线状态、注册表查询、管理端清理与压缩
 - **SSE（Server-Sent Events）**— 通过 `/v1/subscribe` 与 `/v1/channels/<channel>/subscribe` 实现实时消息流。每条 `data:` 行是一个 `StreamEvent`（`{"channel": ..., "message": ...}`），由 `mansio_core.contracts` 负责解析与序列化。可选的 `exclude_own=true` 查询参数会丢弃当前认证调用方自己发送的消息，对实时投递和 Last-Event-ID 重放同样生效；supertoken 与 no-auth 连接没有绑定的用户标识，该参数对它们无效
 - **认证** — 基于 `TokenStore` 的 bearer token 校验，以及 §3.5.3 描述的通道名、payload 与访问控制检查
 - `/health` — 无需认证的存活探针
 
 ```python
-HttpFrontend(host="127.0.0.1", port=8742, cors_origin="*",
+HttpAdapter(host="127.0.0.1", port=8742, cors_origin="*",
              max_body_bytes=1_048_576, max_query_limit=10_000,
              token_store=None)
 ```
 
-#### IrcFrontend
+#### IrcAdapter
 
 把 mansio channel 桥接到 IRC 服务器，便于人类用普通 IRC 客户端旁观或参与 Agent 之间的对话。需要可选的 `irc` 依赖。
 
 #### MansioServer
 
-将 Bus 绑定到一个或多个 Frontend 的编排器。只有一个 Frontend 时在调用线程中提供服务；有多个时，每个 Frontend 各占一个线程：
+将 Bus 绑定到一个或多个 Adapter 的编排器。只有一个 Adapter 时在调用线程中提供服务；有多个时，每个 Adapter 各占一个线程：
 
 ```python
 server = MansioServer(bus)
-server.add_frontend(HttpFrontend(host="0.0.0.0", port=8742))
+server.add_adapter(HttpAdapter(host="0.0.0.0", port=8742))
 server.serve_forever()
 ```
 
@@ -628,7 +628,7 @@ client = MansioClient("http://mansio:8742", "agent-1", token="mst-xxx")
 
 ### 3.7 管理面板
 
-管理面板提供用于 Bus 检查、监控和令牌管理的 HTTP 仪表板与 REST API。它运行在独立端口（默认 8741）上，与面向 Agent 的 HTTP 前端分开：
+管理面板提供用于 Bus 检查、监控和令牌管理的 HTTP 仪表板与 REST API。它运行在独立端口（默认 8741）上，与面向 Agent 的 HTTP 适配器分开：
 
 ```
 admin/
@@ -670,7 +670,7 @@ Delivery 层将 Client SDK 的能力暴露给外部消费者。
 
 | 命令 | 所属包 | 目标用户 | 用途 |
 |------|--------|---------|------|
-| `mansio serve` | `mansio` | 运维人员 | 启动 Bus + 管理面板（可选 HTTP/IRC 前端） |
+| `mansio serve` | `mansio` | 运维人员 | 启动 Bus + 管理面板（可选 HTTP/IRC 适配器） |
 | `mansio-client` | `mansio-client` | 通过 bash 工具的 LLM、人类 | 完整的 SDK-over-CLI：消息、笔记、记忆、通道与 ACL 管理 |
 | `mansio-mcp` | `mansio-client` | 通过 MCP 的 LLM | 把客户端操作暴露为 MCP 工具（JSON-RPC stdio） |
 
@@ -812,7 +812,7 @@ thought_record(
 
 ## 6. 部署模式
 
-每种部署形态都是同一个结构 —— 一个 Bus 加一个或多个 Frontend —— 区别只在于服务端跑在哪里、用哪个 backend。
+每种部署形态都是同一个结构 —— 一个 Bus 加一个或多个 Adapter —— 区别只在于服务端跑在哪里、用哪个 backend。
 
 ### 6.1 本地开发
 
@@ -841,11 +841,11 @@ mansio serve --db /var/lib/mansio/mansio.db --http 0.0.0.0:8742 --remote
 ```python
 bus = Bus(backend=SQLiteBackend("data.db"))
 server = MansioServer(bus)
-server.add_frontend(HttpFrontend(host="127.0.0.1", port=8742))
+server.add_adapter(HttpAdapter(host="127.0.0.1", port=8742))
 server.serve_forever()
 ```
 
-该进程内的代码可以直接调用 `bus`，没有 HTTP 跳转，`subscribe` 回调同步触发；其他机器上的 Agent 仍通过 HTTP 接入。注意直接访问 Bus 会绕过 Frontend，连同它的所有通道校验与访问控制一起绕过。
+该进程内的代码可以直接调用 `bus`，没有 HTTP 跳转，`subscribe` 回调同步触发；其他机器上的 Agent 仍通过 HTTP 接入。注意直接访问 Bus 会绕过 Adapter，连同它的所有通道校验与访问控制一起绕过。
 
 ### 6.4 分布式后端
 
@@ -871,7 +871,7 @@ export MANSIO_TOKEN=mst-xxx
 
 ### 7.2 服务端配置
 
-服务端完全通过 `mansio serve` 的命令行参数配置：后端选择（`--db` / `--maildir` / `--nats`）、前端（`--http`、`--irc` 及其选项）、管理面板（`--admin-port`、`--host`、`--admin-password`、`--remote`、`--no-ui`）、认证（`--no-auth`）以及 `--log-level`。
+服务端完全通过 `mansio serve` 的命令行参数配置：后端选择（`--db` / `--maildir` / `--nats`）、适配器（`--http`、`--irc` 及其选项）、管理面板（`--admin-port`、`--host`、`--admin-password`、`--remote`、`--no-ui`）、认证（`--no-auth`）以及 `--log-level`。
 
 ### 7.3 配置文件（未来）
 
@@ -883,7 +883,7 @@ export MANSIO_TOKEN=mst-xxx
 
 ### 8.1 输入验证
 
-Frontend 层对所有写入操作执行以下验证，不合规的请求返回 HTTP 400：
+Adapter 层对所有写入操作执行以下验证，不合规的请求返回 HTTP 400：
 
 | 验证规则 | 拒绝条件 |
 |----------|----------|
@@ -930,15 +930,15 @@ Frontend 层对所有写入操作执行以下验证，不合规的请求返回 H
 
 **演进路径**：当确实需要 transport 与 persistence 分离时（如 MQTT + PostgreSQL），可引入独立的 Storage Protocol，Backend 内部组合使用。当前 Backend 接口无需变更。
 
-### D2: Channel 命名在 Frontend 层强制执行
+### D2: Channel 命名在 Adapter 层强制执行
 
-**决策**：Channel 命名规则由 Frontend（服务端）层校验，Bus 层接受调用方传入的任意 channel 名。
+**决策**：Channel 命名规则由 Adapter（服务端）层校验，Bus 层接受调用方传入的任意 channel 名。
 
 **理由**：服务端校验能挡住任何客户端提交的非法频道名 —— 只写在 SDK 里的规则，只对守规矩的客户端有效。Bus 层因此保持通用，不嵌入业务语义。
 
 ### D3: 身份认证采用 user_id + 服务端签发令牌
 
-**决策**：user_id 用户自选（格式约束），令牌由服务端生成并以哈希形式存于 `TokenStore`，认证在 Frontend 层强制执行。
+**决策**：user_id 用户自选（格式约束），令牌由服务端生成并以哈希形式存于 `TokenStore`，认证在 Adapter 层强制执行。
 
 **理由**：bearer token 是 HTTP API 的标准凭证，可按 Agent 单独吊销与轮换而不影响其身份，同时支持 cross-session 恢复（同 user_id + token 重连）。`--no-auth` 模式降低开发/测试门槛。
 
