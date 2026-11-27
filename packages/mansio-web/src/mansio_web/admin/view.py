@@ -6,7 +6,7 @@ the only place admin response bodies are built.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mansio_core.contracts.admin import (
     AdminChannelDetail,
@@ -31,7 +31,6 @@ from mansio_core.contracts.admin import (
     AdminUsersResult,
     AdminUserTokensResult,
 )
-from mansio_core.contracts.sse import message_to_dict
 
 if TYPE_CHECKING:
     from mansio_core.bus import Bus
@@ -104,7 +103,7 @@ class AdminView:
         )
         return AdminMessagesResult(
             count=len(messages),
-            messages=[message_to_dict(message) for message in messages],
+            messages=[_message_summary(message) for message in messages],
         )
 
     def subscriptions(self) -> AdminSubscriptionsResult:
@@ -146,7 +145,7 @@ class AdminView:
 
     def users(self) -> AdminUsersResult:
         if self._token_store is None:
-            return AdminUsersResult(users=[])
+            return AdminUsersResult(users=[], enabled=False)
         users = self._token_store.list_users()
         try:
             presence = {a.user_id: a for a in self._bus.users(timeout_seconds=120)}
@@ -156,7 +155,7 @@ class AdminView:
             entry = presence.get(user["user_id"])
             user["status"] = entry.status if entry else "unknown"
             user["last_seen"] = entry.last_seen if entry else None
-        return AdminUsersResult(users=users)
+        return AdminUsersResult(users=users, enabled=True)
 
     def user_registered(self, user_id: str, entry: dict) -> AdminUserRegisteredResult:
         return AdminUserRegisteredResult(user_id=user_id, token=entry)
@@ -206,3 +205,24 @@ class AdminView:
 
     def token_rotated(self, entry: dict) -> AdminTokenRotatedResult:
         return AdminTokenRotatedResult(token=entry)
+
+
+_ADMIN_MESSAGE_FIELDS = (
+    "id",
+    "channel",
+    "sender",
+    "msg_type",
+    "payload",
+    "timestamp",
+    "metadata",
+)
+
+
+def _message_summary(message: Any) -> dict:
+    """Serialize a message with the admin projection.
+
+    The admin API keeps its original seven keys.  ``message_to_dict`` (the
+    REST/SSE serializer) adds ``parent_id``, ``thread_id`` and ``intent``
+    when set, which the admin panel never emitted.
+    """
+    return {name: getattr(message, name) for name in _ADMIN_MESSAGE_FIELDS}

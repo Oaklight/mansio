@@ -207,7 +207,13 @@ class TestAdminResponseDocuments:
         }
 
     def test_users(self) -> None:
-        assert AdminUsersResult(users=[{"user_id": "a"}]).to_dict() == {"users": [{"user_id": "a"}]}
+        document = AdminUsersResult(users=[{"user_id": "a"}], enabled=True).to_dict()
+        assert document == {"users": [{"user_id": "a"}], "enabled": True}
+        assert list(document) == ["users", "enabled"]
+        assert AdminUsersResult(users=[], enabled=False).to_dict() == {
+            "users": [],
+            "enabled": False,
+        }
         assert AdminUserRegisteredResult(user_id="a", token={"token": "mst-x"}).to_dict() == {
             "ok": True,
             "user_id": "a",

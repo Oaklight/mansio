@@ -247,9 +247,14 @@ class AdminPrefixDeletedResult(WireResult):
 
 @dataclass(frozen=True, slots=True)
 class AdminUsersResult(WireResult):
-    """Response of ``GET /api/users``."""
+    """Response of ``GET /api/users``.
+
+    ``enabled`` is always present: ``False`` when no token store is
+    configured, ``True`` otherwise.  Key order is ``users``, ``enabled``.
+    """
 
     users: list = field(default_factory=list)
+    enabled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
