@@ -139,7 +139,7 @@
         <tr><td><code>admin/ POST /api/messages</code></td><td>1 条写路径</td><td><span class="pill good">已修复</span> #385 起 admin 发布走 <code>parse_publish</code>，IRC 丢弃空 PRIVMSG</td><td>已完成</td></tr>
         <tr><td><code>client.py</code></td><td>464 行 + 5 个 mixin（共 688 行）· 39 个公开成员</td><td><span class="pill good">已拆分</span> <code>MansioClient</code> 由 5 个 mixin 组合；公开成员的名称、参数与默认值逐一比对未变</td><td>已完成</td></tr>
         <tr><td><code>authz → Bus.check_access</code></td><td>一次批量调用</td><td><span class="pill good">已修复</span> #393a/#393b：<code>check_access_many</code> 进入 <code>ChannelStore</code>，SQLite 每 500 个名称两条语句；列表查询与过滤在同一工作线程内完成；<code>dm:</code>/<code>notebook:</code>/<code>memory:</code> 仍按名称判定</td><td>已完成</td></tr>
-        <tr><td><code>mcp.py</code></td><td>1126 行 · 32 个工具</td><td>schema 与 handler 手写注册，可拆但优先级低</td><td>后续</td></tr>
+        <tr><td><code>mcp.py</code></td><td>1126 行 · 32 个工具</td><td><span class="pill good">不拆分</span> 工具注册计划由 toolregistry 项目承接；本仓库不为此拆文件</td><td>不拆（外部化）</td></tr>
       </tbody>
     </table>
   </div>
@@ -148,7 +148,7 @@
 <section id="packages">
   <h2><span class="num">01</span>包结构：现状 vs 目标</h2>
   <p class="sub">
-    M1 之后现状 3 个发布包，<code>shared/</code> 并入 core；M2a 契约、M2b SSE、M2c transport 均已收拢；剩余问题是 <code>mcp.py</code>（1126 行）与 <code>cli.py</code>（677 行）的单文件，以及 admin 资产缺少构建期类型检查。
+    M1 之后现状 3 个发布包，<code>shared/</code> 并入 core；M2a 契约、M2b SSE、M2c transport 均已收拢；剩余问题是 <code>cli.py</code>（677 行）的单文件，以及 admin 资产缺少构建期类型检查；<code>mcp.py</code> 不拆，工具注册由 toolregistry 项目承接。
   </p>
   <div class="compare">
     <div class="panel">
