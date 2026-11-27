@@ -10,6 +10,7 @@ piazza.db
 site/
 _build/
 .pytest_cache/
+.hypothesis/
 
 # Worktree-managed documentation directories
 docs_en/
