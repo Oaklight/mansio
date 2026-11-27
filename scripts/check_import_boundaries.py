@@ -5,9 +5,6 @@ Rules:
   R1  mansio_core imports neither mansio_web nor mansio_client.
   R2  mansio_web imports mansio_core, never mansio_client.
   R3  mansio_client imports mansio_core, never mansio_web.
-
-The compatibility package ``packages/mansio-web/src/mansio`` is exempt: it
-exists precisely to route both new packages.
 """
 
 from __future__ import annotations
@@ -24,7 +21,6 @@ RULES = {
     "mansio-web": {"mansio_client"},
     "mansio-client": {"mansio_web"},
 }
-EXEMPT = {PACKAGES / "mansio-web" / "src" / "mansio"}
 
 
 def imported_roots(node: ast.AST) -> list[str]:
@@ -43,8 +39,6 @@ def main() -> int:
             violations.append(f"{package}: missing source tree {src}")
             continue
         for path in sorted(src.rglob("*.py")):
-            if any(exempt in path.parents for exempt in EXEMPT):
-                continue
             if "_vendor" in path.parts:
                 continue
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
