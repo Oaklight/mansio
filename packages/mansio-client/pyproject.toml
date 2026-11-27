@@ -33,6 +33,13 @@ Issues = "https://github.com/Oaklight/mansio/issues"
 mansio-client = "mansio_client.cli:main"
 mansio-mcp = "mansio_client.mcp:main"
 
+[project.optional-dependencies]
+test = [
+    "hypothesis>=6.100.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=6.0.0",
+]
+
 [tool.setuptools.dynamic]
 version = { attr = "mansio_client.__version__" }
 
