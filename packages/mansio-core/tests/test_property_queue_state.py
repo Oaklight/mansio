@@ -157,7 +157,9 @@ class QueueMachine(RuleBasedStateMachine):
     @invariant()
     def completed_stays_completed(self) -> None:
         for mid in self._acked:
-            assert self._bus.queue_status(mid)["status"] == "completed"
+            stored = self._bus.queue_status(mid)
+            assert stored is not None
+            assert stored["status"] == "completed"
 
 
 def test_queue_state_machine(monkeypatch) -> None:
