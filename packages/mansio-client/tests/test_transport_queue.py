@@ -1,6 +1,6 @@
 """Queue claim/ack parsing keeps the server's lease_until (issue #359).
 
-The memory backend sets ``lease_until`` on claim and the HTTP frontend
+The memory backend sets ``lease_until`` on claim and the HTTP adapter
 serializes it, but the transport rebuilt ``ClaimResult`` without the field.
 """
 

@@ -185,36 +185,36 @@ class TestMaildirDeletion:
 
 
 class TestHttpDeletion:
-    """HTTP frontend deletion endpoints."""
+    """HTTP adapter deletion endpoints."""
 
     @pytest.fixture
     def client(self, tmp_path):
         """Create a test HTTP client with no auth."""
-        from mansio_web.frontends.http import HttpFrontend
+        from mansio_web.adapters.http import HttpAdapter
 
         backend = MemoryBackend()
         bus = Bus(backend=backend)
-        frontend = HttpFrontend(port=0, allow_unauthenticated=True)
-        frontend.attach(bus)
+        adapter = HttpAdapter(port=0, allow_unauthenticated=True)
+        adapter.attach(bus)
 
         # Start server in background
-        server_thread = threading.Thread(target=frontend.serve_forever, daemon=True)
+        server_thread = threading.Thread(target=adapter.serve_forever, daemon=True)
         server_thread.start()
 
         # Wait for server to bind
         import time
 
         for _ in range(50):
-            if frontend._app.port is not None:
+            if adapter._app.port is not None:
                 break
             time.sleep(0.05)
 
-        host, port = frontend.address
+        host, port = adapter.address
         base_url = f"http://{host}:{port}"
 
-        yield base_url, bus, frontend
+        yield base_url, bus, adapter
 
-        frontend.shutdown()
+        adapter.shutdown()
 
     def _request(self, method, url, json_data=None):
         """Make an HTTP request and return (status, body_dict)."""
@@ -306,7 +306,7 @@ class TestHttpDeletionAuth:
     def authed_client(self, tmp_path):
         """Create a test HTTP client with token auth."""
         from mansio_core.token_store import TokenStore
-        from mansio_web.frontends.http import HttpFrontend
+        from mansio_web.adapters.http import HttpAdapter
 
         backend = MemoryBackend()
         bus = Bus(backend=backend)
@@ -316,25 +316,25 @@ class TestHttpDeletionAuth:
         agent_token_raw = token_store.create_token("agent-a", label="test")["token"]
         super_token_raw = token_store.create_token(None, label="super")["token"]
 
-        frontend = HttpFrontend(port=0, token_store=token_store)
-        frontend.attach(bus)
+        adapter = HttpAdapter(port=0, token_store=token_store)
+        adapter.attach(bus)
 
-        server_thread = threading.Thread(target=frontend.serve_forever, daemon=True)
+        server_thread = threading.Thread(target=adapter.serve_forever, daemon=True)
         server_thread.start()
 
         import time
 
         for _ in range(50):
-            if frontend._app.port is not None:
+            if adapter._app.port is not None:
                 break
             time.sleep(0.05)
 
-        host, port = frontend.address
+        host, port = adapter.address
         base_url = f"http://{host}:{port}"
 
-        yield base_url, bus, frontend, agent_token_raw, super_token_raw
+        yield base_url, bus, adapter, agent_token_raw, super_token_raw
 
-        frontend.shutdown()
+        adapter.shutdown()
 
     def _request(self, method, url, token=None, json_data=None):
         import http.client

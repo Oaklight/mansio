@@ -11,22 +11,22 @@ import urllib.request
 import pytest
 from mansio_core import Bus, MemoryBackend
 from mansio_web import MansioServer
-from mansio_web.frontends import HttpFrontend
+from mansio_web.adapters import HttpAdapter
 
 
 @pytest.fixture()
 def closed_server_url():
-    """Start a frontend with neither a token store nor the opt-out, yield URL."""
+    """Start an adapter with neither a token store nor the opt-out, yield URL."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0)
+    adapter = HttpAdapter(host="127.0.0.1", port=0)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
 
-    host, port = frontend.address
+    host, port = adapter.address
     yield f"http://{host}:{port}"
 
     server.shutdown()
@@ -153,12 +153,12 @@ class TestUnauthenticatedOptOut:
         from mansio_core.token_store import TokenStore
 
         with pytest.raises(ValueError, match="allow_unauthenticated"):
-            HttpFrontend(
+            HttpAdapter(
                 port=0,
                 token_store=TokenStore(str(tmp_path / "t.db")),
                 allow_unauthenticated=True,
             )
 
     def test_repr_distinguishes_closed_from_opt_out(self):
-        assert "auth-unavailable" in repr(HttpFrontend(port=0))
-        assert "no-auth" in repr(HttpFrontend(port=0, allow_unauthenticated=True))
+        assert "auth-unavailable" in repr(HttpAdapter(port=0))
+        assert "no-auth" in repr(HttpAdapter(port=0, allow_unauthenticated=True))

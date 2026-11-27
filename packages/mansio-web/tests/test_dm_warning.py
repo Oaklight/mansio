@@ -23,18 +23,18 @@ class TestDMWarningHTTP:
         import time
 
         from mansio_web import MansioServer
-        from mansio_web.frontends import HttpFrontend
+        from mansio_web.adapters import HttpAdapter
 
         _bus = Bus(backend=MemoryBackend())
-        frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
+        adapter = HttpAdapter(host="127.0.0.1", port=0, allow_unauthenticated=True)
         server = MansioServer(_bus)
-        server.add_frontend(frontend)
+        server.add_adapter(adapter)
 
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         time.sleep(0.3)
 
-        host, port = frontend.address
+        host, port = adapter.address
         yield f"http://{host}:{port}", _bus
 
         server.shutdown()

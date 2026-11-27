@@ -1,7 +1,7 @@
-"""Tests for HTTP remote transport — HttpFrontend + HttpTransport.
+"""Tests for HTTP remote transport — HttpAdapter + HttpTransport.
 
 Verifies:
-- MansioServer + HttpFrontend serves the Bus over HTTP
+- MansioServer + HttpAdapter serves the Bus over HTTP
 - HttpTransport implements Transport protocol correctly
 - MansioClient("http://...") resolves to HttpTransport
 - DM round-trip between two remote clients
@@ -19,25 +19,23 @@ from mansio_client import MansioClient
 from mansio_client.transport import HttpTransport
 from mansio_core import Bus, MemoryBackend
 from mansio_web import MansioServer
-from mansio_web.frontends import HttpFrontend
+from mansio_web.adapters import HttpAdapter
 
 
 @pytest.fixture()
 def server_url():
-    """Start a MansioServer with HttpFrontend on a random port, yield URL."""
+    """Start a MansioServer with HttpAdapter on a random port, yield URL."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(
-        host="127.0.0.1", port=0, allow_unauthenticated=True
-    )  # OS-assigned port
+    adapter = HttpAdapter(host="127.0.0.1", port=0, allow_unauthenticated=True)  # OS-assigned port
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
     # Wait for server to start
     time.sleep(0.3)
-    host, port = frontend.address
+    host, port = adapter.address
     url = f"http://{host}:{port}"
 
     yield url
@@ -47,16 +45,16 @@ def server_url():
 
 @pytest.fixture()
 def closed_server_url():
-    """Frontend with neither a token store nor the unauthenticated opt-out."""
+    """Adapter with neither a token store nor the unauthenticated opt-out."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0)
+    adapter = HttpAdapter(host="127.0.0.1", port=0)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
-    host, port = frontend.address
+    host, port = adapter.address
 
     yield f"http://{host}:{port}"
 
@@ -447,7 +445,7 @@ class TestRequireAuth:
             transport.close()
 
     def test_required_without_token_store_reports_true(self, closed_server_url: str) -> None:
-        """A frontend that lacks a token store still requires auth."""
+        """An adapter that lacks a token store still requires auth."""
         transport = HttpTransport(closed_server_url, user_id="test-agent")
         try:
             assert transport.require_auth is True
@@ -476,16 +474,16 @@ class TestServerLifecycle:
         data = json.loads(resp.read())
         assert data["status"] == "ok"
 
-    def test_no_frontend_raises(self) -> None:
+    def test_no_adapter_raises(self) -> None:
         bus = Bus(backend=MemoryBackend())
         server = MansioServer(bus)
-        with pytest.raises(RuntimeError, match="No frontends"):
+        with pytest.raises(RuntimeError, match="No adapters"):
             server.serve_forever()
 
-    def test_frontend_not_attached_raises(self) -> None:
-        frontend = HttpFrontend()
+    def test_adapter_not_attached_raises(self) -> None:
+        adapter = HttpAdapter()
         with pytest.raises(RuntimeError, match="Must call attach"):
-            frontend.serve_forever()
+            adapter.serve_forever()
 
 
 # ── Channel Ownership Auth Tests ─────────────────────────────────
@@ -500,15 +498,15 @@ def auth_server(tmp_path):
     token_store = TokenStore(db_path)
 
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0, token_store=token_store)
+    adapter = HttpAdapter(host="127.0.0.1", port=0, token_store=token_store)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
 
-    host, port = frontend.address
+    host, port = adapter.address
     url = f"http://{host}:{port}"
 
     yield url, token_store

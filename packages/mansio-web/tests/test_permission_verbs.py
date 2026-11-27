@@ -27,7 +27,7 @@ from mansio_core import (
     permission_allows,
 )
 from mansio_core.types import expand_permission, normalize_required
-from mansio_web.frontends.http import HttpFrontend
+from mansio_web.adapters.http import HttpAdapter
 
 
 def _now() -> str:
@@ -181,17 +181,17 @@ class TestAclApiPermissions:
     @pytest.fixture()
     def http_client(self):
         bus = Bus(backend=MemoryBackend())
-        frontend = HttpFrontend(port=0, allow_unauthenticated=True)
-        frontend.attach(bus)
-        thread = threading.Thread(target=frontend.serve_forever, daemon=True)
+        adapter = HttpAdapter(port=0, allow_unauthenticated=True)
+        adapter.attach(bus)
+        thread = threading.Thread(target=adapter.serve_forever, daemon=True)
         thread.start()
         for _ in range(50):
-            if frontend._app.port is not None:
+            if adapter._app.port is not None:
                 break
             time.sleep(0.05)
-        host, port = frontend.address
+        host, port = adapter.address
         yield f"http://{host}:{port}", bus
-        frontend.shutdown()
+        adapter.shutdown()
         bus.close()
 
     def _req(self, method: str, url: str, body: dict | None = None):

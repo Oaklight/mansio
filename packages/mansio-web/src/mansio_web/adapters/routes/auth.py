@@ -24,7 +24,7 @@ def register(app: App, ctx: RouteContext) -> None:
     async def auth_check(request: Request) -> dict:
         ts = token_store
         has_tokens = bool(ts and await asyncio.to_thread(ts.has_tokens))
-        # Only the explicit opt-out disables auth. A frontend that merely
+        # Only the explicit opt-out disables auth. An adapter that merely
         # lacks a token store still requires a token it can never accept,
         # which is what the authenticated endpoints report too.
         return AuthCheckResult(

@@ -6,7 +6,7 @@ import threading
 import pytest
 from mansio_core import Bus, MemoryBackend, Message, SQLiteBackend
 from mansio_web import MansioServer
-from mansio_web.frontends import HttpFrontend
+from mansio_web.adapters import HttpAdapter
 
 # ──────────────────────────────────────────────
 # Helpers / Fixtures
@@ -32,15 +32,15 @@ def sqlite_bus(tmp_path):
 @pytest.fixture()
 def server_url(bus):
     """Start a MansioServer on a random port and return its URL."""
-    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
+    adapter = HttpAdapter(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
     import time
 
     time.sleep(0.3)
-    host, port = frontend.address
+    host, port = adapter.address
     url = f"http://{host}:{port}"
     yield url
 

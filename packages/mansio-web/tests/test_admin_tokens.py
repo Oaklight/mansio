@@ -10,8 +10,8 @@ from mansio_core import Bus, MemoryBackend
 from mansio_core.token_store import TokenStore
 from mansio_web import MansioServer
 from mansio_web._vendor.httpclient import Client as HttpClient
+from mansio_web.adapters import HttpAdapter
 from mansio_web.admin.server import AdminServer
-from mansio_web.frontends import HttpFrontend
 
 
 @pytest.fixture()
@@ -106,15 +106,15 @@ class TestCreateUserToken:
 
 
 class TestSupertokenEndToEnd:
-    """A supertoken minted by the admin API works on the HTTP frontend."""
+    """A supertoken minted by the admin API works on the HTTP adapter."""
 
     def test_supertoken_can_publish_to_broadcast(self, tmp_path):
         bus = Bus(backend=MemoryBackend())
         token_store = TokenStore(str(tmp_path / "e2e.db"))
 
-        http_frontend = HttpFrontend(host="127.0.0.1", port=0, token_store=token_store)
+        http_adapter = HttpAdapter(host="127.0.0.1", port=0, token_store=token_store)
         server = MansioServer(bus)
-        server.add_frontend(http_frontend)
+        server.add_adapter(http_adapter)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
 
@@ -129,7 +129,7 @@ class TestSupertokenEndToEnd:
             assert created.status_code == 201
             token = created.json()["token"]["token"]
 
-            host, port = http_frontend.address
+            host, port = http_adapter.address
             resp = http.post(
                 f"http://{host}:{port}/v1/publish",
                 json={

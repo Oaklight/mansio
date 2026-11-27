@@ -1,7 +1,7 @@
 """Tests for offset-based pagination (GitHub issue #14).
 
 Verifies that query(offset=N) correctly skips N messages across
-all backends and the HTTP frontend, and that the HTTP response
+all backends and the HTTP adapter, and that the HTTP response
 includes total, has_more, and offset fields.
 """
 
@@ -278,10 +278,10 @@ class TestBusQueryPagination:
             assert [m.payload for m in msgs] == ["msg-2", "msg-3"]
 
 
-# ── HTTP Frontend ─────────────────────────────────────────────
+# ── HTTP Adapter ─────────────────────────────────────────────
 
 
-class TestHttpFrontendPagination:
+class TestHttpAdapterPagination:
     """Test offset query parameter and response metadata via HTTP."""
 
     def test_query_with_offset(self, server_url):

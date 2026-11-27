@@ -16,7 +16,7 @@ from mansio_core import (
     Message,
     SQLiteBackend,
 )
-from mansio_web.frontends.http import HttpFrontend
+from mansio_web.adapters.http import HttpAdapter
 
 # ──────────────────────────────────────────────
 # Helpers / Fixtures
@@ -498,7 +498,7 @@ class TestACLEnforcement:
     """Policy and storage are separate (issue #247).
 
     The Bus is auth-unaware: these tests pair a ``Bus.check_access`` decision
-    with the storage call a frontend would make afterwards.  Name-based
+    with the storage call an adapter would make afterwards.  Name-based
     structural decisions (dm/notebook/memory/system/broadcast) are covered by
     ``test_authz_policy.py``.
     """
@@ -535,7 +535,7 @@ class TestACLEnforcement:
         assert bus.check_access("ch", "alice", "publish")
 
     def test_publish_is_auth_unaware(self, bus):
-        """Bus.publish has no ACL parameter; a frontend must decide first."""
+        """Bus.publish has no ACL parameter; an adapter must decide first."""
         bus.create_channel("ch", "alice", visibility="private")
         assert not bus.check_access("ch", "bob", "publish")
         assert bus.publish("ch", "bob", "text", "hi")
@@ -611,7 +611,7 @@ class TestACLEnforcement:
         bus.create_channel("ch", "alice", visibility="private")
         entry = ACLEntry(channel="ch", user_id="carol", permission="owner", granted_at=_now())
         bus.add_acl_entry(entry)
-        # The bus has no sender check; a frontend decides.  HTTP keeps
+        # The bus has no sender check; an adapter decides.  HTTP keeps
         # message deletion sender-only, while the channel owner holds the
         # delete verb.
         assert bus.check_access("ch", "alice", "delete")
@@ -666,41 +666,41 @@ class TestHttpChannelACL:
         """Start an HTTP server with MemoryBackend, yield (base_url, bus)."""
         backend = MemoryBackend()
         bus = Bus(backend=backend)
-        frontend = HttpFrontend(port=0, allow_unauthenticated=True)
-        frontend.attach(bus)
+        adapter = HttpAdapter(port=0, allow_unauthenticated=True)
+        adapter.attach(bus)
 
-        server_thread = threading.Thread(target=frontend.serve_forever, daemon=True)
+        server_thread = threading.Thread(target=adapter.serve_forever, daemon=True)
         server_thread.start()
 
         for _ in range(50):
-            if frontend._app.port is not None:
+            if adapter._app.port is not None:
                 break
             time.sleep(0.05)
 
-        host, port = frontend.address
+        host, port = adapter.address
         base_url = f"http://{host}:{port}"
         yield base_url, bus
-        frontend.shutdown()
+        adapter.shutdown()
 
     @pytest.fixture()
     def sqlite_http_client(self, tmp_path):
         """Start an HTTP server with SQLiteBackend, yield (base_url, bus)."""
         bus = Bus(backend=SQLiteBackend(str(tmp_path / "acl.db")))
-        frontend = HttpFrontend(port=0, allow_unauthenticated=True)
-        frontend.attach(bus)
+        adapter = HttpAdapter(port=0, allow_unauthenticated=True)
+        adapter.attach(bus)
 
-        server_thread = threading.Thread(target=frontend.serve_forever, daemon=True)
+        server_thread = threading.Thread(target=adapter.serve_forever, daemon=True)
         server_thread.start()
 
         for _ in range(50):
-            if frontend._app.port is not None:
+            if adapter._app.port is not None:
                 break
             time.sleep(0.05)
 
-        host, port = frontend.address
+        host, port = adapter.address
         base_url = f"http://{host}:{port}"
         yield base_url, bus
-        frontend.shutdown()
+        adapter.shutdown()
         bus.close()
 
     def _req(self, method, url, body=None):

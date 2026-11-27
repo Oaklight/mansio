@@ -1,7 +1,7 @@
 """Command-line interface for the mansio server.
 
 Subcommands:
-    mansio serve   — start Bus + AdminServer (+ optional HttpFrontend)
+    mansio serve   — start Bus + AdminServer (+ optional HttpAdapter)
 """
 
 from __future__ import annotations
@@ -133,7 +133,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--http",
         metavar="[HOST:]PORT",
         default=None,
-        help="Enable HttpFrontend on [HOST:]PORT (e.g. 8742 or 0.0.0.0:8742)",
+        help="Enable HttpAdapter on [HOST:]PORT (e.g. 8742 or 0.0.0.0:8742)",
     )
     serve.add_argument(
         "--admin-port",
@@ -193,7 +193,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--irc",
         metavar="HOST:PORT",
         default=None,
-        help="Enable IrcFrontend connecting to HOST:PORT (e.g. irc.example.com:6667)",
+        help="Enable IrcAdapter connecting to HOST:PORT (e.g. irc.example.com:6667)",
     )
     serve.add_argument(
         "--irc-nick",
@@ -501,8 +501,8 @@ def _create_token_store(args: argparse.Namespace, logger: Any) -> Any:
     return token_store
 
 
-def _start_http_frontend(args: argparse.Namespace, bus: Any, token_store: Any, logger: Any) -> Any:
-    """Start HttpFrontend if --http is set.
+def _start_http_adapter(args: argparse.Namespace, bus: Any, token_store: Any, logger: Any) -> Any:
+    """Start HttpAdapter if --http is set.
 
     Args:
         args: Parsed arguments namespace.
@@ -511,40 +511,40 @@ def _start_http_frontend(args: argparse.Namespace, bus: Any, token_store: Any, l
         logger: Structured logger.
 
     Returns:
-        HttpFrontend instance or None.
+        HttpAdapter instance or None.
     """
     if not args.http:
         return None
 
-    from mansio_web.frontends.http import HttpFrontend
+    from mansio_web.adapters.http import HttpAdapter
 
     host, port = _parse_host_port(args.http)
-    http_frontend = HttpFrontend(
+    http_adapter = HttpAdapter(
         host=host,
         port=port,
         token_store=token_store,
         allow_unauthenticated=(token_store is None),
     )
-    http_frontend.attach(bus)
+    http_adapter.attach(bus)
     http_thread = threading.Thread(
-        target=http_frontend.serve_forever,
-        name="mansio-http-frontend",
+        target=http_adapter.serve_forever,
+        name="mansio-http-adapter",
         daemon=True,
     )
     http_thread.start()
     # Wait for server to bind (port changes from 0 to actual)
     for _ in range(50):
-        _, actual_port = http_frontend.address
+        _, actual_port = http_adapter.address
         if actual_port != 0:
             break
         time.sleep(0.01)
-    actual_host, actual_port = http_frontend.address
-    logger.info("HttpFrontend started", url=f"http://{actual_host}:{actual_port}")
-    return http_frontend
+    actual_host, actual_port = http_adapter.address
+    logger.info("HttpAdapter started", url=f"http://{actual_host}:{actual_port}")
+    return http_adapter
 
 
-def _start_irc_frontend(args: argparse.Namespace, bus: Any, logger: Any) -> Any:
-    """Start IrcFrontend if --irc is set.
+def _start_irc_adapter(args: argparse.Namespace, bus: Any, logger: Any) -> Any:
+    """Start IrcAdapter if --irc is set.
 
     Args:
         args: Parsed arguments namespace.
@@ -552,39 +552,39 @@ def _start_irc_frontend(args: argparse.Namespace, bus: Any, logger: Any) -> Any:
         logger: Structured logger.
 
     Returns:
-        IrcFrontend instance or None.
+        IrcAdapter instance or None.
     """
     if not args.irc:
         return None
 
-    from mansio_web.frontends.irc import IrcFrontend
+    from mansio_web.adapters.irc import IrcAdapter
 
     if ":" not in args.irc:
         logger.error("--irc requires HOST:PORT format (e.g. irc.example.com:6667)")
         sys.exit(1)
     irc_host, irc_port = _parse_host_port(args.irc)
-    irc_frontend = IrcFrontend(
+    irc_adapter = IrcAdapter(
         irc_host=irc_host,
         irc_port=irc_port,
         nickname=args.irc_nick,
         channels=args.irc_channels or [],
         use_ssl=args.irc_ssl,
     )
-    irc_frontend.attach(bus)
+    irc_adapter.attach(bus)
     irc_thread = threading.Thread(
-        target=irc_frontend.serve_forever,
-        name="mansio-irc-frontend",
+        target=irc_adapter.serve_forever,
+        name="mansio-irc-adapter",
         daemon=True,
     )
     irc_thread.start()
     logger.info(
-        "IrcFrontend started",
+        "IrcAdapter started",
         host=irc_host,
         port=irc_port,
         nick=args.irc_nick,
         channels=args.irc_channels or [],
     )
-    return irc_frontend
+    return irc_adapter
 
 
 def _cmd_serve(args: argparse.Namespace) -> None:
@@ -609,10 +609,10 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     bus = _create_bus(args, logger)
     token_store = _create_token_store(args, logger)
 
-    http_frontend = _start_http_frontend(args, bus, token_store, logger)
-    irc_frontend = _start_irc_frontend(args, bus, logger)
+    http_adapter = _start_http_adapter(args, bus, token_store, logger)
+    irc_adapter = _start_irc_adapter(args, bus, logger)
 
-    # Start AdminServer as a Frontend
+    # Start AdminServer as an Adapter
     from mansio_web.admin import AdminServer
 
     admin_kwargs: dict[str, Any] = {
@@ -647,10 +647,10 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     stop.wait()
     logger.info("Shutting down...")
     admin.shutdown()
-    if irc_frontend:
-        irc_frontend.shutdown()
-    if http_frontend:
-        http_frontend.shutdown()
+    if irc_adapter:
+        irc_adapter.shutdown()
+    if http_adapter:
+        http_adapter.shutdown()
     bus.close()
 
 

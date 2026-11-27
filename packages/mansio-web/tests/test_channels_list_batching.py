@@ -16,7 +16,7 @@ from mansio_core import Bus, SQLiteBackend
 from mansio_core.token_store import TokenStore
 from mansio_core.types import ACLEntry
 from mansio_web import MansioServer
-from mansio_web.frontends import HttpFrontend
+from mansio_web.adapters import HttpAdapter
 
 READER = "reader-agent"
 OWNER = "owner-agent"
@@ -62,16 +62,16 @@ def listing_server(tmp_path):
 
     store = TokenStore(str(tmp_path / "tokens.db"))
     token = store.create_token(user_id=READER, label="reader")["token"]
-    frontend = HttpFrontend(host="127.0.0.1", port=0, token_store=store)
+    adapter = HttpAdapter(host="127.0.0.1", port=0, token_store=store)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     for _ in range(100):
-        if frontend.address[1]:
+        if adapter.address[1]:
             break
         time.sleep(0.02)
-    url = f"http://{frontend.address[0]}:{frontend.address[1]}"
+    url = f"http://{adapter.address[0]}:{adapter.address[1]}"
     yield url, bus, token
     server.shutdown()
     bus.close()

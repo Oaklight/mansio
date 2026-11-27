@@ -1,10 +1,10 @@
-"""Channel authorization policy shared by frontends.
+"""Channel authorization policy shared by adapters.
 
 These rules are structural: they follow from the channel name and the
 metadata stored by a ``ChannelStore`` backend, not from HTTP details.
-A frontend authenticates the caller first; this module decides whether the
+An adapter authenticates the caller first; this module decides whether the
 authenticated ``user_id`` may perform a verb on a channel.  Supertokens and
-no-auth mode bypass these checks at the frontend, because they have no
+no-auth mode bypass these checks at the adapter, because they have no
 ``user_id`` to evaluate.
 """
 

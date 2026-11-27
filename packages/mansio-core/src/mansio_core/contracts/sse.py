@@ -5,7 +5,7 @@ Each ``data:`` line of a subscribe stream carries one JSON object::
     {"channel": "general", "message": {...}}
 
 :class:`StreamEvent` is that document.  ``message_to_dict`` is also the
-REST message serializer (the web frontend delegates to it), and the parse
+REST message serializer (the web adapter delegates to it), and the parse
 functions are what both HTTP transports use, so the wire definitions
 cannot drift.  No backend-internal type appears here.
 """

@@ -1,4 +1,4 @@
-"""HTTP transport for MansioClient — connects to an HttpFrontend server.
+"""HTTP transport for MansioClient — connects to an HttpAdapter server.
 
 Uses vendored zerodep modules:
 - ``_vendor.httpclient`` for HTTP requests (supports HTTP + HTTPS)
@@ -74,7 +74,7 @@ def _response_socket(resp: object) -> socket.socket | None:
 
 
 class HttpTransport:
-    """Client-side transport that talks to a remote HttpFrontend.
+    """Client-side transport that talks to a remote HttpAdapter.
 
     Implements the Transport protocol for MansioClient, enabling
     remote agent communication over HTTP/HTTPS.

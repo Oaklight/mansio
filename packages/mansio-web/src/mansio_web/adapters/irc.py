@@ -1,4 +1,4 @@
-"""IRC frontend for mansio — bridges a Bus to an IRC server.
+"""IRC adapter for mansio — bridges a Bus to an IRC server.
 
 Allows agents to communicate via IRC channels mapped to mansio channels.
 IRC users can observe and participate in agent communication using any
@@ -28,7 +28,7 @@ try:
     import irc.strings
 except ImportError as exc:
     raise ImportError(
-        "IrcFrontend requires the 'irc' package. Install it with: pip install mansio[irc]"
+        "IrcAdapter requires the 'irc' package. Install it with: pip install mansio[irc]"
     ) from exc
 
 if TYPE_CHECKING:
@@ -44,7 +44,7 @@ class _IrcBridgeBot(irc.bot.SingleServerIRCBot):
     """Internal IRC bot that bridges messages between IRC and a mansio Bus.
 
     Args:
-        frontend: The owning IrcFrontend instance.
+        adapter: The owning IrcAdapter instance.
         server_list: IRC server list for SingleServerIRCBot.
         nickname: Bot nickname on IRC.
         password: Optional server password.
@@ -52,13 +52,13 @@ class _IrcBridgeBot(irc.bot.SingleServerIRCBot):
 
     def __init__(
         self,
-        frontend: IrcFrontend,
+        adapter: IrcAdapter,
         server_list: list[tuple[str, int]],
         nickname: str,
         password: str | None = None,
     ) -> None:
         connect_params: dict = {}
-        if frontend._use_ssl:
+        if adapter._use_ssl:
             connect_params["connect_factory"] = irc.connection.Factory(wrapper=self._ssl_wrapper)
 
         super().__init__(
@@ -67,7 +67,7 @@ class _IrcBridgeBot(irc.bot.SingleServerIRCBot):
             nickname,  # realname = nickname
             **connect_params,
         )
-        self._frontend = frontend
+        self._adapter = adapter
         self._password = password
 
     @staticmethod
@@ -83,12 +83,12 @@ class _IrcBridgeBot(irc.bot.SingleServerIRCBot):
         logger.info("IRC bot connected to %s as %s", connection.server, connection.get_nickname())
 
         # Join all mapped IRC channels
-        for irc_channel in self._frontend._mansio_to_irc.values():
+        for irc_channel in self._adapter._mansio_to_irc.values():
             logger.info("Joining IRC channel %s", irc_channel)
             connection.join(irc_channel)
 
         # Set up bus subscriptions for mansio→IRC forwarding
-        self._frontend._setup_bus_subscriptions(connection)
+        self._adapter._setup_bus_subscriptions(connection)
 
     def on_pubmsg(self, connection, event):
         """Handle public messages in IRC channels (IRC → mansio)."""
@@ -106,11 +106,11 @@ class _IrcBridgeBot(irc.bot.SingleServerIRCBot):
         if sender == connection.get_nickname():
             return
 
-        mansio_channel = self._frontend._irc_to_mansio.get(irc_channel)
+        mansio_channel = self._adapter._irc_to_mansio.get(irc_channel)
         if mansio_channel is None:
             return
 
-        bus = self._frontend._bus
+        bus = self._adapter._bus
         if bus is None:
             return
 
@@ -148,8 +148,8 @@ class _IrcBridgeBot(irc.bot.SingleServerIRCBot):
         connection.nick(new_nick)
 
 
-class IrcFrontend:
-    """IRC frontend — bridges a mansio Bus to an IRC server.
+class IrcAdapter:
+    """IRC adapter — bridges a mansio Bus to an IRC server.
 
     Maps IRC channels to mansio channels and forwards messages
     bidirectionally. Uses the ``irc`` PyPI package for protocol handling.
@@ -167,12 +167,12 @@ class IrcFrontend:
         use_ssl: Use SSL/TLS for the IRC connection. Default False.
 
     Example:
-        >>> frontend = IrcFrontend(
+        >>> adapter = IrcAdapter(
         ...     irc_host="irc.example.com",
         ...     channels=["tasks", "sync"],
         ... )
-        >>> frontend.attach(bus)
-        >>> frontend.serve_forever()  # blocks
+        >>> adapter.attach(bus)
+        >>> adapter.serve_forever()  # blocks
     """
 
     def __init__(
@@ -216,7 +216,7 @@ class IrcFrontend:
                 self._irc_to_mansio[irc_ch] = mansio_ch
 
     def attach(self, bus: Bus) -> None:
-        """Bind this frontend to a Bus.
+        """Bind this adapter to a Bus.
 
         Args:
             bus: The Bus to expose over IRC.
@@ -225,7 +225,7 @@ class IrcFrontend:
             RuntimeError: If already attached.
         """
         if self._bus is not None:
-            raise RuntimeError("Frontend already attached to a bus")
+            raise RuntimeError("Adapter already attached to a bus")
         self._bus = bus
 
     def serve_forever(self) -> None:
@@ -242,14 +242,14 @@ class IrcFrontend:
 
         server_list = [(self._irc_host, self._irc_port)]
         self._bot = _IrcBridgeBot(
-            frontend=self,
+            adapter=self,
             server_list=server_list,
             nickname=self._nickname,
             password=self._password,
         )
 
         logger.info(
-            "Starting IRC frontend: %s:%d as %s, bridging %d channel(s)",
+            "Starting IRC adapter: %s:%d as %s, bridging %d channel(s)",
             self._irc_host,
             self._irc_port,
             self._nickname,
@@ -280,7 +280,7 @@ class IrcFrontend:
 
     @property
     def address(self) -> tuple[str, int]:
-        """Return the (host, port) of the IRC server this frontend connects to."""
+        """Return the (host, port) of the IRC server this adapter connects to."""
         return (self._irc_host, self._irc_port)
 
     def _setup_bus_subscriptions(self, connection) -> None:
@@ -333,4 +333,4 @@ class IrcFrontend:
         addr = f"{self._irc_host}:{self._irc_port}"
         status = "attached" if self._bus else "detached"
         n_channels = len(self._mansio_to_irc)
-        return f"IrcFrontend({addr}, {self._nickname}, {n_channels} ch, {status})"
+        return f"IrcAdapter({addr}, {self._nickname}, {n_channels} ch, {status})"

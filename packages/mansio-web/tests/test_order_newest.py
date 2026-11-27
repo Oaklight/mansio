@@ -175,10 +175,10 @@ class TestBusQueryOrder:
             assert [m.payload for m in msgs] == ["msg-4", "msg-5"]
 
 
-# ── HTTP Frontend ─────────────────────────────────────────────
+# ── HTTP Adapter ─────────────────────────────────────────────
 
 
-class TestHttpFrontendOrder:
+class TestHttpAdapterOrder:
     """Test order query parameter via HTTP."""
 
     def test_query_order_newest(self, server_url):

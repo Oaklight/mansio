@@ -1,7 +1,7 @@
 """Tests for intent field (GitHub issue #102, Phase 1).
 
 Verifies that the ``intent`` field round-trips through publish/query
-across all backends and the HTTP frontend, and supports query filtering.
+across all backends and the HTTP adapter, and supports query filtering.
 """
 
 from __future__ import annotations
@@ -171,10 +171,10 @@ class TestBusQueryIntent:
             assert msg.intent == "PASS_FLOOR"
 
 
-# ── HTTP Frontend ─────────────────────────────────────────────
+# ── HTTP Adapter ─────────────────────────────────────────────
 
 
-class TestHttpFrontendIntent:
+class TestHttpAdapterIntent:
     """Test intent via HTTP publish and query endpoints."""
 
     def test_publish_with_intent(self, server_url):

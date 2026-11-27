@@ -21,22 +21,22 @@ from mansio_core.contracts import parse_stream_event
 from mansio_web import MansioServer
 from mansio_web._vendor.httpclient import Client as HttpClient
 from mansio_web._vendor.sse import SSEClient
-from mansio_web.frontends import HttpFrontend
+from mansio_web.adapters import HttpAdapter
 
 
 @pytest.fixture()
 def server_url():
-    """Start a MansioServer with HttpFrontend on a random port, yield URL."""
+    """Start a MansioServer with HttpAdapter on a random port, yield URL."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
+    adapter = HttpAdapter(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
 
-    host, port = frontend.address
+    host, port = adapter.address
     url = f"http://{host}:{port}"
 
     yield url
@@ -48,15 +48,15 @@ def server_url():
 def server_with_bus():
     """Start a server and also yield the underlying Bus for direct publishes."""
     bus = Bus(backend=MemoryBackend())
-    frontend = HttpFrontend(host="127.0.0.1", port=0, allow_unauthenticated=True)
+    adapter = HttpAdapter(host="127.0.0.1", port=0, allow_unauthenticated=True)
     server = MansioServer(bus)
-    server.add_frontend(frontend)
+    server.add_adapter(adapter)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.3)
 
-    host, port = frontend.address
+    host, port = adapter.address
     url = f"http://{host}:{port}"
 
     yield url, bus
