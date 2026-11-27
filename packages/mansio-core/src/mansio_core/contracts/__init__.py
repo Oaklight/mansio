@@ -67,10 +67,13 @@ from mansio_core.contracts.parsers import (
 )
 from mansio_core.contracts.sse import (
     StreamEvent,
+    WarningEvent,
     message_from_dict,
     message_to_dict,
     parse_stream_event,
+    parse_warning_event,
     stream_event_to_json,
+    warning_event_to_json,
 )
 
 __all__ = [
@@ -120,6 +123,7 @@ __all__ = [
     "RegistryLookupRequest",
     "RegistryLookupResult",
     "StreamEvent",
+    "WarningEvent",
     "message_from_dict",
     "message_to_dict",
     "parse_acl_add",
@@ -137,5 +141,7 @@ __all__ = [
     "parse_queue_status",
     "parse_registry_lookup",
     "parse_stream_event",
+    "parse_warning_event",
     "stream_event_to_json",
+    "warning_event_to_json",
 ]

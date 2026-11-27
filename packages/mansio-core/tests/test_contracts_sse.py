@@ -8,11 +8,14 @@ import pytest
 from mansio_core.contracts import (
     ContractError,
     StreamEvent,
+    WarningEvent,
     message_from_dict,
     message_to_dict,
     parse_publish,
     parse_stream_event,
+    parse_warning_event,
     stream_event_to_json,
+    warning_event_to_json,
 )
 from mansio_core.types import Message
 
@@ -221,3 +224,52 @@ class TestPublishToStreamRoundTrip:
         )
         event = StreamEvent(channel=request.channel, message=message)
         assert parse_stream_event(stream_event_to_json(event)) == event
+
+
+class TestWarningEvent:
+    def test_dropped_round_trip(self) -> None:
+        event = WarningEvent(kind="dropped", count=3)
+        payload = warning_event_to_json(event)
+        assert json.loads(payload) == {"kind": "dropped", "count": 3, "channel": None}
+        assert parse_warning_event(payload) == event
+
+    def test_truncated_round_trip_with_channel(self) -> None:
+        event = WarningEvent(kind="truncated", count=500, channel="general")
+        payload = warning_event_to_json(event)
+        assert json.loads(payload) == {
+            "kind": "truncated",
+            "count": 500,
+            "channel": "general",
+        }
+        assert parse_warning_event(payload) == event
+
+    @pytest.mark.parametrize("kind", ["warning", "", "DROPPED"])
+    def test_unknown_kind_is_rejected(self, kind: str) -> None:
+        with pytest.raises(ContractError, match="'kind'"):
+            parse_warning_event(json.dumps({"kind": kind, "count": 1, "channel": None}))
+
+    @pytest.mark.parametrize("count", [0, -1, True, "2", 1.5, None])
+    def test_non_positive_or_non_integer_count_is_rejected(self, count: object) -> None:
+        with pytest.raises(ContractError, match="'count'"):
+            parse_warning_event(json.dumps({"kind": "dropped", "count": count, "channel": None}))
+
+    def test_truncated_requires_channel(self) -> None:
+        with pytest.raises(ContractError, match="requires 'channel'"):
+            parse_warning_event(json.dumps({"kind": "truncated", "count": 1, "channel": None}))
+
+    def test_dropped_rejects_channel(self) -> None:
+        with pytest.raises(ContractError, match="must not carry 'channel'"):
+            parse_warning_event(json.dumps({"kind": "dropped", "count": 1, "channel": "general"}))
+
+    @pytest.mark.parametrize("channel", ["", 3, []])
+    def test_bad_channel_is_rejected(self, channel: object) -> None:
+        with pytest.raises(ContractError, match="'channel'"):
+            parse_warning_event(json.dumps({"kind": "truncated", "count": 1, "channel": channel}))
+
+    def test_malformed_json_is_rejected(self) -> None:
+        with pytest.raises(ContractError, match="valid JSON"):
+            parse_warning_event("{not json")
+
+    def test_serializer_rejects_invalid_event(self) -> None:
+        with pytest.raises(ContractError, match="'count'"):
+            warning_event_to_json(WarningEvent(kind="dropped", count=0))

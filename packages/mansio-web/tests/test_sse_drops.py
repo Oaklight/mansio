@@ -1,7 +1,7 @@
 """Tests for SSE slow-consumer drop notification.
 
 Verifies that when the SSE event queue fills up and events are
-dropped, a warning comment is sent to the client.
+dropped, a typed ``event: warning`` frame is sent to the client.
 
 Closes #24 (item 3).
 """
@@ -82,10 +82,10 @@ class TestDropCounter(unittest.TestCase):
 
 
 class TestDropWarningInGenerator(unittest.TestCase):
-    """Verify that the SSE generator emits a warning comment after drops."""
+    """Verify that the SSE generator emits a typed warning after drops."""
 
     def test_generator_emits_drop_warning(self):
-        """After drops, generator should yield a warning SSE comment."""
+        """After drops, generator should yield an ``event: warning`` frame."""
         bus = Bus(MemoryBackend())
 
         loop = asyncio.new_event_loop()
@@ -128,11 +128,14 @@ class TestDropWarningInGenerator(unittest.TestCase):
             ):
                 events.append(chunk)
 
-            # Should have: connected comment, the event, drop warning
+            # Should have: connected comment, the event, the drop warning
             event_text = "".join(events)
             self.assertIn(": connected", event_text)
             self.assertIn("msg-1", event_text)
-            self.assertIn(": warning: 5 event(s) dropped (slow consumer)", event_text)
+            self.assertIn(
+                'event: warning\ndata: {"kind": "dropped", "count": 5, "channel": null}\n\n',
+                event_text,
+            )
 
             # Counter should be reset
             with drop_lock:
@@ -142,7 +145,7 @@ class TestDropWarningInGenerator(unittest.TestCase):
         loop.close()
 
     def test_generator_no_warning_without_drops(self):
-        """When no drops, no warning comment should appear."""
+        """When no drops, no warning frame should appear."""
         bus = Bus(MemoryBackend())
 
         loop = asyncio.new_event_loop()
@@ -198,7 +201,10 @@ class TestDrainDropCounter(unittest.TestCase):
         lock = threading.Lock()
         counter = [7]
         result = _drain_drop_counter(lock, counter)
-        self.assertIn("7 event(s) dropped", result)
+        self.assertIn("event: warning", result)
+        self.assertIn('"kind": "dropped"', result)
+        self.assertIn('"count": 7', result)
+        self.assertIn('"channel": null', result)
         self.assertEqual(counter[0], 0)
 
     def test_returns_empty_when_no_drops(self):
@@ -252,7 +258,9 @@ class TestQuietStreamDropWarning(unittest.TestCase):
 
         text = "".join(events)
         self.assertIn(": keepalive", text)
-        self.assertIn(": warning: 3 event(s) dropped (slow consumer)", text)
+        self.assertIn(
+            'event: warning\ndata: {"kind": "dropped", "count": 3, "channel": null}\n\n', text
+        )
         self.assertEqual(drop_counter[0], 0, "Counter should reset after the warning")
 
     def test_no_warning_on_quiet_stream_without_drops(self):
@@ -313,8 +321,7 @@ class TestReplayTruncationWarning(unittest.TestCase):
         self.assertEqual(len(events), _SSE_REPLAY_LIMIT + 1)
         self.assertEqual(
             events[0],
-            f": warning: replay truncated at {_SSE_REPLAY_LIMIT} "
-            "for channel 'trunc-ch', re-query for more\n\n",
+            'event: warning\ndata: {"kind": "truncated", "count": 500, "channel": "trunc-ch"}\n\n',
         )
         self.assertIn("m1", events[1])
 
