@@ -9,7 +9,9 @@ composition root and calls the registers in a fixed order.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from mansio_core.contracts import ContractError
 
 if TYPE_CHECKING:
     from mansio_core.bus import Bus
@@ -30,4 +32,12 @@ class RouteContext:
     serve_ui: bool
 
 
-__all__ = ["RouteContext"]
+def json_body(request: Any, message: str = "Request body must be valid JSON") -> Any:
+    """Decode an admin request body, mapping decode failures to a contract error."""
+    try:
+        return request.json()
+    except ValueError as exc:
+        raise ContractError(message) from exc
+
+
+__all__ = ["RouteContext", "json_body"]

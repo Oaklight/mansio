@@ -204,6 +204,14 @@ class AdminMessagesResult(WireResult):
     messages: list = field(default_factory=list)
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AdminPublishResult(WireResult):
+    """Response of ``POST /api/messages``."""
+
+    success: bool = True
+    message_id: str
+
+
 @dataclass(frozen=True, slots=True)
 class AdminSubscriptionsResult(WireResult):
     """Response of ``GET /api/subscriptions``."""

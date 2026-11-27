@@ -17,6 +17,7 @@ from mansio_core.contracts.admin import (
     AdminPrefixCreatedResult,
     AdminPrefixDeletedResult,
     AdminPrefixesResult,
+    AdminPublishResult,
     AdminStatsResult,
     AdminSubscriptionsResult,
     AdminSystemResult,
@@ -105,6 +106,9 @@ class AdminView:
             count=len(messages),
             messages=[_message_summary(message) for message in messages],
         )
+
+    def message_published(self, message_id: str) -> AdminPublishResult:
+        return AdminPublishResult(message_id=message_id)
 
     def subscriptions(self) -> AdminSubscriptionsResult:
         counts = self._bus.subscription_counts()

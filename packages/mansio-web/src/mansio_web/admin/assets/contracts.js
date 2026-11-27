@@ -188,6 +188,24 @@ export function parseAdminPrefixesResult(raw) {
     return Object.freeze({ ...obj });
 }
 
+// POST /api/messages
+
+/**
+ * @typedef {Object} AdminPublishResult
+ * @property {boolean} success
+ * @property {string} message_id
+ */
+
+export function parseAdminPublishResult(raw) {
+    const document = 'POST /api/messages';
+    const obj = expectObject(raw, document);
+    requireField(obj, 'success', document);
+    expectType(obj.success, 'boolean', `${document}: success must be boolean`);
+    requireField(obj, 'message_id', document);
+    expectType(obj.message_id, 'string', `${document}: message_id must be string`);
+    return Object.freeze({ ...obj });
+}
+
 // GET /api/stats
 
 /**
