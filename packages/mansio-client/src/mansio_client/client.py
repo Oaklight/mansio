@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, cast, overload
 from uuid import uuid4
 
+from mansio_core.transport import Transport
 from mansio_core.types import (
     ACLEntry,
     ChannelMeta,
@@ -289,7 +290,7 @@ class MansioClient:
         self._validate_user_id(user_id)
         self._user_id = user_id
         self._display_name = display_name or user_id
-        self._transport = HttpTransport(url, user_id=user_id, token=token)
+        self._transport: Transport = HttpTransport(url, user_id=user_id, token=token)
         self._cursors: dict[str, str] = {}
         self._persisted: dict[str, str] = {}
         self._coalescers: dict[str, _Coalescer] = {}
