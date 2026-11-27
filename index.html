@@ -91,12 +91,12 @@
   <div class="eyebrow">MANSIO · Architecture</div>
   <h1>现状与目标并列：问题在哪里</h1>
   <p class="lede">
-    左列是 <code>master @ b5b67fc</code> 的实际结构（M1–M4c 已合并；M4d 进行中），右列是 core/web/transport 重构与前端重设计的目标结构。
+    左列是 <code>master @ 0983530</code> 的实际结构（M1–M4c 已合并；M4d 进行中），右列是 core/web/transport 重构与前端重设计的目标结构。
     每个节点标出文件规模与职责，红色表示层次倒置或重复，橙色表示 god module，绿色表示目标态新增的接口与包。
     合并任一重构 PR 后，本页按迁移阶段更新“现状”一列。
   </p>
   <div class="meta">
-    <span>现状快照：<code>master @ b5b67fc</code>（M1–M4c 已合并）</span>
+    <span>现状快照：<code>master @ 0983530</code>（M1–M4c 已合并）</span>
     <span>目标：<code>core / web / client</code> 三包 + 契约层</span>
     <span>分支：<code>docs_arch</code></span>
     <button id="themeBtn" type="button">深色主题</button>
@@ -123,7 +123,7 @@
 <section id="problems">
   <h2><span class="num">00</span>问题总览</h2>
   <p class="sub">
-    自研 Python 17.1k 行（core 8.4k + web 4.3k + client 4.4k）、admin UI 4.2k 行、测试 23.5k 行、1500 个测试函数；模块级 import 环为 0（已验证）。
+    自研 Python 17.2k 行（core 8.4k + web 4.3k + client 4.5k）、admin UI 4.2k 行、测试 23.5k 行、1504 个测试函数；模块级 import 环为 0（已验证）。
     复杂度不在“层数”，而在下列具体位置。
   </p>
   <div class="panel">
@@ -133,7 +133,7 @@
         <tr><td><code>mansio_web/frontends/http.py</code></td><td>1596 行 · 24 条路由 · 20 个 <code>_setup_*</code></td><td><span class="pill hot">god module</span> 契约与错误体已移出；认证、SSE、队列、ACL、presence 仍共处一个类</td><td>后续</td></tr>
         <tr><td>admin UI</td><td>55 行骨架 + 4099 行资产（19 文件）</td><td><span class="pill good">已重构</span> M4b：Slack 式侧栏 + 内容 + 详情、组件词汇、契约生成视图；M4c 把 26 条后端路由移入 10 个 <code>routes/*.py</code> 模块</td><td>M4b / M4c 已完成</td></tr>
         <tr><td><code>mansio_web/admin/server.py</code></td><td>332 行 · 组装根</td><td><span class="pill good">已拆分</span> M4c：路由移入 <code>admin/routes/</code> 的 10 个模块（<code>routes/</code> 共 482 行，含 <code>RouteContext</code>），各暴露 <code>register(app, ctx)</code>；<code>server.py</code> 只作组装根（冻结 <code>RouteContext</code>）</td><td>M4c 已完成</td></tr>
-        <tr><td>transport</td><td>协议 178 · 实现 745+22 · 服务端副本已删</td><td><span class="pill good">已修复</span> M2c：SDK 只按 <code>Transport</code> 协议使用，唯一实现位于 <code>mansio_client/transport/</code>；<code>mansio client</code> 为 exit-2 弃用桩（M4d 删除）。残留：构造处仍直接 import <code>HttpTransport</code>（待工厂按 scheme 选择）</td><td>M2c 已完成</td></tr>
+        <tr><td>transport</td><td>协议 178 · 实现 745 · 工厂 101</td><td><span class="pill good">已修复</span> M2c 收拢协议与唯一实现；#403 起构造走 <code>create_transport(url)</code>，按 URL scheme 注册实现，<code>MansioClient</code> 不再 import <code>HttpTransport</code>；<code>mansio client</code> 为 exit-2 弃用桩（M4d 删除）</td><td>M2c 已完成</td></tr>
         <tr><td><code>shared/</code></td><td>949 行（已删除）</td><td><span class="pill good">已消除</span> M1 把类型与传输协议并入 <code>mansio-core</code>；复制与 <code>sync-check</code> 一并删除</td><td>M1 已完成</td></tr>
         <tr><td><code>bus.py</code></td><td>Bus 798 行</td><td><span class="pill good">已修复</span> M1 把 <code>metrics</code> 移入 core 中性模块，Bus 不再导入 admin</td><td>M1 已完成</td></tr>
         <tr><td><code>admin/ POST /api/messages</code></td><td>1 条写路径</td><td><span class="pill good">已修复</span> #385 起 admin 发布走 <code>parse_publish</code>，IRC 丢弃空 PRIVMSG</td><td>已完成</td></tr>
@@ -159,7 +159,7 @@ flowchart TB
   subgraph PKG["当前：3 个发布包（M1–M4c 已合并）"]
     CORE["mansio-core · 自研 8.4k 行 · 运行时依赖 0&lt;br/&gt;contracts 1430（bus + admin DTO · parse_* · SSE）&lt;br/&gt;types 193 · transport 178（协议）&lt;br/&gt;bus 798 · authz 386 · protocols 533&lt;br/&gt;backends 4.2k · token_store 415 · metrics 122"]
     WEB["mansio 包 = mansio_web + 兼容别名 mansio（260）&lt;br/&gt;自研 4.3k 行 + admin UI 4.2k&lt;br/&gt;frontends/http 1596 · admin 1.4k · cli 761"]
-    CLI["mansio-client · 自研 4.4k 行&lt;br/&gt;client 464 + mixins 688 · mcp 1126&lt;br/&gt;transport 767 · cli 397 · federation 529&lt;br/&gt;injectors 327 · types.py 47：重导出（M4d 删除）"]
+    CLI["mansio-client · 自研 4.5k 行&lt;br/&gt;client 464 + mixins 688 · mcp 1126&lt;br/&gt;transport 846（含工厂） · cli 397 · federation 529&lt;br/&gt;injectors 327 · types.py 47：重导出（M4d 删除）"]
   end
   WEB -->|"一个运行时依赖"| CORE
   CLI -->|"一个运行时依赖"| CORE
@@ -227,7 +227,7 @@ flowchart TB
   MCP --> SDK
   CLIC --> SDK
   SDK -->|"使用协议"| TP
-  SDK -->|"构造具体类（待工厂）"| TRC
+  SDK -->|"工厂按 scheme 选择"| TRC
   TRC -.->|"实现"| TP
   TRC -->|"HTTP + SSE"| HTTPF
   ADMUI --> ADMS
@@ -317,7 +317,7 @@ flowchart LR
   CLIS["mansio client&lt;br/&gt;exit-2 桩（M4d 删除）"]
   HTTPF["HttpFrontend 1596"]
   SDK -->|"使用协议"| TP
-  SDK -->|"构造具体类（待工厂）"| TR
+  SDK -->|"create_transport(url)"| TR
   TR -.->|"实现"| TP
   TR -->|"HTTP + SSE"| HTTPF
   CLIS -.->|"指向 mansio-client 子命令"| SDK
@@ -366,7 +366,7 @@ flowchart LR
   <div class="callout">
     M2c 已完成：删除 <code>mansio_web/transport_http.py</code>，实现唯一在 <code>mansio_client/transport/http.py</code>，
     <code>mansio client</code> 变为 exit 2 的弃用桩。服务端不再为 CLI 反向依赖客户端包；
-    新增传输（WS、in-process）只需实现 <code>Transport</code> 并加一个模块。
+    新增传输（WS、in-process）只需实现 <code>Transport</code> 并注册工厂，<code>MansioClient</code> 无需改动。
   </div>
 </section>
 
@@ -556,7 +556,7 @@ flowchart LR
         <tr><td><code>.../mansio_core/backends/</code> 4.2k</td><td>四种存储</td><td><code>SQLiteBackend</code> 等</td></tr>
         <tr><td><code>packages/mansio-web/src/mansio_web/frontends/http.py</code> 1596</td><td>HTTP + SSE（契约与信封已移出）</td><td><code>HttpFrontend</code>, <code>_SSESession</code></td></tr>
         <tr><td><code>.../mansio_web/admin/</code> 1.4k + UI 4.2k</td><td>控制台（骨架 + assets）+ <code>routes/</code> + auth + AdminView</td><td><code>AdminServer</code>, <code>AdminView</code></td></tr>
-        <tr><td><code>.../mansio_client/transport/http.py</code> 745</td><td>HTTP+SSE 实现（唯一）</td><td><code>HttpTransport</code></td></tr>
+        <tr><td><code>.../mansio_client/transport/</code> 846</td><td>HTTP+SSE 实现（745）+ 按 scheme 选择的工厂（101）</td><td><code>HttpTransport</code>, <code>create_transport</code></td></tr>
         <tr><td><code>packages/mansio-client/src/mansio_client/client.py</code> 464 + mixins 688</td><td>SDK 门面 + 5 个 mixin：游标、语义 API、合批、循环检测</td><td><code>MansioClient</code></td></tr>
         <tr><td><code>.../mansio_client/mcp.py</code> 1126</td><td>32 个 MCP 工具</td><td><code>_TOOLS</code>, <code>_DISPATCH</code></td></tr>
       </tbody>
@@ -592,7 +592,7 @@ flowchart LR
 
 <footer>
   <span>MANSIO · 现状与目标并列（docs_arch）</span>
-  <span>数据来源：master b5b67fc 源码、README、docs/DESIGN_EN.md</span>
+  <span>数据来源：master 0983530 源码、README、docs/DESIGN_EN.md</span>
 </footer>
 
 </div>
