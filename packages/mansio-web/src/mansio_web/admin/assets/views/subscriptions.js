@@ -1,26 +1,47 @@
+// Subscriptions: active subscription counts per channel.
+
 import { api } from '../api.js';
-import { esc } from '../util.js';
+import { formatCount } from '../format.js';
+import { card, dataTable, el, emptyState, errorState, pageHeader, statGrid } from '../ui.js';
 
-/* ============== Subscriptions Tab ============== */
-export async function loadSubscriptions() {
+export async function render(route, ctx) {
+    let data;
     try {
-        const data = await api.getSubscriptions();
-        document.getElementById('subTotal').textContent =
-            `Total active subscriptions: ${data.total}`;
-
-        const tbody = document.getElementById('subList');
-        if (data.channels.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" style="color:var(--text-secondary);text-align:center;padding:40px">No active subscriptions</td></tr>';
-            return;
-        }
-        tbody.innerHTML = data.channels.map(ch => `
-            <tr>
-                <td><strong>${esc(ch.channel)}</strong></td>
-                <td style="font-family:monospace;font-size:0.8rem;word-break:break-all">${ch.subscription_ids.join(', ')}</td>
-                <td>${ch.count}</td>
-            </tr>
-        `).join('');
-    } catch (e) {
-        console.error('Subscriptions load error:', e);
+        data = await api.getSubscriptions();
+    } catch (error) {
+        return { main: errorState(error, () => ctx.refresh()), detail: null };
     }
+
+    const main = el(
+        'div',
+        {},
+        pageHeader('Subscriptions', { subtitle: 'Live SSE subscribers attached to the bus' }),
+        statGrid([{ label: 'Active subscriptions', value: formatCount(data.total) }]),
+        card(
+            'By channel',
+            data.channels.length
+                ? dataTable({
+                      columns: [
+                          {
+                              label: 'Channel',
+                              render: (row) => el('strong', { className: 'mono', text: row.channel }),
+                          },
+                          {
+                              label: 'Subscribers',
+                              className: 'num',
+                              render: (row) => formatCount(row.count),
+                          },
+                          {
+                              label: 'Subscription IDs',
+                              render: (row) =>
+                                  el('span', { className: 'mono muted', text: row.subscription_ids.join(', ') }),
+                          },
+                      ],
+                      rows: data.channels,
+                      rowKey: (row) => row.channel,
+                  })
+                : emptyState('No active subscriptions', 'Agents subscribe over the SSE endpoint.'),
+        ),
+    );
+    return { main, detail: null };
 }

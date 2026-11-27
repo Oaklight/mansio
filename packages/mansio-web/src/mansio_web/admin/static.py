@@ -16,21 +16,28 @@ _ADMIN_HTML: Final[str] = (
     importlib.resources.files(_PACKAGE).joinpath("admin.html").read_text("utf-8")
 )
 
+_JS = "text/javascript; charset=utf-8"
+
 _ASSET_TYPES: Final[dict[str, str]] = {
     "admin.css": "text/css; charset=utf-8",
-    "api.js": "text/javascript; charset=utf-8",
-    "app.js": "text/javascript; charset=utf-8",
-    "auth.js": "text/javascript; charset=utf-8",
-    "refresh.js": "text/javascript; charset=utf-8",
-    "state.js": "text/javascript; charset=utf-8",
-    "theme-init.js": "text/javascript; charset=utf-8",
-    "util.js": "text/javascript; charset=utf-8",
-    "views/channels.js": "text/javascript; charset=utf-8",
-    "views/dashboard.js": "text/javascript; charset=utf-8",
-    "views/messages.js": "text/javascript; charset=utf-8",
-    "views/subscriptions.js": "text/javascript; charset=utf-8",
-    "views/system.js": "text/javascript; charset=utf-8",
-    "views/tokens.js": "text/javascript; charset=utf-8",
+    "api.js": _JS,
+    "app.js": _JS,
+    "auth.js": _JS,
+    "contracts.js": _JS,
+    "format.js": _JS,
+    "models.js": _JS,
+    "router.js": _JS,
+    "state.js": _JS,
+    "theme-init.js": _JS,
+    "ui.js": _JS,
+    "views/channels.js": _JS,
+    "views/messages.js": _JS,
+    "views/overview.js": _JS,
+    "views/prefixes.js": _JS,
+    "views/subscriptions.js": _JS,
+    "views/system.js": _JS,
+    "views/tokens.js": _JS,
+    "views/users.js": _JS,
 }
 
 

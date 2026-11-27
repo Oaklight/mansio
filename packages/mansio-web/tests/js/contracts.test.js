@@ -7,6 +7,7 @@ import {
     toChannelBreakdown,
     toChannelDetail,
     toChannelSummary,
+    toCreatedToken,
     toMessage,
     toPrefix,
     toStats,
@@ -181,6 +182,29 @@ test('message, token and user adapters reject bad rows', () => {
     });
     assert.equal(token.user_id, null);
     assert.throws(() => toToken({ id: 't1' }), ContractMismatch);
+
+    const created = toCreatedToken({
+        id: 't2',
+        token_prefix: 'mst-def',
+        user_id: 'alice',
+        label: 'agent',
+        created_at: '2026-01-01',
+        last_used_at: null,
+        token: 'mst-secret',
+    });
+    assert.equal(created.token, 'mst-secret');
+    assert.throws(
+        () =>
+            toCreatedToken({
+                id: 't2',
+                token_prefix: 'mst-def',
+                user_id: 'alice',
+                label: 'agent',
+                created_at: '2026-01-01',
+                last_used_at: null,
+            }),
+        ContractMismatch,
+    );
 
     const user = toUser({ user_id: 'alice', token_count: 2, last_active: null });
     assert.equal(user.status, 'unknown');
