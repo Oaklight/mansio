@@ -19,7 +19,7 @@ from mansio_core.types import ACLEntry, ChannelMeta, ClaimResult, Message, UserP
 
 def _wire_value(value: Any) -> Any:
     """Convert a nested value to its JSON form."""
-    if isinstance(value, _WireResult):
+    if isinstance(value, WireResult):
         return value.to_dict()
     if isinstance(value, Message):
         return message_to_dict(value)
@@ -61,7 +61,7 @@ def _wire_value(value: Any) -> Any:
 
 
 @dataclass(frozen=True, slots=True)
-class _WireResult:
+class WireResult:
     """Base for response documents.
 
     ``to_dict`` walks the fields in declaration order, which is the wire
@@ -96,7 +96,7 @@ class PublishRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class PublishResult(_WireResult):
+class PublishResult(WireResult):
     """Response of ``POST /v1/publish``."""
 
     _omit_none: ClassVar[frozenset[str]] = frozenset({"warning"})
@@ -120,7 +120,7 @@ class QueryRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class QueryResult(_WireResult):
+class QueryResult(WireResult):
     """Response of ``GET /v1/query``."""
 
     messages: list[Message]
@@ -138,7 +138,7 @@ class ChannelsRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class ChannelsResult(_WireResult):
+class ChannelsResult(WireResult):
     """Response of ``GET /v1/channels``.
 
     ``channels`` is a list of names when ``detail`` is false and a list of
@@ -158,14 +158,14 @@ class ChannelCreateRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class ChannelResult(_WireResult):
+class ChannelResult(WireResult):
     """Response carrying one channel's metadata."""
 
     channel: ChannelMeta
 
 
 @dataclass(frozen=True, slots=True)
-class ACLResult(_WireResult):
+class ACLResult(WireResult):
     """Response of ``GET /v1/channels/<channel>/acl``."""
 
     acl: list[ACLEntry]
@@ -195,7 +195,7 @@ class ACLAddRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class DeleteChannelResult(_WireResult):
+class DeleteChannelResult(WireResult):
     """Response of ``DELETE /v1/channels/<channel>``."""
 
     deleted: int
@@ -203,7 +203,7 @@ class DeleteChannelResult(_WireResult):
 
 
 @dataclass(frozen=True, slots=True)
-class DeleteMessageResult(_WireResult):
+class DeleteMessageResult(WireResult):
     """Response of ``DELETE /v1/messages/<message_id>``."""
 
     deleted: bool
@@ -228,7 +228,7 @@ class QueueAckRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class QueueClaimResult(_WireResult):
+class QueueClaimResult(WireResult):
     """Response of ``POST /v1/queue/claim``."""
 
     _omit_none: ClassVar[frozenset[str]] = frozenset({"result"})
@@ -238,7 +238,7 @@ class QueueClaimResult(_WireResult):
 
 
 @dataclass(frozen=True, slots=True)
-class QueueAckResult(_WireResult):
+class QueueAckResult(WireResult):
     """Response of ``POST /v1/queue/ack``."""
 
     _omit_none: ClassVar[frozenset[str]] = frozenset({"result"})
@@ -255,7 +255,7 @@ class QueueStatusRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class QueueStatusResult(_WireResult):
+class QueueStatusResult(WireResult):
     """Response of ``GET /v1/queue/status``."""
 
     found: bool
@@ -278,14 +278,14 @@ class PresenceListRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class PresenceResult(_WireResult):
+class PresenceResult(WireResult):
     """Response of ``GET /v1/presence``."""
 
     agents: list[UserPresence]
 
 
 @dataclass(frozen=True, slots=True)
-class PresenceAgentResult(_WireResult):
+class PresenceAgentResult(WireResult):
     """Response of ``GET /v1/presence/<user_id>``."""
 
     user_id: str
@@ -302,7 +302,7 @@ class RegistryLookupRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class RegistryLookupResult(_WireResult):
+class RegistryLookupResult(WireResult):
     """Response of ``GET /v1/registry/lookup``."""
 
     found: bool
@@ -310,7 +310,7 @@ class RegistryLookupResult(_WireResult):
 
 
 @dataclass(frozen=True, slots=True)
-class AuthCheckResult(_WireResult):
+class AuthCheckResult(WireResult):
     """Response of ``GET /v1/auth/check``."""
 
     auth_mode: str
@@ -318,7 +318,7 @@ class AuthCheckResult(_WireResult):
 
 
 @dataclass(frozen=True, slots=True)
-class HealthResult(_WireResult):
+class HealthResult(WireResult):
     """Response of ``GET /health``."""
 
     status: str = "ok"
@@ -333,7 +333,7 @@ class AdminCleanupRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class AdminCleanupResult(_WireResult):
+class AdminCleanupResult(WireResult):
     """Response of ``POST /v1/admin/channels/cleanup``."""
 
     channels_deleted: int
@@ -351,7 +351,7 @@ class AdminCompactRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class AdminCompactResult(_WireResult):
+class AdminCompactResult(WireResult):
     """Response of ``POST /v1/admin/compact``."""
 
     channel: str
@@ -359,7 +359,7 @@ class AdminCompactResult(_WireResult):
 
 
 @dataclass(frozen=True, slots=True)
-class ErrorResult(_WireResult):
+class ErrorResult(WireResult):
     """Error body shared by every bus route."""
 
     error: str
@@ -367,14 +367,14 @@ class ErrorResult(_WireResult):
 
 
 @dataclass(frozen=True, slots=True)
-class PresenceHeartbeatResult(_WireResult):
+class PresenceHeartbeatResult(WireResult):
     """Response of ``POST /v1/presence/heartbeat``."""
 
     ok: bool = True
 
 
 @dataclass(frozen=True, slots=True)
-class ACLSetResult(_WireResult):
+class ACLSetResult(WireResult):
     """Response of ``PUT /v1/channels/<channel>/acl``."""
 
     status: str = "ok"
@@ -382,7 +382,7 @@ class ACLSetResult(_WireResult):
 
 
 @dataclass(frozen=True, slots=True)
-class ACLAddEntry(_WireResult):
+class ACLAddEntry(WireResult):
     """The entry echoed by ``POST /v1/channels/<channel>/acl``."""
 
     channel: str
@@ -391,7 +391,7 @@ class ACLAddEntry(_WireResult):
 
 
 @dataclass(frozen=True, slots=True)
-class ACLAddResult(_WireResult):
+class ACLAddResult(WireResult):
     """Response of ``POST /v1/channels/<channel>/acl``."""
 
     status: str = "ok"
@@ -399,7 +399,7 @@ class ACLAddResult(_WireResult):
 
 
 @dataclass(frozen=True, slots=True)
-class ACLRemoveResult(_WireResult):
+class ACLRemoveResult(WireResult):
     """Response of ``DELETE /v1/channels/<channel>/acl/<user_id>``."""
 
     status: str = "ok"
