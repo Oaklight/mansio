@@ -60,6 +60,8 @@ import { ContractMismatch } from './contracts.js';
  * @property {string} created_at
  * @property {string|null} last_used_at
  *
+ * @typedef {Token & {token: string}} CreatedToken
+ *
  * @typedef {Object} User
  * @property {string} user_id
  * @property {number} token_count
@@ -237,6 +239,15 @@ export function toToken(raw) {
         label: stringOf(raw, 'label', document),
         created_at: stringOf(raw, 'created_at', document),
         last_used_at: optionalString(raw, 'last_used_at', document),
+    });
+}
+
+/** @returns {CreatedToken} */
+export function toCreatedToken(raw) {
+    const token = toToken(raw);
+    return Object.freeze({
+        ...token,
+        token: stringOf(raw, 'token', 'created token'),
     });
 }
 
