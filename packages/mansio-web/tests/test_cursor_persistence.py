@@ -123,12 +123,12 @@ def test_failed_cursor_write_is_logged_and_retried(server_url, caplog):
 
 
 def test_restore_failure_propagates(server_url, monkeypatch):
-    from mansio_client import client as client_module
+    from mansio_client.transport import HttpTransport
 
     def failing_query(self, *args, **kwargs):
         raise ConnectionError("query rejected")
 
-    monkeypatch.setattr(client_module.HttpTransport, "query", failing_query, raising=True)
+    monkeypatch.setattr(HttpTransport, "query", failing_query, raising=True)
     with pytest.raises(ConnectionError):
         MansioClient(server_url, "broken-agent")
 
