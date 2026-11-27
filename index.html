@@ -164,7 +164,7 @@ flowchart TB
   WEB -->|"一个运行时依赖"| CORE
   CLI -->|"一个运行时依赖"| CORE
   CLI -->|"运行期 HTTP REST + SSE"| WEB
-  ALIAS["import mansio&lt;br/&gt;MetaPathFinder 代理（临时，保留一个发布周期）"] -.-> WEB
+  ALIAS["import mansio&lt;br/&gt;MetaPathFinder 代理（计划移除，无兼容承诺）"] -.-> WEB
   class CORE good
   classDef good fill:#e8f5e9,stroke:#1a8f3c,color:#14532d
 </pre>
@@ -192,7 +192,7 @@ flowchart TB
   <div class="callout">
     包边界同时是发布边界：<code>mansio-core</code> 可单独被扩展作者依赖（只含契约与领域），
     <code>mansio-web</code>（发布名 <code>mansio</code>）提供服务器，<code>mansio-client</code> 提供 SDK/CLI/MCP。
-    <code>import mansio</code> 由 web 包内的兼容别名支持，保留一个发布周期；
+    <code>import mansio</code> 由 web 包内的兼容别名支持，计划在 M4c 之后直接删除（无兼容承诺）；
     <code>shared/</code>、<code>sync-shared.sh</code> 与 CI <code>sync-check</code> 已删除。
   </div>
 </section>
@@ -578,6 +578,7 @@ flowchart LR
         <tr><td>M4a ✅</td><td>admin.html 拆为 286 行骨架 + 14 个资产文件；白名单资产服务；行为与字节不变。合并于 <code>da1aa35</code></td><td>yes</td><td>05/06 的现状列（已更新）</td></tr>
         <tr><td>M4b ✅</td><td>Slack 式控制台重设计：侧栏 + 内容 + 详情、组件词汇、contracts 生成的类型化视图、hash 路由、移除 inline handler、a11y。合并于 <code>fe1eb48</code></td><td>yes</td><td>05/06 的现状列（已更新）</td></tr>
         <tr><td>M4c 🚧</td><td>admin 路由拆分（27 条路由移入 <code>admin/routes/</code>），URL 与响应不变</td><td>yes</td><td>05 的现状列</td></tr>
+        <tr><td>M4d 🚧</td><td>删除兼容层：<code>mansio</code> 别名包、<code>mansio client</code> 桩、<code>mansio_client/types.py</code> 再导出；无兼容承诺</td><td>yes</td><td>01/06 的现状列</td></tr>
         <tr><td>M3</td><td>HTTP/admin 路由拆分 + 类型化 AdminView</td><td>yes</td><td>02/05 的现状列</td></tr>
         <tr><td>M4</td><td>前端重构与重新设计（骨架 + css/js 模块）</td><td>no</td><td>05 的现状列</td></tr>
       </tbody>
