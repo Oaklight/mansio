@@ -91,12 +91,12 @@
   <div class="eyebrow">MANSIO · Architecture</div>
   <h1>现状与目标并列：问题在哪里</h1>
   <p class="lede">
-    左列是 <code>master @ b5fe4df</code> 的实际结构（M1–M4d 已合并），右列是 core/web/transport 重构与前端重设计的目标结构。
+    左列是 <code>master @ 289bd70</code> 的实际结构（M1–M4d 已合并），右列是 core/web/transport 重构与前端重设计的目标结构。
     每个节点标出文件规模与职责，红色表示层次倒置或重复，橙色表示 god module，绿色表示目标态新增的接口与包。
     合并任一重构 PR 后，本页按迁移阶段更新“现状”一列。
   </p>
   <div class="meta">
-    <span>现状快照：<code>master @ b5fe4df</code>（M1–M4d 已合并）</span>
+    <span>现状快照：<code>master @ 289bd70</code>（M1–M4d 已合并）</span>
     <span>目标：<code>core / web / client</code> 三包 + 契约层</span>
     <span>分支：<code>docs_arch</code></span>
     <button id="themeBtn" type="button">深色主题</button>
@@ -123,7 +123,7 @@
 <section id="problems">
   <h2><span class="num">00</span>问题总览</h2>
   <p class="sub">
-    自研 Python 17.4k 行（core 8.4k + web 4.5k + client 4.5k）、admin UI 4.2k 行、测试 23.4k 行、1488 个测试函数；模块级 import 环为 0（已验证）。
+    自研 Python 17.4k 行（core 8.4k + web 4.5k + client 4.5k）、admin UI 4.2k 行、测试 23.5k 行、1492 个测试函数；模块级 import 环为 0（已验证）。
     复杂度不在“层数”，而在下列具体位置。
   </p>
   <div class="panel">
@@ -131,7 +131,7 @@
       <thead><tr><th>位置</th><th>规模</th><th>症状</th><th>目标阶段</th></tr></thead>
       <tbody>
         <tr><td><code>mansio_web/frontends/http.py</code></td><td>360 行组装根 + <code>routes/</code> 1476 行（24 条路由）</td><td><span class="pill good">已拆分</span> M4e：10 个 <code>register(app, ctx)</code> 模块 + <code>_common</code>；<code>http.py</code> 只剩生命周期、中间件与按序注册，冻结 <code>RouteContext</code></td><td>M4e 已完成</td></tr>
-        <tr><td>admin UI</td><td>55 行骨架 + 4117 行资产（19 文件）</td><td><span class="pill good">已重构</span> M4b：Slack 式侧栏 + 内容 + 详情、组件词汇、契约生成视图；M4c 把 26 条后端路由移入 10 个 <code>routes/*.py</code> 模块</td><td>M4b / M4c 已完成</td></tr>
+        <tr><td>admin UI</td><td>55 行骨架 + 4151 行资产（19 文件）</td><td><span class="pill good">已重构</span> M4b：Slack 式侧栏 + 内容 + 详情、组件词汇、契约生成视图；M4c 把 26 条后端路由移入 10 个 <code>routes/*.py</code> 模块</td><td>M4b / M4c 已完成</td></tr>
         <tr><td><code>mansio_web/admin/server.py</code></td><td>332 行 · 组装根</td><td><span class="pill good">已拆分</span> M4c：路由移入 <code>admin/routes/</code> 的 10 个模块（<code>routes/</code> 共 482 行，含 <code>RouteContext</code>），各暴露 <code>register(app, ctx)</code>；<code>server.py</code> 只作组装根（冻结 <code>RouteContext</code>）</td><td>M4c 已完成</td></tr>
         <tr><td>transport</td><td>协议 178 · 实现 745 · 工厂 101</td><td><span class="pill good">已修复</span> M2c 收拢协议与唯一实现；#403 起构造走 <code>create_transport(url)</code>，按 URL scheme 注册实现，<code>MansioClient</code> 不再 import <code>HttpTransport</code>；<code>mansio client</code> 已随 M4d 删除</td><td>M2c 已完成</td></tr>
         <tr><td><code>shared/</code></td><td>949 行（已删除）</td><td><span class="pill good">已消除</span> M1 把类型与传输协议并入 <code>mansio-core</code>；复制与 <code>sync-check</code> 一并删除</td><td>M1 已完成</td></tr>
@@ -232,7 +232,7 @@ flowchart TB
   end
   subgraph WEB["mansio-web（发布名 mansio）"]
     WH["frontends 2263&lt;br/&gt;http 组装根 360 + routes 1476&lt;br/&gt;24 条路由"]
-    WA["admin 1432 + 资产 4172"]
+    WA["admin 1445 + 资产 4206"]
     WC["cli 677"]
     WB["frontends/base 71&lt;br/&gt;Frontend 协议（仅 web 使用）"]
   end
@@ -469,14 +469,14 @@ flowchart LR
 <pre class="mermaid">
 flowchart TB
   H["admin.html 55 行骨架"]
-  AS["assets/ 4117 行 · 19 文件&lt;br/&gt;router · ui · models · contracts（生成）&lt;br/&gt;api/format/auth/state · views/*.js"]
+  AS["assets/ 4151 行 · 19 文件&lt;br/&gt;router · ui · models · contracts（生成）&lt;br/&gt;api/format/auth/state · views/*.js"]
   S["admin/server.py 332 行&lt;br/&gt;组装根：按固定顺序注册"]
   R["admin/routes/ 10 模块 · 482 行&lt;br/&gt;auth · stats · channels · messages&lt;br/&gt;prefixes · subscriptions · system&lt;br/&gt;tokens · ui · users"]
   VW["admin/view.py 228&lt;br/&gt;AdminView：唯一视图组装点（M3b）"]
   C["mansio_core/contracts/admin.py 335&lt;br/&gt;请求解析 + 响应 DTO"]
   A["admin/auth.py 303"]
   M["mansio_core/metrics.py 122&lt;br/&gt;M1 移出 admin"]
-  ST["admin/static.py 61"]
+  ST["admin/static.py 74"]
   B["Bus 813"]
   H --> AS
   H --> S
@@ -620,7 +620,7 @@ flowchart LR
 
 <footer>
   <span>MANSIO · 现状与目标并列（docs_arch）</span>
-  <span>数据来源：master b5fe4df 源码、README、docs/DESIGN_EN.md</span>
+  <span>数据来源：master 289bd70 源码、README、docs/DESIGN_EN.md</span>
 </footer>
 
 </div>
