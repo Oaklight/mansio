@@ -682,6 +682,27 @@ class TestHttpChannelACL:
         yield base_url, bus
         frontend.shutdown()
 
+    @pytest.fixture()
+    def sqlite_http_client(self, tmp_path):
+        """Start an HTTP server with SQLiteBackend, yield (base_url, bus)."""
+        bus = Bus(backend=SQLiteBackend(str(tmp_path / "acl.db")))
+        frontend = HttpFrontend(port=0, allow_unauthenticated=True)
+        frontend.attach(bus)
+
+        server_thread = threading.Thread(target=frontend.serve_forever, daemon=True)
+        server_thread.start()
+
+        for _ in range(50):
+            if frontend._app.port is not None:
+                break
+            time.sleep(0.05)
+
+        host, port = frontend.address
+        base_url = f"http://{host}:{port}"
+        yield base_url, bus
+        frontend.shutdown()
+        bus.close()
+
     def _req(self, method, url, body=None):
         """Make HTTP request, return (status, data)."""
         import http.client
@@ -777,6 +798,37 @@ class TestHttpChannelACL:
             },
         )
         assert status == 400
+
+    @pytest.mark.parametrize("client_fixture", ["http_client", "sqlite_http_client"])
+    def test_add_acl_missing_channel_is_404(self, request, client_fixture):
+        """#381: ACL writes to a missing channel return 404, not 500."""
+        base, _ = request.getfixturevalue(client_fixture)
+        status, data = self._req(
+            "POST",
+            f"{base}/v1/channels/missing/acl",
+            {
+                "user_id": "bob",
+                "permission": "read",
+            },
+        )
+        assert status == 404, data
+        assert "not found" in data["message"]
+
+    @pytest.mark.parametrize("client_fixture", ["http_client", "sqlite_http_client"])
+    def test_set_acl_missing_channel_is_404(self, request, client_fixture):
+        """#381: ACL writes to a missing channel return 404, not 500."""
+        base, _ = request.getfixturevalue(client_fixture)
+        status, data = self._req(
+            "PUT",
+            f"{base}/v1/channels/missing/acl",
+            {
+                "acl": [
+                    {"user_id": "bob", "permission": "read"},
+                ],
+            },
+        )
+        assert status == 404, data
+        assert "not found" in data["message"]
 
     def test_set_acl_replaces(self, http_client):
         base, bus = http_client

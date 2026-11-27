@@ -1175,6 +1175,8 @@ class HttpFrontend:
             ]
 
             try:
+                if await asyncio.to_thread(bus.get_channel_meta, channel) is None:
+                    return _error("Not Found", f"Channel '{channel}' not found", 404)
                 await asyncio.to_thread(bus.set_acl, channel, entries)
             except NotImplementedError:
                 return _error("Not Implemented", "Backend does not support channel management", 501)
@@ -1216,6 +1218,8 @@ class HttpFrontend:
             )
 
             try:
+                if await asyncio.to_thread(bus.get_channel_meta, channel) is None:
+                    return _error("Not Found", f"Channel '{channel}' not found", 404)
                 await asyncio.to_thread(bus.add_acl_entry, entry)
             except NotImplementedError:
                 return _error("Not Implemented", "Backend does not support channel management", 501)
