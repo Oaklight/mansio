@@ -112,6 +112,15 @@ def read_url(spec: RuntimeSpec, scope: str, *, cwd: Path | None = None) -> str |
     return value if isinstance(value, str) and value else None
 
 
+def read_token(spec: RuntimeSpec, scope: str, *, cwd: Path | None = None) -> str | None:
+    """Return the installed MANSIO token, if any."""
+    env = read_env(spec, scope, cwd=cwd)
+    if not env:
+        return None
+    value = env.get("MANSIO_TOKEN")
+    return value if isinstance(value, str) and value else None
+
+
 def used_user_ids(spec: RuntimeSpec, *, cwd: Path | None = None) -> set[str]:
     """Return every user id installed for *spec* in either scope."""
     used: set[str] = set()
@@ -120,6 +129,15 @@ def used_user_ids(spec: RuntimeSpec, *, cwd: Path | None = None) -> set[str]:
         if user_id:
             used.add(user_id)
     return used
+
+
+def _specs_for(poll_format: str) -> list[RuntimeSpec]:
+    """Return the runtime specs whose config *poll_format* searches."""
+    if poll_format == "claude":
+        return [RUNTIMES["claude-code"]]
+    if poll_format == "codex":
+        return [RUNTIMES["codex"]]
+    return [RUNTIMES["claude-code"], RUNTIMES["codex"]]
 
 
 def resolve_connection(
@@ -139,20 +157,36 @@ def resolve_connection(
     if url and user_id:
         return url, user_id
 
-    if poll_format == "claude":
-        specs = [RUNTIMES["claude-code"]]
-    elif poll_format == "codex":
-        specs = [RUNTIMES["codex"]]
-    else:
-        specs = [RUNTIMES["claude-code"], RUNTIMES["codex"]]
-
     for scope in ("project", "user"):
-        for spec in specs:
+        for spec in _specs_for(poll_format):
             if not url:
                 url = read_url(spec, scope, cwd=cwd)
             if not user_id:
                 user_id = read_user_id(spec, scope, cwd=cwd)
     return url, user_id
+
+
+def resolve_token(
+    poll_format: str = "plain",
+    *,
+    cwd: Path | None = None,
+    token: str | None = None,
+) -> str | None:
+    """Resolve the API token for ``poll`` and ``doctor``.
+
+    Explicit *token* wins, then ``MANSIO_TOKEN``, then the installed project
+    config, then the user config.  ``plain`` searches both runtimes.
+    """
+    token = token or env_or("MANSIO_TOKEN")
+    if token:
+        return token
+
+    for scope in ("project", "user"):
+        for spec in _specs_for(poll_format):
+            token = read_token(spec, scope, cwd=cwd)
+            if token:
+                return token
+    return token
 
 
 def install(

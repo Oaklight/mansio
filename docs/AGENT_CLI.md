@@ -72,14 +72,15 @@ so an id is never shared. Explicit ids must match
 ### Tokens
 
 - `--token VALUE` is never written unless `--write-token` is also passed.
+- A token written by `--write-token` is reused by `poll` and `doctor`.
 - `--token-env` reads `MANSIO_TOKEN` from the environment and never writes it.
 - A token written by an earlier run is removed from the managed env block when
   you re-run without `--write-token`.
 - Tokens are redacted from dry-run diffs and all output. A config that receives
   a token is written with mode `0600`.
 
-If the token is not written, export it in the environment that launches the
-agent:
+If the token is neither written to the config nor exported, start the agent
+with it in the environment:
 
 ```bash
 export MANSIO_TOKEN=mst-...
@@ -100,10 +101,11 @@ mansio-agent poll --format claude
 mansio-agent poll --channels general,inbox --format plain
 ```
 
-- Connection settings come from the environment first (`MANSIO_URL`,
-  `MANSIO_USER_ID`), then from the installed project config, then the user
-  config. The token comes only from `MANSIO_TOKEN` (or `--token` for manual
-  runs).
+- Connection settings come from the environment (`MANSIO_URL`,
+  `MANSIO_USER_ID`), then the installed project config, then the user config.
+- The token comes from `--token`, then `MANSIO_TOKEN`, then the installed
+  config (`env.MANSIO_TOKEN`, project then user). A token written with
+  `--write-token` is reused without exporting anything.
 - Channels come from `--channels` or `MANSIO_CHANNELS`; otherwise every
   non-`_system:` channel is polled. System channels are skipped.
 - `--format claude` and `--format codex` print
@@ -130,11 +132,12 @@ Checks, one line each, with a fix hint on failure:
 
 Like `poll`, doctor takes `--url`/`--id` first, then the environment, then the
 installed config, so it works right after `install` without exporting anything.
-The token comes only from `--token` or `MANSIO_TOKEN`.
+The token follows the same order: `--token`, `MANSIO_TOKEN`, then the installed
+config. It is never printed.
 
-The exit code is non-zero if any check fails. The token is never printed. If a
-Codex hook is installed, doctor reminds you to review it with `/hooks`; Codex
-does not run unreviewed command hooks.
+The exit code is non-zero if any check fails. If a Codex hook is installed,
+doctor reminds you to review it with `/hooks`; Codex does not run unreviewed
+command hooks.
 
 ## Uninstall
 

@@ -198,9 +198,8 @@ def _print_next_steps(
 
 
 def _poll(args: argparse.Namespace) -> int:
-    token = args.token or env_or("MANSIO_TOKEN")
     channels = poll.parse_channels(args.channels)
-    return poll.run(poll_format=args.format, channels=channels, token=token)
+    return poll.run(poll_format=args.format, channels=channels, token=args.token)
 
 
 def _doctor(args: argparse.Namespace) -> int:
@@ -208,7 +207,7 @@ def _doctor(args: argparse.Namespace) -> int:
     return doctor.run(
         url=url,
         user_id=user_id,
-        token=args.token or env_or("MANSIO_TOKEN"),
+        token=runtimes.resolve_token("plain", token=args.token),
     )
 
 
