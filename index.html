@@ -764,7 +764,7 @@ flowchart LR
     <table>
       <thead><tr><th>抽象</th><th>契约</th><th>当前问题</th><th>目标</th></tr></thead>
       <tbody>
-        <tr><td>Principal</td><td>封闭枚举 <code>USER · SUPERTOKEN · ADMIN · SERVICE · NO_AUTH</code>；USER 当且仅当带非空 user_id</td><td><code>auth_result</code> 用 <code>str / None / True / False</code> 表达身份，调用方靠 <code>isinstance(str)</code> 反推特权</td><td>每请求恰好一个 Principal，无默认值；无效凭证在构造前拒绝；<code>NO_AUTH</code> 保留来源，不与 supertoken 混同</td></tr>
+        <tr><td>Principal</td><td>封闭枚举 <code>USER · SUPERTOKEN · ADMIN · SERVICE · NO_AUTH</code>；USER 当且仅当带非空 user_id</td><td><code>auth_result</code> 用 <code>str / None / True / False</code> 表达身份，调用方靠 <code>isinstance(str)</code> 反推特权</td><td>每个到达 Operations 的请求恰好一个 Principal，无默认值；公开路径不构造 Principal；无效凭证在构造前拒绝；<code>NO_AUTH</code> 保留来源，不与 supertoken 混同</td></tr>
         <tr><td>Operations</td><td>用例函数：publish · query · read · subscribe · channels · acl · queue · presence · admin</td><td>解析、身份、策略、序列化分散在 24 条 HTTP 路由与 admin/IRC 各自的实现里</td><td>core 内的 use-case 层（含 admin 用例）；唯一调用 Bus 与 authz 的地方；适配器只做 wire 映射</td></tr>
         <tr><td>Admin 用例</td><td>operations.admin.*：stats · info · metrics · channels · messages · search · users</td><td>AdminView 直接调用 <code>bus.stats / query / search / users …</code>，无 Principal</td><td>改为用例，要求 <code>ADMIN</code> 或 <code>NO_AUTH</code> principal</td></tr>
         <tr><td>Dispatch</td><td><code>Bus</code>：路由、队列租约、通知、压缩</td><td>已收拢；鉴权由 <code>ChannelAuthorizer</code> 承担，Bus 不实现策略</td><td>保持；Operations 是唯一调用方</td></tr>
@@ -781,7 +781,7 @@ flowchart LR
     <table>
       <thead><tr><th>规则</th><th>内容</th><th>检查</th></tr></thead>
       <tbody>
-        <tr><td>R7</td><td>所有适配器（HTTP 路由、SSE、IRC、admin 路由与 view）只能经 Operations 访问消息、频道、ACL、队列与在线状态；异常仅限生命周期方法（attach / serve_forever / shutdown）与认证中间件的 token 校验</td><td>AST 扫描测试：<code>adapters/</code> 与 <code>admin/</code> 中出现任何 <code>bus.&lt;attr&gt;</code> 都失败，白名单只含生命周期调用与 <code>_bus</code> 赋值</td></tr>
+        <tr><td>R7</td><td>所有适配器（HTTP 路由、SSE、IRC、admin 路由与 view）只能经 Operations 访问消息、频道、ACL、队列与在线状态；异常仅限生命周期方法（attach / serve_forever / shutdown）与认证中间件的 token 校验</td><td>AST 扫描测试：<code>adapters/</code> 与 <code>admin/</code> 中出现任何 <code>bus.&lt;attr&gt;</code>（含 <code>bus = self._bus</code> 别名）都失败，白名单只含生命周期调用与 <code>_bus</code> 赋值；M6a 以允许清单引入，M6b–M6d 逐步缩减</td></tr>
         <tr><td>R8</td><td>MCP 工具只调用 Delivery / SDK；不得内嵌 wire 解析、身份规则或 HTTP 细节</td><td>同上，扫描 <code>mcp.py</code> 的调用面</td></tr>
         <tr><td>R9</td><td>每种 wire 适配器必须显式产生 <code>Principal</code>；禁止用裸字符串/哨兵表达身份</td><td>类型检查 + 中间件测试覆盖 supertoken / scoped / no-auth / admin / IRC</td></tr>
       </tbody>
@@ -792,10 +792,10 @@ flowchart LR
     <table>
       <thead><tr><th>阶段</th><th>内容</th><th>gate</th></tr></thead>
       <tbody>
-        <tr><td>M6a</td><td><code>Principal</code> + <code>OperationError</code> + <code>OperationContext</code> 进入 core；HTTP 中间件产出 Principal，替换 <code>auth_result</code> 三态</td><td>tester + ARCH</td></tr>
+        <tr><td>M6a</td><td><code>Principal</code> + <code>OperationError</code> + <code>OperationContext</code> 进入 core；HTTP 中间件产出 Principal，替换 <code>auth_result</code> 四态（<code>str / None / True / False</code>）；AST 扫描器以允许清单引入</td><td>tester + ARCH</td></tr>
         <tr><td>M6b</td><td><code>operations.messages</code>：publish / query / read；24 条 HTTP 路由中消息相关部分改为调用用例，golden 字节不变</td><td>tester + ARCH</td></tr>
         <tr><td>M6c</td><td>channels / acl / queue / presence 用例；剩余总线路由迁移</td><td>tester + ARCH</td></tr>
-        <tr><td>M6d</td><td><code>subscribe</code> 用例：HTTP SSE 与 IRC 共用。IRC 双向收口：入站身份来自 SASL 账号或配置的 nick→user 映射（自述 nick 不足），未映射或非法一律丢弃并记日志；出站按映射用户的读 ACL 过滤，DM 与私有频道默认不桥接。行为变更，写入 AGENT_ENTRY 与设计文档</td><td>tester3 安全审计</td></tr>
+        <tr><td>M6d</td><td><code>subscribe</code> 用例：HTTP SSE 与 IRC 共用。IRC 双向收口：入站身份来自 SASL 账号或配置的 nick→user 映射（自述 nick 不足），未映射或非法一律丢弃并记日志；出站按频道整体判定：只有频道对所有已映射成员都可读（或频道无 ACL）时才桥接，否则整频道不桥接并记日志——广播介质无法按收件人过滤；DM 与私有频道默认不桥接。行为变更，写入 AGENT_ENTRY 与设计文档</td><td>tester3 安全审计</td></tr>
         <tr><td>M6e</td><td><code>ServerAdapter</code> 协议迁入 core；web 内实现改为导入新路径</td><td>CI + ARCH</td></tr>
         <tr><td>M6f</td><td>client <code>Delivery</code>：Pull / Queue / Stream + Format；MCP 工具与 <code>mansio-agent poll</code> 改用</td><td>tester + ARCH</td></tr>
         <tr><td>M6g</td><td>转发抽象 <code>Forwarder</code>：federation 作为实现；保持客户端组件并标注 experimental</td><td>暂缓</td></tr>
@@ -803,11 +803,14 @@ flowchart LR
     </table>
   </div>
   <div class="callout">
-    <strong>身份前提（M6a 起必须成立）</strong>：每个请求恰好得到一个 Principal，参数无默认值，不用真值判断。
-    scoped token → <code>USER</code>；supertoken → <code>SUPERTOKEN</code>；管理会话 → <code>ADMIN</code>；
-    <code>--no-auth</code>，或回环地址上未配置管理员密码的 admin 服务，→ <code>NO_AUTH</code>（特权但保留来源）。
-    无效或缺失凭证在构造 Principal 之前返回 401/403，绝不回退为特权；<code>/health</code> 与 <code>/v1/auth/check</code>
-    是唯一公开路径，不调用 Operations。管理端不再绕过用例：stats / info / metrics / channels / messages / search / users
+    <strong>身份前提（M6a 起必须成立）</strong>：每个到达 Operations 的请求恰好得到一个 Principal，参数无默认值，不用真值判断。
+    scoped token → <code>USER</code>；supertoken → <code>SUPERTOKEN</code>；有效管理会话 → <code>ADMIN</code>；
+    <code>/v1</code> 的 <code>--no-auth</code> 仅在 <code>allow_unauthenticated</code> 时产生 <code>NO_AUTH</code>（特权但保留来源），
+    带鉴权的服务在缺失或无效凭证时先返回 401/403，绝不回退。
+    管理端保持既有行为：回环地址且未配置管理员密码（<code>SessionAuth=None</code>）→ <code>NO_AUTH</code>，远端一律强制会话；
+    这是要测试的信任边界，不做静默收紧。
+    <code>/health</code> 与 <code>/v1/auth/check</code> 是唯一公开路径，不构造 Principal、不调用 Operations。
+    管理端不再绕过用例：stats / info / metrics / channels / messages / search / users
     都是 <code>ADMIN</code>（或 <code>NO_AUTH</code>）用例。
   </div>
   <div class="callout">
