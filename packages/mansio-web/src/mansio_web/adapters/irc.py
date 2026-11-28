@@ -20,15 +20,23 @@ Visibility:
     ``streams.bridgeable`` decides at subscribe time and is re-checked every
     five seconds on a daemon thread, so a channel that turns private stops
     being forwarded shortly after. One message can still slip through if a
-    publish races a failing check.
+    publish races a failing check. A channel skipped at connect is retried
+    only on reconnect, not by the revalidation loop.
+
+    Prefix checks are case-sensitive because channel names are lowercase by
+    contract; a mixed-case ``DM:`` name is an ordinary public channel to the
+    bus, so the bridge treats it the same way.
 
 Identity:
     ``users`` maps an IRC nick to a mansio user id. A mapped nick publishes
     through the same rules as an API caller: the message sender is the
     mapped id, and the ACL, registered-prefix, and DM checks apply.
-    An unmapped nick publishes as itself only when the adapter runs with no
-    token store (the explicit no-auth mode); with a token store the message
-    is logged and dropped.
+    An unmapped nick publishes as itself only when the adapter has no token
+    store and was built with ``allow_unauthenticated=True``; with a token
+    store the message is logged and dropped.
+
+    Nicks are folded with RFC1459 casemapping for the map keys and every
+    lookup, whatever CASEMAPPING the server announces.
 
     The map is authorization, not authentication: this adapter does not log
     in to the IRC server (no SASL), so the operator's server must guarantee
@@ -261,21 +269,22 @@ class IrcAdapter:
         channel_map: Optional explicit mapping of mansio channel name
             to IRC channel name (e.g. ``{"tasks": "#project-tasks"}``).
             Overrides auto-mapping for listed channels.
-        users: Mapping of IRC nick to mansio user id.
+        users: Mapping of IRC nick to mansio user id. Keys are folded with
+            RFC1459 casemapping, whichever CASEMAPPING the server announces.
         token_store: Token store used when publishing an unmapped nick.
-            Without one, every nick may publish as itself (no-auth mode).
-        allow_unauthenticated: Whether an unmapped nick may publish when
-            no token store is configured. Defaults to True in that mode and
-            has no effect once a token store is present.
+        allow_unauthenticated: Let an unmapped nick publish as itself when
+            there is no token store. Default False; combining it with a
+            token store raises ``ValueError``.
         password: Optional IRC server password.
         use_ssl: Use SSL/TLS for the IRC connection. Default False.
 
     Raises:
         ValueError: If a mapped user id is empty or invalid (the message
             names the IRC nick), if two nicks casemap to the same name, if a
-            user id is mapped twice, if a nick is the bot's own, or if a
+            user id is mapped twice, if a nick is the bot's own, if a
             configured channel name is invalid, private-prefixed, or
-            ``_system:``.
+            ``_system:``, or if ``allow_unauthenticated`` is combined with a
+            token store.
 
     Example:
         >>> adapter = IrcAdapter(
@@ -296,17 +305,22 @@ class IrcAdapter:
         channel_map: dict[str, str] | None = None,
         users: dict[str, str] | None = None,
         token_store: TokenStore | None = None,
-        allow_unauthenticated: bool | None = None,
+        allow_unauthenticated: bool = False,
         password: str | None = None,
         use_ssl: bool = False,
     ) -> None:
+        if allow_unauthenticated and token_store is not None:
+            raise ValueError(
+                "allow_unauthenticated cannot be combined with a token_store — "
+                "drop the token store or the flag"
+            )
         self._irc_host = irc_host
         self._irc_port = irc_port
         self._nickname = nickname
         self._password = password
         self._use_ssl = use_ssl
         self._token_store = token_store
-        self._allow_unauthenticated = token_store is None and allow_unauthenticated is not False
+        self._allow_unauthenticated = allow_unauthenticated
         self._bus: Bus | None = None
         self._operations: OperationContext | None = None
         self._bot: _IrcBridgeBot | None = None
@@ -566,6 +580,11 @@ class IrcAdapter:
         A read error is not a revocation signal: the rule only ever narrows
         from public to private, so a transient failure keeps the channel
         until the next tick.
+
+        An unsubscribe failure is not fatal either. The handle stays tracked
+        and the channel keeps forwarding until a later tick can drop it;
+        letting the error escape would kill the daemon thread instead, and a
+        private channel would forward for the rest of the run.
         """
         operations = self._operations
         if operations is None:
@@ -580,7 +599,14 @@ class IrcAdapter:
                 continue
             if allowed:
                 continue
-            streams.unsubscribe(operations, [sub_id])
+            try:
+                streams.unsubscribe(operations, [sub_id])
+            except Exception:
+                logger.exception(
+                    "IRC bridge could not unsubscribe '%s'; keeping it for the next tick",
+                    channel,
+                )
+                continue
             self._sub_ids.pop(channel, None)
             logger.warning("Stopped bridging mansio channel '%s': it is no longer public", channel)
 
