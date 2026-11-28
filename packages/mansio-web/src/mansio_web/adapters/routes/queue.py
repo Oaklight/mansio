@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from mansio_core.contracts import (
     ContractError,
@@ -14,56 +14,29 @@ from mansio_core.contracts import (
     parse_queue_claim,
     parse_queue_status,
 )
-from mansio_core.principal import Principal
+from mansio_core.operations import OperationContext, OperationError
+from mansio_core.operations.queue import ack as ack_message
+from mansio_core.operations.queue import claim as claim_message
+from mansio_core.operations.queue import status as queue_status_operation
 
 from mansio_web._vendor.httpserver import App
 
-from ._common import _bad_request, _error, _json_body
+from ._common import _bad_request, _error, _json_body, _operation_error
 
 if TYPE_CHECKING:
-    from mansio_core.authz import ChannelAuthorizer
-
     from mansio_web._vendor.httpserver import Request
 
     from . import RouteContext
 
 
-async def _handle_queue_status(request: Any, bus: Any, authz: ChannelAuthorizer) -> dict | tuple:
-    """Handle /v1/queue/status requests."""
-    try:
-        status = parse_queue_status(request.query_params)
-    except ContractError as err:
-        return _bad_request(err)
-    message_id = status.message_id
-
-    user_id = request.state.principal.user_id
-    if user_id is not None:
-        message = await asyncio.to_thread(bus.get_message, message_id)
-        if message is not None and not authz.can_read(user_id, message.channel):
-            # Same body as a message without queue state, so the answer does
-            # not confirm that a private message exists.
-            return _error("Not Found", "No queue status for this message", 404)
-
-    result = await asyncio.to_thread(bus.queue_status, message_id)
-    if result is None:
-        return _error("Not Found", "No queue status for this message", 404)
-    return QueueStatusResult(found=True, status=result).to_dict()
-
-
-def _resolve_claimed_by(principal: Principal, claimed_by: str | None) -> tuple[str, tuple | None]:
-    """Resolve claimed_by from the authenticated identity or the request body."""
-    user_id = principal.user_id
-    if user_id is not None:
-        return user_id, None
-    if not claimed_by:
-        return "", (_error("Bad Request", "Missing 'claimed_by'", 400))
-    return claimed_by, None
-
-
 def register(app: App, ctx: RouteContext) -> None:
     """Register queue routes."""
-    bus = ctx.bus
-    authz = ctx.authz
+    operations = OperationContext(
+        bus=ctx.bus,
+        authz=ctx.authz,
+        token_store=ctx.token_store,
+        allow_unauthenticated=ctx.allow_unauthenticated,
+    )
 
     # ── Shared handlers ───────────────────────────────────────
 
@@ -72,20 +45,14 @@ def register(app: App, ctx: RouteContext) -> None:
             claim = parse_queue_claim(_json_body(request, "Invalid JSON"))
         except ContractError as err:
             return _bad_request(err)
-        principal = request.state.principal
-        claimed_by, err = _resolve_claimed_by(principal, claim.claimed_by)
-        if err:
-            return err
 
-        user_id = principal.user_id
-        if user_id is not None:
-            denial = await asyncio.to_thread(authz.claim_denial, user_id, claim.channel)
-            if denial:
-                return _error("Forbidden", denial, 403)
+        try:
+            result = await asyncio.to_thread(
+                claim_message, operations, request.state.principal, claim
+            )
+        except OperationError as err:
+            return _operation_error(err)
 
-        result = await asyncio.to_thread(
-            bus.queue_claim, claim.channel, claimed_by, lease_seconds=claim.lease_seconds
-        )
         if result is None:
             return QueueClaimResult(claimed=False).to_dict()
         return QueueClaimResult(claimed=True, result=result).to_dict()
@@ -95,23 +62,32 @@ def register(app: App, ctx: RouteContext) -> None:
             ack = parse_queue_ack(_json_body(request, "Invalid JSON"))
         except ContractError as err:
             return _bad_request(err)
-        principal = request.state.principal
-        claimed_by, err = _resolve_claimed_by(principal, ack.claimed_by)
-        if err:
-            return err
 
-        user_id = principal.user_id
-        if user_id is not None:
-            message = await asyncio.to_thread(bus.get_message, ack.message_id)
-            if message is not None and not authz.can_read(user_id, message.channel):
-                # Same answer as "not claimed by you": an unauthorized
-                # caller learns nothing about the message's existence.
-                return QueueAckResult(acked=False).to_dict()
+        try:
+            result = await asyncio.to_thread(ack_message, operations, request.state.principal, ack)
+        except OperationError as err:
+            return _operation_error(err)
 
-        result = await asyncio.to_thread(bus.queue_ack, ack.message_id, claimed_by)
         if result is None:
             return QueueAckResult(acked=False).to_dict()
         return QueueAckResult(acked=True, result=result).to_dict()
+
+    async def _handle_queue_status(request: Request) -> dict | tuple:
+        try:
+            status = parse_queue_status(request.query_params)
+        except ContractError as err:
+            return _bad_request(err)
+
+        try:
+            result = await asyncio.to_thread(
+                queue_status_operation, operations, request.state.principal, status
+            )
+        except OperationError as err:
+            return _operation_error(err)
+
+        if result is None:
+            return _error("Not Found", "No queue status for this message", 404)
+        return QueueStatusResult(found=True, status=result).to_dict()
 
     # ── Canonical paths (/v1/queue/*) ─────────────────────────
 
@@ -125,4 +101,4 @@ def register(app: App, ctx: RouteContext) -> None:
 
     @app.get("/v1/queue/status")
     async def queue_status(request: Request) -> dict | tuple:
-        return await _handle_queue_status(request, bus, authz)
+        return await _handle_queue_status(request)
