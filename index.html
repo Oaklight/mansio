@@ -94,12 +94,12 @@
   <div class="eyebrow">MANSIO · Architecture</div>
   <h1>现状与目标并列：问题在哪里</h1>
   <p class="lede">
-    左列是 <code>master @ e811763</code> 的实际结构（M1–M4g 与 Agent 入口 v1 已合并），右列是 core/web/transport 重构与前端重设计的目标结构。
+    左列是 <code>master @ 9bc618e</code> 的实际结构（M1–M4g 与 Agent 入口 v1 已合并），右列是 core/web/transport 重构与前端重设计的目标结构。
     每个节点标出文件规模与职责，红色表示层次倒置或重复，橙色表示 god module，绿色表示目标态新增的接口与包。
     合并任一重构 PR 后，本页按迁移阶段更新“现状”一列。
   </p>
   <div class="meta">
-    <span>现状快照：<code>master @ e811763</code>（M1–M4g 与 Agent 入口 v1 已合并）</span>
+    <span>现状快照：<code>master @ 9bc618e</code>（M1–M4g 与 Agent 入口 v1 已合并）</span>
     <span>目标：<code>core / web / client</code> 三包 + 契约层</span>
     <span>分支：<code>docs_arch</code></span>
     <button id="themeBtn" type="button">深色主题</button>
@@ -127,7 +127,7 @@
 <section id="problems">
   <h2><span class="num">00</span>问题总览</h2>
   <p class="sub">
-    自研 Python 19.0k 行（core 8.5k + web 4.5k + client 6.0k，含 agent 入口 1403 行）、admin UI 4.2k 行、测试 25.1k 行、1570 个测试函数；模块级 import 环为 0（已验证）。
+    自研 Python 19.0k 行（core 8.5k + web 4.5k + client 6.0k，含 agent 入口 1403 行）、admin UI 4.2k 行、测试 25.6k 行、1585 个测试函数；模块级 import 环为 0（已验证）。
     复杂度不在“层数”，而在下列具体位置。
   </p>
   <div class="panel">
@@ -621,7 +621,7 @@ flowchart LR
         <tr><td>M4f ✅</td><td>术语改名：<code>mansio_web/frontends/</code> → <code>adapters/</code>，<code>Frontend</code> → <code>ServerAdapter</code>，<code>HttpFrontend</code>/<code>IrcFrontend</code> → <code>HttpAdapter</code>/<code>IrcAdapter</code>，<code>add_frontend</code> → <code>add_adapter</code>；无别名，旧路径 <code>ModuleNotFoundError</code>。合并于 <code>c555a87</code></td><td>yes</td><td>00/01/02/03/06 的现状列（已更新）</td></tr>
         <tr><td>M4e ✅</td><td>HTTP 前端路由拆分：24 条路由移入 <code>adapters/routes/</code> 的 10 个 <code>register(app, ctx)</code> 模块（+ <code>_common</code>，共 1476 行），<code>http.py</code> 360 行只作组装根；冻结 <code>RouteContext</code>，路由表 24 条顺序不变。合并于 <code>b5fe4df</code></td><td>yes</td><td>00/01/02/03/06 的现状列（已更新）</td></tr>
         <tr><td>M4d ✅</td><td>删除兼容层：<code>mansio</code> 别名包（260 行）、<code>mansio client</code> 子命令与桩、<code>mansio_client/types.py</code> 再导出；打包限定 <code>include = ["mansio_web*"]</code>，边界脚本去掉豁免；文档与 README 同步。合并于 <code>5cf1ed7</code></td><td>yes</td><td>00/01/02/03/04/07 的现状列（已更新）</td></tr>
-        <tr><td>M5 ✅</td><td>Agent 入口 v1：契约 A1–A7（<code>docs/AGENT_ENTRY.md</code>，14 个稳定 MCP 工具）、两身份验收测试、<code>mansio-agent</code> 安装器（1403 行）与 <code>mansio_wait</code>；<code>python -m mansio_client.mcp</code> 可运行；doctor / poll 复用已装配置并解析 token，<code>.bak</code> 只保留首次备份。合并于 <code>0345f02</code>、<code>3fce6b7</code>、<code>49ae56b</code>、<code>ffb45b8</code>、<code>af8e52a</code>、<code>e811763</code></td><td>yes</td><td>00/01/02/06/08 的现状列（已更新）</td></tr>
+        <tr><td>M5 ✅</td><td>Agent 入口 v1：契约 A1–A7（<code>docs/AGENT_ENTRY.md</code>，14 个稳定 MCP 工具）、两身份验收测试、<code>mansio-agent</code> 安装器（1403 行）与 <code>mansio_wait</code>；<code>python -m mansio_client.mcp</code> 可运行；doctor / poll 复用已装配置并解析 token，<code>.bak</code> 只保留首次备份。合并于 <code>0345f02</code>、<code>3fce6b7</code>、<code>49ae56b</code>、<code>ffb45b8</code>、<code>af8e52a</code>、<code>e811763</code>、<code>9bc618e</code></td><td>yes</td><td>00/01/02/06/08 的现状列（已更新）</td></tr>
       </tbody>
     </table>
   </div>
@@ -637,7 +637,8 @@ flowchart LR
     不同 agentic CLI 的原生通信各自封闭，不能互相看见。MANSIO 的共同入口是 MCP stdio 子进程 <code>mansio-mcp</code>：
     每个 agent 实例用唯一身份接入中继，跨运行时只经服务器交换消息。
     契约 A1–A7 v1 在 <code>docs/AGENT_ENTRY.md</code>；安装器 <code>mansio-agent</code> 1403 行；
-    验收是两身份互换测试 <code>test_agent_entry_conformance.py</code>（259 行）。
+    验收是两身份互换测试 <code>test_agent_entry_conformance.py</code>（259 行）与
+    <code>mansio_wait</code> 行为测试 <code>test_agent_entry_wait.py</code>（305 行：阻塞、超时边界、错误码、游标共享）。
   </p>
   <div class="panel">
     <div class="scroll">
@@ -713,7 +714,7 @@ flowchart LR
 
 <footer>
   <span>MANSIO · 现状与目标并列（docs_arch）</span>
-  <span>数据来源：master e811763 源码、README、docs/DESIGN_EN.md、docs/AGENT_ENTRY.md</span>
+  <span>数据来源：master 9bc618e 源码、README、docs/DESIGN_EN.md、docs/AGENT_ENTRY.md</span>
 </footer>
 
 </div>
