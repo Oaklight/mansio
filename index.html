@@ -94,12 +94,12 @@
   <div class="eyebrow">MANSIO · Architecture</div>
   <h1>现状与目标并列：问题在哪里</h1>
   <p class="lede">
-    左列是 <code>master @ 2233c3c</code> 的实际结构（M1–M4g 与 Agent 入口 v1 已合并）；右列是已落地的决策结构；09 节是据此重新划定的目标架构 v2（入口 / 中间件 / 出口，尚未实现）。
+    左列是 <code>master @ 364a251</code> 的实际结构（M1–M4g 与 Agent 入口 v1 已合并）；右列是已落地的决策结构；09 节是据此重新划定的目标架构 v2（入口 / 中间件 / 出口，尚未实现）。
     每个节点标出文件规模与职责，红色表示层次倒置或重复，橙色表示 god module，绿色表示目标态新增的接口与包。
     合并任一重构 PR 后，本页按迁移阶段更新“现状”一列。
   </p>
   <div class="meta">
-    <span>现状快照：<code>master @ 2233c3c</code>（M1–M4g 与 Agent 入口 v1 已合并）</span>
+    <span>现状快照：<code>master @ 364a251</code>（M1–M4g 与 Agent 入口 v1 已合并）</span>
     <span>目标：<code>core / web / client</code> 三包 + 契约层</span>
     <span>分支：<code>docs_arch</code></span>
     <button id="themeBtn" type="button">深色主题</button>
@@ -128,7 +128,7 @@
 <section id="problems">
   <h2><span class="num">00</span>问题总览</h2>
   <p class="sub">
-    自研 Python 19.0k 行（core 8.5k + web 4.5k + client 6.0k，含 agent 入口 1403 行）、admin UI 4.2k 行、测试 25.7k 行、1586 个测试函数；模块级 import 环为 0（已验证）。
+    自研 Python 19.0k 行（core 8.5k + web 4.5k + client 6.0k，含 agent 入口 1403 行）、admin UI 4.2k 行、测试 26.0k 行、1590 个测试函数；模块级 import 环为 0（已验证）。
     复杂度不在“层数”，而在下列具体位置。
   </p>
   <div class="panel">
@@ -822,7 +822,7 @@ flowchart LR
 
 <footer>
   <span>MANSIO · 现状与目标并列（docs_arch）</span>
-  <span>数据来源：master 2233c3c 源码、README、docs/DESIGN_EN.md、docs/AGENT_ENTRY.md</span>
+  <span>数据来源：master 364a251 源码、README、docs/DESIGN_EN.md、docs/AGENT_ENTRY.md</span>
 </footer>
 
 </div>
