@@ -94,12 +94,12 @@
   <div class="eyebrow">MANSIO · Architecture</div>
   <h1>现状与目标并列：问题在哪里</h1>
   <p class="lede">
-    左列是 <code>master @ 66d687d</code> 的实际结构（M1–M4g 与 Agent 入口 v1 已合并）；右列是已落地的决策结构；09 节是据此重新划定的目标架构 v2（入口 / 中间件 / 出口；M6a / M6e 在 <code>0cd878f</code>，M6b 在 <code>ffe46db</code>，M6c 在 <code>6e7f518</code> + <code>66d687d</code>，M6f 在 <code>a57cf00</code>；M6d 与 admin 用例尚未实现）。
+    左列是 <code>master @ a3e6348</code> 的实际结构（M1–M4g 与 Agent 入口 v1 已合并）；右列是已落地的决策结构；09 节是据此重新划定的目标架构 v2（入口 / 中间件 / 出口；M6a / M6e 在 <code>0cd878f</code>，M6b 在 <code>ffe46db</code>，M6c 在 <code>6e7f518</code> + <code>66d687d</code>，M6d-1 在 <code>3b079bc</code> + <code>a3e6348</code>，M6f 在 <code>a57cf00</code>；M6d-2 与 admin 用例尚未实现）。
     每个节点标出文件规模与职责，红色表示层次倒置或重复，橙色表示 god module，绿色表示目标态新增的接口与包。
     合并任一重构 PR 后，本页按迁移阶段更新“现状”一列。
   </p>
   <div class="meta">
-    <span>现状快照：<code>master @ 66d687d</code>（M1–M4g 与 Agent 入口 v1 已合并）</span>
+    <span>现状快照：<code>master @ a3e6348</code>（M1–M4g 与 Agent 入口 v1 已合并）</span>
     <span>目标：<code>core / web / client</code> 三包 + 契约层</span>
     <span>分支：<code>docs_arch</code></span>
     <button id="themeBtn" type="button">深色主题</button>
@@ -162,7 +162,7 @@
 <pre class="mermaid">
 flowchart TB
   subgraph PKG["当前：3 个发布包（M1–M4e 已合并）"]
-    CORE["mansio-core · 自研 9.3k 行 · 运行时依赖 0&lt;br/&gt;contracts 1535（bus + admin DTO · parse_* · SSE）&lt;br/&gt;types 193 · transport 190 · principal 96 · server 72&lt;br/&gt;operations 662（messages 217 · validation 85 · channels 97 · acl 92 · queue 66 · presence 40 · 契约 65）&lt;br/&gt;bus 813 · authz 386 · protocols 533&lt;br/&gt;backends 4.2k · token_store 415 · metrics 122"]
+    CORE["mansio-core · 自研 9.3k 行 · 运行时依赖 0&lt;br/&gt;contracts 1535（bus + admin DTO · parse_* · SSE）&lt;br/&gt;types 193 · transport 190 · principal 96 · server 72&lt;br/&gt;operations 770（messages 217 · validation 85 · channels 97 · acl 92 · queue 66 · presence 40 · streams 108 · 契约 65）&lt;br/&gt;bus 813 · authz 386 · protocols 533&lt;br/&gt;backends 4.2k · token_store 415 · metrics 122"]
     WEB["mansio 包 = 仅 mansio_web（M4d 删除别名）&lt;br/&gt;自研 4.2k 行 + admin UI 4.2k&lt;br/&gt;adapters 1943（http 389 + routes 1195）&lt;br/&gt;admin 1.4k · cli 677"]
     CLI["mansio-client · 自研 6.2k 行&lt;br/&gt;client 501 + mixins 688 · mcp 1171&lt;br/&gt;agent 1403 · delivery 199 · transport 907&lt;br/&gt;cli 392 · federation 529 · injectors 327"]
   end
@@ -795,7 +795,7 @@ flowchart LR
     <table>
       <thead><tr><th>规则</th><th>内容</th><th>检查</th></tr></thead>
       <tbody>
-        <tr><td>R7</td><td>所有适配器（HTTP 路由、SSE、IRC、admin 路由与 view）只能经 Operations 访问消息、频道、ACL、队列与在线状态；异常仅限生命周期方法（attach / serve_forever / shutdown）与认证中间件的 token 校验</td><td>AST 扫描测试：<code>adapters/</code> 与 <code>admin/</code> 中出现任何 <code>bus.&lt;attr&gt;</code>（含 <code>bus = self._bus</code> 别名）都失败，白名单只含生命周期调用与 <code>_bus</code> 赋值；扫描器随阶段缩减：M6a 11 文件 52 处；M6b 后 <code>publish.py</code> 清零；M6c 后仅剩 <code>irc.py</code> / <code>sse.py</code> / <code>admin</code></td></tr>
+        <tr><td>R7</td><td>所有适配器（HTTP 路由、SSE、IRC、admin 路由与 view）只能经 Operations 访问消息、频道、ACL、队列与在线状态；异常仅限生命周期方法（attach / serve_forever / shutdown）与认证中间件的 token 校验</td><td>AST 扫描测试：<code>adapters/</code> 与 <code>admin/</code> 中出现任何 <code>bus.&lt;attr&gt;</code>（含 <code>bus = self._bus</code> 别名）都失败，白名单只含生命周期调用与 <code>_bus</code> 赋值；扫描器随阶段缩减：M6a 11 文件 52 处；M6b 后 <code>publish.py</code> 清零；M6d-1 后 <code>sse.py</code> 清零，仅剩 <code>irc.py</code> / <code>admin</code>（admin 待 M6c-admin，IRC 待 M6d-2）</td></tr>
         <tr><td>R8</td><td>MCP 工具只调用 Delivery / SDK；不得内嵌 wire 解析、身份规则或 HTTP 细节</td><td>同上，扫描 <code>mcp.py</code> 的调用面</td></tr>
         <tr><td>R9</td><td>每种 wire 适配器必须显式产生 <code>Principal</code>；禁止用裸字符串/哨兵表达身份</td><td>类型检查 + 中间件测试覆盖 supertoken / scoped / no-auth / admin / IRC</td></tr>
       </tbody>
@@ -811,7 +811,7 @@ flowchart LR
         <tr><td>M6c-1 ✅</td><td>channels + ACL 用例；频道名校验迁入 core；pre-parse 门被 tester3 拦下后改回 <code>to_thread</code>。合并于 <code>6e7f518</code></td><td>tester3 + ARCH</td></tr>
         <tr><td>M6c-2 ✅</td><td>queue + presence 用例；<code>http.py::_write_presence</code> 改走 <code>presence.touch</code>。合并于 <code>66d687d</code></td><td>tester3 + ARCH</td></tr>
         <tr><td>M6c-admin</td><td>admin 用例：stats · system · users · tokens · prefixes · admin messages · search；<code>AdminView</code> 改走 <code>operations.admin</code></td><td>tester + ARCH</td></tr>
-        <tr><td>M6d-1</td><td><code>operations.streams</code>：validate · allows · subscribe · unsubscribe · replay；HTTP SSE 改用它，格式、丢弃计数与 warning 仍留在适配器，行为不变；R7 去掉 <code>sse.py</code></td><td>tester + ARCH</td></tr>
+        <tr><td>M6d-1 ✅</td><td><code>operations.streams</code>：validate · allows · subscribe · unsubscribe · replay；HTTP SSE 改用它，格式、丢弃计数与 warning 仍留在适配器；订阅校验移出事件循环（二次 validate 被拦截后修正）；R7 去掉 <code>sse.py</code>。合并于 <code>3b079bc</code> + <code>a3e6348</code></td><td>tester + ARCH</td></tr>
         <tr><td>M6d-2</td><td>IRC 双向收口：入站身份来自 SASL 账号或配置的 nick→user 映射（自述 nick 不足），未映射或非法一律丢弃并记日志；出站按频道整体判定：只有频道对所有已映射成员都可读（或频道无 ACL）时才桥接，否则整频道不桥接并记日志——广播介质无法按收件人过滤；DM 与私有频道默认不桥接。行为变更，写入 AGENT_ENTRY 与设计文档</td><td>tester3 安全审计</td></tr>
         <tr><td>M6e ✅</td><td><code>ServerAdapter</code> 协议迁入 core；web 内实现改为导入新路径。合并于 <code>0cd878f</code></td><td>CI + ARCH</td></tr>
         <tr><td>M6f ✅</td><td>client <code>AgentDelivery</code>：pull / queue / stream；MCP 工具与 <code>mansio-agent poll</code> 改用。合并于 <code>a57cf00</code></td><td>CI + ARCH</td></tr>
@@ -829,7 +829,7 @@ flowchart LR
         <tr><td><code>operations.acl</code> ✅</td><td>get · set · remove</td><td>USER（manage 权限）· 特权</td><td>特权写入的 <code>granted_by=None</code>，USER 写入记 user id</td></tr>
         <tr><td><code>operations.queue</code> ✅</td><td>claim · ack · status</td><td>USER（claimed_by 绑定）· 特权</td><td>USER 的 claim/ack 不接受请求体里的他人身份</td></tr>
         <tr><td><code>operations.presence</code> ✅</td><td>touch · list · get</td><td>USER（touch 仅本人）· 特权</td><td><code>touch</code> 取代适配器里的 <code>bus.heartbeat</code></td></tr>
-        <tr><td><code>operations.streams</code></td><td>subscribe_all · subscribe_channel</td><td>USER（读 ACL）· 特权 · SERVICE（IRC 出站）</td><td>返回 Feed / StreamEvent；格式由适配器决定</td></tr>
+        <tr><td><code>operations.streams</code> ✅</td><td>validate · allows · subscribe · unsubscribe · replay（M6d-2 增加 bridgeable · subscribe_bridged）</td><td>USER（读 ACL）· 特权</td><td>消息格式、丢弃计数与 warning 留在适配器；bridgeable 做频道级判定，桥接订阅不经过 Principal</td></tr>
         <tr><td><code>operations.admin</code></td><td>stats · throughput · system · users · tokens · prefixes · admin-messages · channels-detail · subscriptions</td><td>ADMIN · NO_AUTH</td><td>只接受管理面 principal；USER / SUPERTOKEN 不进入</td></tr>
         <tr><td>公开路径</td><td><code>/health</code> · <code>/v1/auth/check</code></td><td>无</td><td>不构造 Principal，不调用 Operations</td></tr>
       </tbody>
@@ -859,7 +859,7 @@ flowchart LR
 
 <footer>
   <span>MANSIO · 现状与目标并列（docs_arch）</span>
-  <span>数据来源：master 66d687d 源码、README、docs/DESIGN_EN.md、docs/AGENT_ENTRY.md</span>
+  <span>数据来源：master a3e6348 源码、README、docs/DESIGN_EN.md、docs/AGENT_ENTRY.md</span>
 </footer>
 
 </div>
