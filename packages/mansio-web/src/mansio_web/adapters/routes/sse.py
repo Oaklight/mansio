@@ -56,7 +56,7 @@ class _SSESession:
     on_activity: Callable[[], None] | None = None
 
 
-def _setup_sse_subscriptions(
+async def _setup_sse_subscriptions(
     operations: OperationContext,
     ch_list: list[str],
     principal: Principal,
@@ -71,6 +71,9 @@ def _setup_sse_subscriptions(
     Returns a ``[dropped_count]`` list (mutable single-element) and
     a lock protecting it, so the async generator can report and reset
     the counter.
+
+    The subscription itself runs in a worker thread: the read check can
+    reach the channel store.
     """
     loop = asyncio.get_running_loop()
     q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=256)
@@ -93,7 +96,8 @@ def _setup_sse_subscriptions(
         data = stream_event_to_json(StreamEvent(channel=target_ch, message=message))
         loop.call_soon_threadsafe(_safe_enqueue, data)
 
-    sub_ids = streams.subscribe(
+    sub_ids = await asyncio.to_thread(
+        streams.subscribe,
         operations,
         principal,
         StreamRequest(channels=list(ch_list), exclude_own=exclude_own),
@@ -266,18 +270,11 @@ def register(app: App, ctx: RouteContext) -> None:
         principal = request.state.principal
         user_id = principal.user_id
         try:
-            await asyncio.to_thread(
-                streams.validate,
-                operations,
-                principal,
-                StreamRequest(channels=ch_list, exclude_own=exclude_own),
+            q, sub_ids, drop_lock, drop_counter = await _setup_sse_subscriptions(
+                operations, ch_list, principal, exclude_own
             )
         except OperationError as err:
             return _operation_error(err)
-
-        q, sub_ids, drop_lock, drop_counter = _setup_sse_subscriptions(
-            operations, ch_list, principal, exclude_own
-        )
 
         on_activity = partial(ctx.note_activity, user_id) if user_id is not None else None
 

@@ -70,7 +70,7 @@ class TestDropCounter(unittest.TestCase):
         loop = asyncio.new_event_loop()
 
         async def _run():
-            q, sub_ids, drop_lock, drop_counter = _setup_sse_subscriptions(
+            q, sub_ids, drop_lock, drop_counter = await _setup_sse_subscriptions(
                 _operations(bus), ["test-ch"], Principal.supertoken()
             )
             # Fill the queue to capacity (256)
