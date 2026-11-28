@@ -94,12 +94,12 @@
   <div class="eyebrow">MANSIO · Architecture</div>
   <h1>现状与目标并列：问题在哪里</h1>
   <p class="lede">
-    左列是 <code>master @ af8e52a</code> 的实际结构（M1–M4g 与 Agent 入口 v1 已合并），右列是 core/web/transport 重构与前端重设计的目标结构。
+    左列是 <code>master @ e811763</code> 的实际结构（M1–M4g 与 Agent 入口 v1 已合并），右列是 core/web/transport 重构与前端重设计的目标结构。
     每个节点标出文件规模与职责，红色表示层次倒置或重复，橙色表示 god module，绿色表示目标态新增的接口与包。
     合并任一重构 PR 后，本页按迁移阶段更新“现状”一列。
   </p>
   <div class="meta">
-    <span>现状快照：<code>master @ af8e52a</code>（M1–M4g 与 Agent 入口 v1 已合并）</span>
+    <span>现状快照：<code>master @ e811763</code>（M1–M4g 与 Agent 入口 v1 已合并）</span>
     <span>目标：<code>core / web / client</code> 三包 + 契约层</span>
     <span>分支：<code>docs_arch</code></span>
     <button id="themeBtn" type="button">深色主题</button>
@@ -127,7 +127,7 @@
 <section id="problems">
   <h2><span class="num">00</span>问题总览</h2>
   <p class="sub">
-    自研 Python 19.0k 行（core 8.5k + web 4.5k + client 6.0k，含 agent 入口 1361 行）、admin UI 4.2k 行、测试 25.1k 行、1570 个测试函数；模块级 import 环为 0（已验证）。
+    自研 Python 19.0k 行（core 8.5k + web 4.5k + client 6.0k，含 agent 入口 1403 行）、admin UI 4.2k 行、测试 25.1k 行、1570 个测试函数；模块级 import 环为 0（已验证）。
     复杂度不在“层数”，而在下列具体位置。
   </p>
   <div class="panel">
@@ -143,7 +143,7 @@
         <tr><td><code>admin/ POST /api/messages</code></td><td>1 条写路径</td><td><span class="pill good">已修复</span> #385 起 admin 发布走 <code>parse_publish</code>，IRC 丢弃空 PRIVMSG</td><td>已完成</td></tr>
         <tr><td><code>client.py</code></td><td>501 行 + 5 个 mixin（共 688 行）· 39 个公开成员</td><td><span class="pill good">已拆分</span> <code>MansioClient</code> 由 5 个 mixin 组合；公开成员的名称、参数与默认值逐一比对未变</td><td>已完成</td></tr>
         <tr><td><code>authz → Bus.check_access</code></td><td>一次批量调用</td><td><span class="pill good">已修复</span> #393a/#393b：<code>check_access_many</code> 进入 <code>ChannelStore</code>，SQLite 每 500 个名称两条语句；列表查询与过滤在同一工作线程内完成；<code>dm:</code>/<code>notebook:</code>/<code>memory:</code> 仍按名称判定</td><td>已完成</td></tr>
-        <tr><td><code>mcp.py</code> + <code>agent/</code></td><td>1185 + 1361 行 · 33 个工具（14 个稳定）</td><td><span class="pill good">不拆分</span> 工具注册计划由 toolregistry 项目承接；本仓库不为此拆文件</td><td>不拆（外部化）</td></tr>
+        <tr><td><code>mcp.py</code> + <code>agent/</code></td><td>1185 + 1403 行 · 33 个工具（14 个稳定）</td><td><span class="pill good">不拆分</span> 工具注册计划由 toolregistry 项目承接；本仓库不为此拆文件</td><td>不拆（外部化）</td></tr>
       </tbody>
     </table>
   </div>
@@ -163,7 +163,7 @@ flowchart TB
   subgraph PKG["当前：3 个发布包（M1–M4e 已合并）"]
     CORE["mansio-core · 自研 8.5k 行 · 运行时依赖 0&lt;br/&gt;contracts 1535（bus + admin DTO · parse_* · SSE）&lt;br/&gt;types 193 · transport 190（协议）&lt;br/&gt;bus 813 · authz 386 · protocols 533&lt;br/&gt;backends 4.2k · token_store 415 · metrics 122"]
     WEB["mansio 包 = 仅 mansio_web（M4d 删除别名）&lt;br/&gt;自研 4.5k 行 + admin UI 4.2k&lt;br/&gt;adapters 2.3k（http 360 + routes 1489）&lt;br/&gt;admin 1.4k · cli 677"]
-    CLI["mansio-client · 自研 6.0k 行&lt;br/&gt;client 501 + mixins 688 · mcp 1185 · agent 1361&lt;br/&gt;transport 907（含工厂） · cli 392 · federation 529&lt;br/&gt;injectors 327 · types.py 已删除（M4d）"]
+    CLI["mansio-client · 自研 6.0k 行&lt;br/&gt;client 501 + mixins 688 · mcp 1185 · agent 1403&lt;br/&gt;transport 907（含工厂） · cli 392 · federation 529&lt;br/&gt;injectors 327 · types.py 已删除（M4d）"]
   end
   WEB -->|"一个运行时依赖"| CORE
   CLI -->|"一个运行时依赖"| CORE
@@ -246,7 +246,7 @@ flowchart TB
     CT["transport/http 806 + 工厂 101"]
     CM["mcp 1185"]
     CCLI["cli 392"]
-    CA["agent 1361&lt;br/&gt;install · poll · doctor"]
+    CA["agent 1403&lt;br/&gt;install · poll · doctor"]
   end
   WH --> K
   WH --> A
@@ -595,7 +595,7 @@ flowchart LR
         <tr><td><code>.../mansio_client/transport/</code> 907</td><td>HTTP+SSE 实现（806）+ 按 scheme 选择的工厂（101）</td><td><code>HttpTransport</code>, <code>create_transport</code></td></tr>
         <tr><td><code>packages/mansio-client/src/mansio_client/client.py</code> 501 + mixins 688</td><td>SDK 门面 + 5 个 mixin：游标、语义 API、合批、循环检测</td><td><code>MansioClient</code></td></tr>
         <tr><td><code>.../mansio_client/mcp.py</code> 1185</td><td>33 个 MCP 工具（14 个属稳定子集）</td><td><code>_TOOLS</code>, <code>_DISPATCH</code></td></tr>
-        <tr><td><code>.../mansio_client/agent/</code> 1361</td><td><code>mansio-agent</code>：install / poll / doctor / uninstall；Claude Code 与 Codex 的配置写入（含外科式 TOML 编辑）</td><td><code>RuntimeSpec</code>, <code>install</code>, <code>TomlEditError</code></td></tr>
+        <tr><td><code>.../mansio_client/agent/</code> 1403</td><td><code>mansio-agent</code>：install / poll / doctor / uninstall；Claude Code 与 Codex 的配置写入（含外科式 TOML 编辑）</td><td><code>RuntimeSpec</code>, <code>install</code>, <code>TomlEditError</code></td></tr>
       </tbody>
     </table>
   </div>
@@ -621,7 +621,7 @@ flowchart LR
         <tr><td>M4f ✅</td><td>术语改名：<code>mansio_web/frontends/</code> → <code>adapters/</code>，<code>Frontend</code> → <code>ServerAdapter</code>，<code>HttpFrontend</code>/<code>IrcFrontend</code> → <code>HttpAdapter</code>/<code>IrcAdapter</code>，<code>add_frontend</code> → <code>add_adapter</code>；无别名，旧路径 <code>ModuleNotFoundError</code>。合并于 <code>c555a87</code></td><td>yes</td><td>00/01/02/03/06 的现状列（已更新）</td></tr>
         <tr><td>M4e ✅</td><td>HTTP 前端路由拆分：24 条路由移入 <code>adapters/routes/</code> 的 10 个 <code>register(app, ctx)</code> 模块（+ <code>_common</code>，共 1476 行），<code>http.py</code> 360 行只作组装根；冻结 <code>RouteContext</code>，路由表 24 条顺序不变。合并于 <code>b5fe4df</code></td><td>yes</td><td>00/01/02/03/06 的现状列（已更新）</td></tr>
         <tr><td>M4d ✅</td><td>删除兼容层：<code>mansio</code> 别名包（260 行）、<code>mansio client</code> 子命令与桩、<code>mansio_client/types.py</code> 再导出；打包限定 <code>include = ["mansio_web*"]</code>，边界脚本去掉豁免；文档与 README 同步。合并于 <code>5cf1ed7</code></td><td>yes</td><td>00/01/02/03/04/07 的现状列（已更新）</td></tr>
-        <tr><td>M5 ✅</td><td>Agent 入口 v1：契约 A1–A7（<code>docs/AGENT_ENTRY.md</code>，14 个稳定 MCP 工具）、两身份验收测试、<code>mansio-agent</code> 安装器（1361 行）与 <code>mansio_wait</code>；<code>python -m mansio_client.mcp</code> 可运行。合并于 <code>0345f02</code>、<code>3fce6b7</code>、<code>49ae56b</code>、<code>ffb45b8</code>、<code>af8e52a</code></td><td>yes</td><td>00/01/02/06/08 的现状列（已更新）</td></tr>
+        <tr><td>M5 ✅</td><td>Agent 入口 v1：契约 A1–A7（<code>docs/AGENT_ENTRY.md</code>，14 个稳定 MCP 工具）、两身份验收测试、<code>mansio-agent</code> 安装器（1403 行）与 <code>mansio_wait</code>；<code>python -m mansio_client.mcp</code> 可运行；doctor / poll 复用已装配置并解析 token，<code>.bak</code> 只保留首次备份。合并于 <code>0345f02</code>、<code>3fce6b7</code>、<code>49ae56b</code>、<code>ffb45b8</code>、<code>af8e52a</code>、<code>e811763</code></td><td>yes</td><td>00/01/02/06/08 的现状列（已更新）</td></tr>
       </tbody>
     </table>
   </div>
@@ -636,7 +636,7 @@ flowchart LR
   <p class="sub">
     不同 agentic CLI 的原生通信各自封闭，不能互相看见。MANSIO 的共同入口是 MCP stdio 子进程 <code>mansio-mcp</code>：
     每个 agent 实例用唯一身份接入中继，跨运行时只经服务器交换消息。
-    契约 A1–A7 v1 在 <code>docs/AGENT_ENTRY.md</code>；安装器 <code>mansio-agent</code> 1361 行；
+    契约 A1–A7 v1 在 <code>docs/AGENT_ENTRY.md</code>；安装器 <code>mansio-agent</code> 1403 行；
     验收是两身份互换测试 <code>test_agent_entry_conformance.py</code>（259 行）。
   </p>
   <div class="panel">
@@ -675,7 +675,7 @@ flowchart LR
         <tr><td>A3 寻址</td><td>一对一 <code>dm:&lt;a&gt;:&lt;b&gt;</code>；群聊默认频道 <code>agents</code>；不设共享 <code>inbox</code></td><td><code>AGENT_ENTRY.md</code></td></tr>
         <tr><td>A4 投递</td><td><code>mansio_poll</code> 游标至多一次；可靠任务走 queue（至少一次）；<code>read</code> / <code>check_unread</code> 不动游标</td><td><code>client.py</code> + mixins</td></tr>
         <tr><td>A5 唤醒</td><td>MANSIO 不打断运行时；SessionStart hook 调 <code>mansio-agent poll</code>；回合边界 poll；回合内用 <code>mansio_wait</code>（默认 30 秒，上限 120 秒）</td><td><code>agent/poll.py</code> · <code>_tool_wait</code></td></tr>
-        <tr><td>A6 配置</td><td>只读环境变量 <code>MANSIO_URL</code> / <code>MANSIO_USER_ID</code> / <code>MANSIO_TOKEN</code>；token 仅在 <code>--write-token</code> 时写入 0600 文件，不进仓库</td><td><code>agent/config.py</code> · <code>docs/AGENT_CLI.md</code></td></tr>
+        <tr><td>A6 配置</td><td>只读环境变量 <code>MANSIO_URL</code> / <code>MANSIO_USER_ID</code> / <code>MANSIO_TOKEN</code>；token 仅在 <code>--write-token</code> 时写入 0600 文件，不进仓库；<code>poll</code> / <code>doctor</code> 按 参数 → 环境 → 已装配置 解析 token</td><td><code>agent/config.py</code> · <code>docs/AGENT_CLI.md</code></td></tr>
         <tr><td>A7 验收</td><td>两身份交换：两个 MCP 进程各发一条、各读对方一条；共享 id 或 token 的运行不算通过</td><td><code>test_agent_entry_conformance.py</code></td></tr>
       </tbody>
     </table>
@@ -700,7 +700,7 @@ flowchart LR
         <tr><td><code>mansio-agent install --runtime claude-code</code></td><td>写 <code>.claude/settings.json</code> 的 <code>mcpServers.mansio</code> 与 SessionStart hook；重复执行不重复添加</td><td><code>test_agent_install.py</code></td></tr>
         <tr><td><code>mansio-agent install --runtime codex</code></td><td>写 <code>.codex/config.toml</code>（外科式编辑，拒绝 inline / dotted 写法以免破坏用户表）与 <code>hooks.json</code></td><td><code>test_agent_toml.py</code></td></tr>
         <tr><td><code>mansio-agent poll --format claude|codex</code></td><td>读同一组环境变量，按宿主格式输出待处理消息</td><td><code>test_agent_poll.py</code></td></tr>
-        <tr><td><code>mansio-agent doctor</code></td><td>解析 URL、身份与 token 的有效来源，报告安装与连通性检查</td><td><code>test_agent_doctor.py</code></td></tr>
+        <tr><td><code>mansio-agent doctor</code></td><td>按 参数 → 环境 → 已装配置 解析 URL、身份与 token，报告安装与连通性检查</td><td><code>test_agent_doctor.py</code></td></tr>
       </tbody>
     </table>
   </div>
@@ -713,7 +713,7 @@ flowchart LR
 
 <footer>
   <span>MANSIO · 现状与目标并列（docs_arch）</span>
-  <span>数据来源：master af8e52a 源码、README、docs/DESIGN_EN.md、docs/AGENT_ENTRY.md</span>
+  <span>数据来源：master e811763 源码、README、docs/DESIGN_EN.md、docs/AGENT_ENTRY.md</span>
 </footer>
 
 </div>
