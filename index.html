@@ -812,7 +812,7 @@ flowchart LR
         <tr><td>M6c-2 ✅</td><td>queue + presence 用例；<code>http.py::_write_presence</code> 改走 <code>presence.touch</code>。合并于 <code>66d687d</code></td><td>tester3 + ARCH</td></tr>
         <tr><td>M6c-admin</td><td>admin 用例：stats · system · users · tokens · prefixes · admin messages · search；<code>AdminView</code> 改走 <code>operations.admin</code></td><td>tester + ARCH</td></tr>
         <tr><td>M6d-1 ✅</td><td><code>operations.streams</code>：validate · allows · subscribe · unsubscribe · replay；HTTP SSE 改用它，格式、丢弃计数与 warning 仍留在适配器；订阅校验移出事件循环（二次 validate 被拦截后修正）；R7 去掉 <code>sse.py</code>。合并于 <code>3b079bc</code> + <code>a3e6348</code></td><td>tester + ARCH</td></tr>
-        <tr><td>M6d-2</td><td>IRC 双向收口：入站身份来自 SASL 账号或配置的 nick→user 映射（自述 nick 不足），未映射或非法一律丢弃并记日志；出站按频道整体判定：只有频道对所有已映射成员都可读（或频道无 ACL）时才桥接，否则整频道不桥接并记日志——广播介质无法按收件人过滤；DM 与私有频道默认不桥接。行为变更，写入 AGENT_ENTRY 与设计文档</td><td>tester3 安全审计</td></tr>
+        <tr><td>M6d-2</td><td>IRC 双向收口：入站身份来自配置的 nick→user 映射（授权映射，不是认证；要求运维侧 IRC 服务器保证 nick 所有权），nick 按 IRC casemapping 归一化，未映射、大小写冲突或映射用户非法一律丢弃并记日志，nick 变更后按新 nick 重新判定。出站只桥接未注册或 public 可见性的频道；dm / notebook / memory / _system 一律不桥接——IRC 频道成员不可枚举，私有频道无法 fail-closed；桥接期间每 5 秒复检并退订失效频道。行为变更，写入设计文档</td><td>tester3 安全审计</td></tr>
         <tr><td>M6e ✅</td><td><code>ServerAdapter</code> 协议迁入 core；web 内实现改为导入新路径。合并于 <code>0cd878f</code></td><td>CI + ARCH</td></tr>
         <tr><td>M6f ✅</td><td>client <code>AgentDelivery</code>：pull / queue / stream；MCP 工具与 <code>mansio-agent poll</code> 改用。合并于 <code>a57cf00</code></td><td>CI + ARCH</td></tr>
         <tr><td>M6g</td><td>转发抽象 <code>Forwarder</code>：federation 作为实现；保持客户端组件并标注 experimental</td><td>暂缓</td></tr>
@@ -829,7 +829,7 @@ flowchart LR
         <tr><td><code>operations.acl</code> ✅</td><td>get · set · remove</td><td>USER（manage 权限）· 特权</td><td>特权写入的 <code>granted_by=None</code>，USER 写入记 user id</td></tr>
         <tr><td><code>operations.queue</code> ✅</td><td>claim · ack · status</td><td>USER（claimed_by 绑定）· 特权</td><td>USER 的 claim/ack 不接受请求体里的他人身份</td></tr>
         <tr><td><code>operations.presence</code> ✅</td><td>touch · list · get</td><td>USER（touch 仅本人）· 特权</td><td><code>touch</code> 取代适配器里的 <code>bus.heartbeat</code></td></tr>
-        <tr><td><code>operations.streams</code> ✅</td><td>validate · allows · subscribe · unsubscribe · replay（M6d-2 增加 bridgeable · subscribe_bridged）</td><td>USER（读 ACL）· 特权</td><td>消息格式、丢弃计数与 warning 留在适配器；bridgeable 做频道级判定，桥接订阅不经过 Principal</td></tr>
+        <tr><td><code>operations.streams</code> ✅</td><td>validate · allows · subscribe · unsubscribe · replay（M6d-2 增加 bridgeable · subscribe_bridged）</td><td>USER（读 ACL）· 特权</td><td>消息格式、丢弃计数与 warning 留在适配器；bridgeable 只放行未注册或 public 频道，subscribe_bridged 自带判定，不暴露原始订阅</td></tr>
         <tr><td><code>operations.admin</code></td><td>stats · throughput · system · users · tokens · prefixes · admin-messages · channels-detail · subscriptions</td><td>ADMIN · NO_AUTH</td><td>只接受管理面 principal；USER / SUPERTOKEN 不进入</td></tr>
         <tr><td>公开路径</td><td><code>/health</code> · <code>/v1/auth/check</code></td><td>无</td><td>不构造 Principal，不调用 Operations</td></tr>
       </tbody>
