@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from mansio_core.authz import ChannelAuthorizer
+from mansio_core.operations import OperationContext
 from mansio_core.principal import Principal
 
 from mansio_web._vendor.httpserver import App, JSONResponse, Response
@@ -89,6 +91,7 @@ class AdminServer:
         auth_token: str | None = None,
     ) -> None:
         self._bus: Bus | None = None
+        self._operations: OperationContext | None = None
         self._view: AdminView | None = None
         self._host = "0.0.0.0" if remote else host
         self._port = port
@@ -130,7 +133,13 @@ class AdminServer:
         if self._bus is not None:
             raise RuntimeError("AdminServer already attached to a bus")
         self._bus = bus
-        self._view = AdminView(bus, self._token_store)
+        self._operations = OperationContext(
+            bus=bus,
+            authz=ChannelAuthorizer(bus),
+            token_store=self._token_store,
+            allow_unauthenticated=self._auth is None,
+        )
+        self._view = AdminView(self._operations, self._token_store)
         self._setup_routes()
 
     def serve_forever(self) -> None:
@@ -310,13 +319,13 @@ class AdminServer:
 
     def _setup_routes(self) -> None:
         """Register all admin routes through the route modules."""
-        bus = self._bus
+        operations = self._operations
         view = self._view
-        assert bus is not None
+        assert operations is not None
         assert view is not None
         ctx = RouteContext(
             view=view,
-            bus=bus,
+            operations=operations,
             token_store=self._token_store,
             auth=self._auth,
             serve_ui=self._serve_ui,

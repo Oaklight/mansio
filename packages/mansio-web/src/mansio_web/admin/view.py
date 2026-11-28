@@ -1,7 +1,9 @@
-"""Assemble admin API response documents from the bus and token store.
+"""Assemble admin API response documents from operations and the token store.
 
 Routes call one method and serialize the returned document; this module is
-the only place admin response bodies are built.
+the only place admin response bodies are built.  Bus reads and the admin
+session gate live in :mod:`mansio_core.operations.admin`; this module maps
+their values onto the admin contracts.
 """
 
 from __future__ import annotations
@@ -32,76 +34,63 @@ from mansio_core.contracts.admin import (
     AdminUsersResult,
     AdminUserTokensResult,
 )
+from mansio_core.operations import OperationContext
+from mansio_core.operations import admin as admin_operations
 
 if TYPE_CHECKING:
-    from mansio_core.bus import Bus
+    from mansio_core.principal import Principal
     from mansio_core.token_store import TokenStore
 
 
 class AdminView:
     """Read and mutation response builders for the admin API."""
 
-    def __init__(self, bus: Bus, token_store: TokenStore | None) -> None:
-        self._bus = bus
+    def __init__(self, operations: OperationContext, token_store: TokenStore | None) -> None:
+        self._operations = operations
         self._token_store = token_store
 
     # ── Dashboard ────────────────────────────────────────────────
 
-    def stats(self) -> AdminStatsResult:
-        stats = dict(self._bus.stats())
-        stats["active_subscriptions"] = sum(
-            len(ids) for ids in self._bus.subscription_counts().values()
-        )
-        return AdminStatsResult(stats=stats)
+    def stats(self, principal: Principal) -> AdminStatsResult:
+        return AdminStatsResult(stats=admin_operations.stats(self._operations, principal))
 
-    def throughput(self, window_seconds: int = 60) -> AdminThroughputResult:
+    def throughput(self, principal: Principal, window_seconds: int = 60) -> AdminThroughputResult:
         return AdminThroughputResult(
             window_seconds=window_seconds,
-            buckets=self._bus.metrics.get_throughput(window_seconds),
+            buckets=admin_operations.throughput(self._operations, principal, window_seconds),
         )
 
     # ── Channels and messages ────────────────────────────────────
 
-    def channels(self) -> AdminChannelsResult:
-        subscriptions = self._bus.subscription_counts()
-        summaries = []
-        for name in self._bus.channels():
-            messages = self._bus.query(name, limit=1000)
-            summaries.append(
+    def channels(self, principal: Principal) -> AdminChannelsResult:
+        summaries = admin_operations.channels(self._operations, principal)
+        return AdminChannelsResult(
+            channels=[
                 AdminChannelSummary(
-                    name=name,
-                    message_count=len(messages),
-                    sender_count=len({m.sender for m in messages}),
-                    subscription_count=len(subscriptions.get(name, [])),
-                    last_message_time=messages[-1].timestamp if messages else None,
+                    name=summary.name,
+                    message_count=summary.message_count,
+                    sender_count=summary.sender_count,
+                    subscription_count=summary.subscription_count,
+                    last_message_time=summary.last_message_time,
                 )
-            )
-        return AdminChannelsResult(channels=summaries)
+                for summary in summaries
+            ]
+        )
 
-    def channel_detail(self, name: str) -> AdminChannelDetail | None:
-        messages = self._bus.query(name, limit=1000)
-        if not messages:
+    def channel_detail(self, principal: Principal, name: str) -> AdminChannelDetail | None:
+        detail = admin_operations.channel_detail(self._operations, principal, name)
+        if detail is None:
             return None
-        type_counts: dict[str, int] = {}
-        for message in messages:
-            type_counts[message.msg_type] = type_counts.get(message.msg_type, 0) + 1
         return AdminChannelDetail(
-            name=name,
-            message_count=len(messages),
-            senders=sorted({m.sender for m in messages}),
-            msg_types=[
-                {"msg_type": msg_type, "count": count} for msg_type, count in type_counts.items()
-            ],
-            last_message_time=messages[-1].timestamp,
+            name=detail.name,
+            message_count=detail.message_count,
+            senders=detail.senders,
+            msg_types=detail.msg_types,
+            last_message_time=detail.last_message_time,
         )
 
-    def messages(self, query: AdminMessagesQuery) -> AdminMessagesResult:
-        messages = self._bus.search(
-            channel=query.channel,
-            sender=query.sender,
-            msg_type=query.msg_type,
-            limit=query.limit,
-        )
+    def messages(self, principal: Principal, query: AdminMessagesQuery) -> AdminMessagesResult:
+        messages = admin_operations.search_messages(self._operations, principal, query)
         return AdminMessagesResult(
             count=len(messages),
             messages=[_message_summary(message) for message in messages],
@@ -110,8 +99,8 @@ class AdminView:
     def message_published(self, message_id: str) -> AdminPublishResult:
         return AdminPublishResult(message_id=message_id)
 
-    def subscriptions(self) -> AdminSubscriptionsResult:
-        counts = self._bus.subscription_counts()
+    def subscriptions(self, principal: Principal) -> AdminSubscriptionsResult:
+        counts = admin_operations.subscriptions(self._operations, principal)
         channels = [
             {"channel": channel, "subscription_ids": ids, "count": len(ids)}
             for channel, ids in counts.items()
@@ -120,7 +109,7 @@ class AdminView:
             total=sum(len(ids) for ids in counts.values()), channels=channels
         )
 
-    def system(self) -> AdminSystemResult:
+    def system(self, principal: Principal) -> AdminSystemResult:
         import mansio_web as mansio
 
         configured = 0
@@ -128,7 +117,7 @@ class AdminView:
             configured = len(self._token_store.list_tokens())
         return AdminSystemResult(
             version=mansio.__version__,
-            backend=self._bus.info(),
+            backend=admin_operations.backend_info(self._operations, principal),
             tokens={"configured": configured},
         )
 
@@ -147,14 +136,11 @@ class AdminView:
 
     # ── Users ────────────────────────────────────────────────────
 
-    def users(self) -> AdminUsersResult:
+    def users(self, principal: Principal) -> AdminUsersResult:
         if self._token_store is None:
             return AdminUsersResult(users=[], enabled=False)
         users = self._token_store.list_users()
-        try:
-            presence = {a.user_id: a for a in self._bus.users(timeout_seconds=120)}
-        except NotImplementedError:
-            presence = {}
+        presence = admin_operations.presence_map(self._operations, principal)
         for user in users:
             entry = presence.get(user["user_id"])
             user["status"] = entry.status if entry else "unknown"
@@ -164,15 +150,12 @@ class AdminView:
     def user_registered(self, user_id: str, entry: dict) -> AdminUserRegisteredResult:
         return AdminUserRegisteredResult(user_id=user_id, token=entry)
 
-    def user_detail(self, user_id: str) -> AdminUserDetailResult | None:
+    def user_detail(self, principal: Principal, user_id: str) -> AdminUserDetailResult | None:
         assert self._token_store is not None
         tokens = self._token_store.list_user_tokens(user_id)
         if not tokens:
             return None
-        try:
-            presence = self._bus.user_status(user_id)
-        except NotImplementedError:
-            presence = None
+        presence = admin_operations.user_status(self._operations, principal, user_id)
         return AdminUserDetailResult(
             user_id=user_id,
             tokens=tokens,

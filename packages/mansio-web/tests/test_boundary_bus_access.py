@@ -1,4 +1,4 @@
-"""R7 ratchet: adapters and admin must not touch the Bus directly.
+"""R7 ratchet: wire adapters must not touch the Bus directly.
 
 The rule (docs_arch section 09, R7) is that a wire adapter reaches the Bus
 only through Operations. Until the operations exist, this test freezes the
@@ -8,9 +8,8 @@ remove its entry in the same change; the test then fails until it does.
 Planned replacements, per the target architecture:
 
 - ``adapters/irc.py``: the subscribe path and inbound publish (M6d-2).
-- ``admin/view.py`` and ``admin/routes/messages.py``: admin operations.
-- Channels, ACL, messages, queue, presence, and streams already live in
-  ``mansio_core.operations``.
+- Channels, ACL, messages, queue, presence, streams and admin already live
+  in ``mansio_core.operations``; the admin panel has no direct Bus access.
 
 The scanner counts ``<bus>.<attr>`` loads, where ``<bus>`` is the name
 ``bus``, a local alias of it (``x = self._bus`` also counts), or an
@@ -32,18 +31,6 @@ ALLOWED_LIFECYCLE = {"close"}
 # file -> attribute -> number of accesses. Shrinks stage by stage.
 KNOWN_VIOLATIONS: dict[str, dict[str, int]] = {
     "adapters/irc.py": {"publish": 1, "subscribe": 1, "unsubscribe": 2},
-    "admin/routes/messages.py": {"publish": 1},
-    "admin/view.py": {
-        "channels": 1,
-        "info": 1,
-        "metrics": 1,
-        "query": 2,
-        "search": 1,
-        "stats": 1,
-        "subscription_counts": 3,
-        "user_status": 1,
-        "users": 1,
-    },
 }
 
 
