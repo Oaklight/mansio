@@ -19,11 +19,12 @@ from mansio_core.contracts import (
     stream_event_to_json,
     warning_event_to_json,
 )
+from mansio_core.operations.validation import invalid_dm_name
 from mansio_core.principal import Principal
 
 from mansio_web._vendor.httpserver import App, StreamingResponse
 
-from ._common import _error, _invalid_dm_name
+from ._common import _error
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -255,7 +256,7 @@ def register(app: App, ctx: RouteContext) -> None:
             return _error("Bad Request", "At least one channel required", 400)
 
         for ch in ch_list:
-            if _invalid_dm_name(ch):
+            if invalid_dm_name(ch):
                 return _error("Bad Request", f"{DM_NAME_EXPECTED} (got '{ch}')", 400)
 
         principal = request.state.principal
