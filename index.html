@@ -794,13 +794,33 @@ flowchart LR
       <tbody>
         <tr><td>M6a</td><td><code>Principal</code> + <code>OperationError</code> + <code>OperationContext</code> 进入 core；HTTP 中间件产出 Principal，替换 <code>auth_result</code> 四态（<code>str / None / True / False</code>）；AST 扫描器以允许清单引入</td><td>tester + ARCH</td></tr>
         <tr><td>M6b</td><td><code>operations.messages</code>：publish / query / read；24 条 HTTP 路由中消息相关部分改为调用用例，golden 字节不变</td><td>tester + ARCH</td></tr>
-        <tr><td>M6c</td><td>channels / acl / queue / presence 用例；剩余总线路由迁移</td><td>tester + ARCH</td></tr>
+        <tr><td>M6c</td><td>channels / acl / queue / presence 用例，以及 admin 用例（stats / system / users / tokens / prefixes / admin messages）；剩余总线路由迁移</td><td>tester + ARCH</td></tr>
         <tr><td>M6d</td><td><code>subscribe</code> 用例：HTTP SSE 与 IRC 共用。IRC 双向收口：入站身份来自 SASL 账号或配置的 nick→user 映射（自述 nick 不足），未映射或非法一律丢弃并记日志；出站按频道整体判定：只有频道对所有已映射成员都可读（或频道无 ACL）时才桥接，否则整频道不桥接并记日志——广播介质无法按收件人过滤；DM 与私有频道默认不桥接。行为变更，写入 AGENT_ENTRY 与设计文档</td><td>tester3 安全审计</td></tr>
         <tr><td>M6e</td><td><code>ServerAdapter</code> 协议迁入 core；web 内实现改为导入新路径</td><td>CI + ARCH</td></tr>
         <tr><td>M6f</td><td>client <code>Delivery</code>：Pull / Queue / Stream + Format；MCP 工具与 <code>mansio-agent poll</code> 改用</td><td>tester + ARCH</td></tr>
         <tr><td>M6g</td><td>转发抽象 <code>Forwarder</code>：federation 作为实现；保持客户端组件并标注 experimental</td><td>暂缓</td></tr>
       </tbody>
     </table>
+  </div>
+  <h3>用例清单（M6b–M6d 的目标形状）</h3>
+  <div class="panel">
+    <table>
+      <thead><tr><th>用例模块</th><th>操作</th><th>允许的 Principal</th><th>边界</th></tr></thead>
+      <tbody>
+        <tr><td><code>operations.messages</code></td><td>publish · query · delete_message · cleanup · compact</td><td>USER（按 ACL）· SUPERTOKEN / NO_AUTH · ADMIN</td><td>USER 的 sender 必须等于 user_id；删除按既有 deny/404 规则</td></tr>
+        <tr><td><code>operations.channels</code></td><td>list · create · meta · delete · registry_lookup</td><td>USER（列表过滤）· 特权</td><td>频道名规则与注册前缀检查留在用例内</td></tr>
+        <tr><td><code>operations.acl</code></td><td>get · set · remove</td><td>USER（manage 权限）· 特权</td><td>特权写入的 <code>granted_by=None</code>，USER 写入记 user id</td></tr>
+        <tr><td><code>operations.queue</code></td><td>claim · ack · status</td><td>USER（claimed_by 绑定）· 特权</td><td>USER 的 claim/ack 不接受请求体里的他人身份</td></tr>
+        <tr><td><code>operations.presence</code></td><td>touch · list · get</td><td>USER（touch 仅本人）· 特权</td><td><code>touch</code> 取代适配器里的 <code>bus.heartbeat</code></td></tr>
+        <tr><td><code>operations.streams</code></td><td>subscribe_all · subscribe_channel</td><td>USER（读 ACL）· 特权 · SERVICE（IRC 出站）</td><td>返回 Feed / StreamEvent；格式由适配器决定</td></tr>
+        <tr><td><code>operations.admin</code></td><td>stats · throughput · system · users · tokens · prefixes · admin-messages · channels-detail · subscriptions</td><td>ADMIN · NO_AUTH</td><td>只接受管理面 principal；USER / SUPERTOKEN 不进入</td></tr>
+        <tr><td>公开路径</td><td><code>/health</code> · <code>/v1/auth/check</code></td><td>无</td><td>不构造 Principal，不调用 Operations</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout">
+    签名统一为 <code>op(ctx, principal, dto)</code>：适配器解析 wire，用例鉴权并执行，返回 Result DTO 或 Feed；失败抛
+    <code>OperationError(kind, message)</code>，由适配器映射为 HTTP 状态、IRC NOTICE 或 MCP 错误。用例内部不出现 HTTP / IRC / MCP 类型。
   </div>
   <div class="callout">
     <strong>身份前提（M6a 起必须成立）</strong>：每个到达 Operations 的请求恰好得到一个 Principal，参数无默认值，不用真值判断。
