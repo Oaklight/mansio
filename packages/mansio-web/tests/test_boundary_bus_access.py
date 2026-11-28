@@ -15,7 +15,9 @@ Planned replacements, per the target architecture:
 - ``adapters/routes/sse.py``: ``bus.subscribe`` / ``bus.unsubscribe`` /
   ``bus.query`` become ``operations.subscribe``.
 - ``adapters/routes/*`` and ``admin/view.py``: the remaining calls become
-  message, channel, queue, presence, and admin operations (M6b/M6c).
+  channel, queue, presence, and admin operations (M6c). Message publish,
+  query, delete, cleanup, and compact already live in
+  ``mansio_core.operations.messages``.
 
 The scanner counts ``<bus>.<attr>`` loads, where ``<bus>`` is the name
 ``bus``, a local alias of it (``x = self._bus`` also counts), or an
@@ -47,21 +49,8 @@ KNOWN_VIOLATIONS: dict[str, dict[str, int]] = {
         "set_acl": 1,
     },
     "adapters/routes/channels.py": {"channels": 2, "channels_detail": 2},
-    "adapters/routes/messages.py": {
-        "channels": 1,
-        "channels_detail": 1,
-        "compact": 1,
-        "delete_channel": 2,
-        "delete_message": 1,
-        "get_message": 1,
-    },
+    "adapters/routes/messages.py": {"delete_channel": 1},
     "adapters/routes/presence.py": {"heartbeat": 1, "user_status": 1, "users": 1},
-    "adapters/routes/publish.py": {
-        "message_count": 1,
-        "publish": 1,
-        "query": 1,
-        "user_status": 1,
-    },
     "adapters/routes/queue.py": {
         "get_message": 2,
         "queue_ack": 1,

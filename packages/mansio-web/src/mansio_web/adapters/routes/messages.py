@@ -3,44 +3,29 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from mansio_core.contracts import (
-    AdminCleanupResult,
-    AdminCompactResult,
     ContractError,
     DeleteChannelResult,
     DeleteMessageResult,
     parse_admin_cleanup,
     parse_admin_compact,
 )
+from mansio_core.operations import OperationContext, OperationError
+from mansio_core.operations.messages import DeleteMessageRequest, require_privileged
+from mansio_core.operations.messages import cleanup as cleanup_channels
+from mansio_core.operations.messages import compact as compact_channel
+from mansio_core.operations.messages import delete_message as delete_message_operation
 
 from mansio_web._vendor.httpserver import App
 
-from ._common import _bad_request, _error, _json_body
+from ._common import _bad_request, _error, _json_body, _operation_error
 
 if TYPE_CHECKING:
     from mansio_web._vendor.httpserver import Request
 
     from . import RouteContext
-
-
-def _match_channels(channels: list[str], pattern: str) -> list[str]:
-    """Match channel names against a glob-like pattern.
-
-    Supports ``*`` as a wildcard for any sequence of characters.
-    The pattern is matched against the full channel name.
-
-    Args:
-        channels: List of channel names to match.
-        pattern: Glob pattern (e.g. ``"test:*"``, ``"*"``)
-
-    Returns:
-        List of matching channel names.
-    """
-    import fnmatch
-
-    return [ch for ch in channels if fnmatch.fnmatch(ch, pattern)]
 
 
 def register(app: App, ctx: RouteContext) -> None:
@@ -52,6 +37,12 @@ def register(app: App, ctx: RouteContext) -> None:
 def _register_delete_routes(app: App, ctx: RouteContext) -> None:
     bus = ctx.bus
     authz = ctx.authz
+    operations = OperationContext(
+        bus=bus,
+        authz=authz,
+        token_store=ctx.token_store,
+        allow_unauthenticated=ctx.allow_unauthenticated,
+    )
 
     @app.delete("/v1/channels/<channel_name>")
     async def delete_channel(request: Request, channel_name: str = "") -> dict | tuple:
@@ -79,30 +70,17 @@ def _register_delete_routes(app: App, ctx: RouteContext) -> None:
         if not message_id:
             return _error("Bad Request", "Message ID required", 400)
 
-        user_id = request.state.principal.user_id
-
-        # For scoped tokens, verify the message belongs to the agent
-        if user_id is not None:
-            found_msg = await asyncio.to_thread(bus.get_message, message_id)
-
-            if found_msg is None:
-                return _error("Not Found", f"Message '{message_id}' not found", 404)
-
-            if not authz.can_delete_message(user_id, found_msg):
-                return _error(
-                    "Forbidden",
-                    f"Token for '{user_id}' cannot delete messages "
-                    f"from sender '{found_msg.sender}'",
-                    403,
-                )
-
         try:
-            deleted = await asyncio.to_thread(bus.delete_message, message_id)
+            await asyncio.to_thread(
+                delete_message_operation,
+                operations,
+                request.state.principal,
+                DeleteMessageRequest(message_id),
+            )
+        except OperationError as err:
+            return _operation_error(err)
         except NotImplementedError:
             return _error("Not Implemented", "Backend does not support deletion", 501)
-
-        if not deleted:
-            return _error("Not Found", f"Message '{message_id}' not found", 404)
 
         return DeleteMessageResult(deleted=True, message_id=message_id).to_dict()
 
@@ -113,85 +91,64 @@ def _register_admin_routes(app: App, ctx: RouteContext) -> None:
 
 
 def _register_admin_cleanup(app: App, ctx: RouteContext) -> None:
-    bus = ctx.bus
+    operations = OperationContext(
+        bus=ctx.bus,
+        authz=ctx.authz,
+        token_store=ctx.token_store,
+        allow_unauthenticated=ctx.allow_unauthenticated,
+    )
 
     @app.post("/v1/admin/channels/cleanup")
     async def admin_cleanup(request: Request) -> dict | tuple:
-        # Admin only: a privileged principal (supertoken or no-auth).
-        if not request.state.principal.is_privileged:
-            return _error("Forbidden", "Admin endpoints require a supertoken", 403)
+        principal = request.state.principal
+        # The gate runs before body parsing so a forbidden caller still gets
+        # 403 for a malformed body, as it did when the check lived here.
+        try:
+            require_privileged(principal)
+        except OperationError as err:
+            return _operation_error(err)
 
         try:
             cleanup = parse_admin_cleanup(_json_body(request))
         except ContractError as err:
             return _bad_request(err)
 
-        pattern = cleanup.pattern
-        older_than = cleanup.older_than
-
-        all_channels = cast(list[str], await asyncio.to_thread(bus.channels, detail=False))
-        matched = _match_channels(all_channels, pattern)
-
-        # Protect system channels from bulk deletion
-        matched = [ch for ch in matched if not ch.startswith("_system:")]
-
-        if older_than:
-            # Filter by last activity time
-            try:
-                detail_list = await asyncio.to_thread(bus.channels_detail)
-            except NotImplementedError:
-                detail_list = []
-            detail_map = {d["name"]: d for d in detail_list}
-            matched = [
-                ch
-                for ch in matched
-                if ch in detail_map and detail_map[ch].get("last_activity", "") < older_than
-            ]
-
-        total_deleted = 0
-        channels_deleted: list[str] = []
-
         try:
-            for ch in matched:
-                count = await asyncio.to_thread(bus.delete_channel, ch)
-                total_deleted += count
-                channels_deleted.append(ch)
+            result = await asyncio.to_thread(cleanup_channels, operations, principal, cleanup)
+        except OperationError as err:
+            return _operation_error(err)
         except NotImplementedError:
             return _error("Not Implemented", "Backend does not support deletion", 501)
 
-        return AdminCleanupResult(
-            channels_deleted=len(channels_deleted),
-            messages_deleted=total_deleted,
-            channels=channels_deleted,
-        ).to_dict()
+        return result.to_dict()
 
 
 def _register_admin_compact(app: App, ctx: RouteContext) -> None:
-    bus = ctx.bus
+    operations = OperationContext(
+        bus=ctx.bus,
+        authz=ctx.authz,
+        token_store=ctx.token_store,
+        allow_unauthenticated=ctx.allow_unauthenticated,
+    )
 
     @app.post("/v1/admin/compact")
     async def admin_compact(request: Request) -> dict | tuple:
-        # Admin only: a privileged principal (supertoken or no-auth).
-        if not request.state.principal.is_privileged:
-            return _error("Forbidden", "Admin endpoints require a supertoken", 403)
+        principal = request.state.principal
+        try:
+            require_privileged(principal)
+        except OperationError as err:
+            return _operation_error(err)
 
         try:
             compact = parse_admin_compact(_json_body(request))
         except ContractError as err:
             return _bad_request(err)
 
-        channel = compact.channel
-        max_messages = compact.max_messages
-        keep_latest_per_sender = compact.keep_latest_per_sender
-
         try:
-            removed = await asyncio.to_thread(
-                bus.compact,
-                channel,
-                max_messages=max_messages,
-                keep_latest_per_sender=keep_latest_per_sender,
-            )
+            result = await asyncio.to_thread(compact_channel, operations, principal, compact)
+        except OperationError as err:
+            return _operation_error(err)
         except NotImplementedError:
             return _error("Not Implemented", "Backend does not support compaction", 501)
 
-        return AdminCompactResult(channel=channel, messages_removed=removed).to_dict()
+        return result.to_dict()
