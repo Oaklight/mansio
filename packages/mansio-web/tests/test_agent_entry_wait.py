@@ -19,9 +19,10 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import select
+import queue
 import subprocess
 import sys
+import threading
 import time
 from typing import Any, NoReturn
 
@@ -78,6 +79,28 @@ class McpProcess:
             env=env,
         )
         self._next_id = 0
+        self._lines: queue.Queue[str | None] = queue.Queue()
+        threading.Thread(target=self._pump, daemon=True).start()
+
+    def _pump(self) -> None:
+        """Feed stdout lines to a queue.
+
+        A reader thread avoids ``select`` on a ``TextIOWrapper``: ``readline``
+        can buffer the next line, which would make ``select`` on the raw fd
+        miss a response that is already in Python's buffer.  The queue keeps
+        the behind-the-wait probe reliable when two responses arrive together.
+        """
+        stream = self.proc.stdout
+        if stream is None:
+            self._lines.put(None)
+            return
+        try:
+            for line in stream:
+                self._lines.put(line)
+        except (OSError, ValueError):
+            pass
+        finally:
+            self._lines.put(None)
 
     def _write(self, message: dict[str, Any]) -> None:
         assert self.proc.stdin is not None
@@ -92,17 +115,26 @@ class McpProcess:
         raise AssertionError(f"{self.user_id}: {message}\nstderr tail:\n{stderr[-2000:]}")
 
     def _read(self, request_id: int, timeout: float) -> dict[str, Any]:
-        assert self.proc.stdout is not None
-        ready, _, _ = select.select([self.proc.stdout], [], [], timeout)
-        if not ready:
+        try:
+            line = self._lines.get(timeout=timeout)
+        except queue.Empty:
             self._fail(f"no response to id {request_id} within {timeout}s")
-        line = self.proc.stdout.readline()
-        if not line:
+        if line is None:
             self._fail(f"stdout closed before id {request_id}")
         try:
             return json.loads(line)
         except json.JSONDecodeError as exc:
             self._fail(f"non-JSON line before id {request_id}: {line!r} ({exc})")
+
+    def expect_no_line(self, seconds: float, context: str) -> None:
+        """Fail with the exact line if the server answers within *seconds*."""
+        try:
+            line = self._lines.get(timeout=seconds)
+        except queue.Empty:
+            return
+        if line is None:
+            raise AssertionError(f"{context}: stdout closed")
+        raise AssertionError(f"{context}: server answered early: {line!r}")
 
     def send_request(self, method: str, params: dict[str, Any] | None = None) -> int:
         self._next_id += 1
@@ -214,11 +246,7 @@ def test_message_published_during_the_wait_returns_before_the_deadline(runtimes)
 
     # The wait must still be blocking before the publish.  Surface the exact
     # line instead of a bare timeout if it answered early.
-    assert a.proc.stdout is not None
-    ready, _, _ = select.select([a.proc.stdout], [], [], BLOCK_PROBE_SECONDS)
-    if ready:
-        early = a.proc.stdout.readline()
-        raise AssertionError(f"mansio_wait answered before B published: {early!r}")
+    a.expect_no_line(BLOCK_PROBE_SECONDS, "mansio_wait answered before B published")
 
     b.channel_send(CHANNEL, PUBLIC_TEXT)
     response = a.read_response(request_id, timeout=REQUEST_TIMEOUT)
@@ -233,6 +261,36 @@ def test_message_published_during_the_wait_returns_before_the_deadline(runtimes)
     assert len(payload["messages"]) == 1, payload
     _assert_message(payload["messages"][0], sender=B_ID, payload=PUBLIC_TEXT)
     assert elapsed < 2.0, f"wait returned after its deadline: {elapsed:.2f}s"
+
+
+def test_the_server_answers_no_other_request_while_the_wait_blocks(runtimes) -> None:
+    """A5: the stdio server is sequential, so a queued ping waits with it."""
+    a, _b = runtimes
+    started = time.monotonic()
+    wait_id = a.send_request(
+        "tools/call",
+        {"name": "mansio_wait", "arguments": {"channel": EMPTY_CHANNEL, "timeout_seconds": 2}},
+    )
+    # Queue a distinct request behind the wait.  The server answers in request
+    # order, so the ping cannot be answered before the wait finishes.
+    ping_id = a.send_request("ping")
+
+    a.expect_no_line(0.5, "server answered while the wait was still blocking")
+
+    wait_response = a.read_response(wait_id, timeout=4.0)
+    wait_elapsed = time.monotonic() - started
+    assert "error" not in wait_response, wait_response
+    wait_result = wait_response["result"]
+    assert set(wait_result) == {"content"}, wait_result
+    wait_payload = json.loads(wait_result["content"][0]["text"])
+    assert wait_payload == {"messages": [], "timed_out": True}
+    assert wait_elapsed >= 1.8, f"wait returned too early to prove sequencing: {wait_elapsed:.2f}s"
+    assert wait_elapsed < 4.0, f"wait overran its deadline: {wait_elapsed:.2f}s"
+
+    # The ping is the next line, which also pins arrival order.
+    ping_response = a.read_response(ping_id, timeout=4.0)
+    assert set(ping_response) == {"jsonrpc", "id", "result"}, ping_response
+    assert ping_response["result"] == {}
 
 
 def test_zero_timeout_returns_immediately(runtimes) -> None:
