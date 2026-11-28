@@ -11,6 +11,7 @@ STABLE_REQUIRED: dict[str, tuple[str, ...]] = {
     "mansio_send": ("channel", "content"),
     "mansio_read": ("channel",),
     "mansio_poll": ("channel",),
+    "mansio_wait": ("channel",),
     "mansio_check_unread": (),
     "mansio_heartbeat": (),
     "mansio_agents": (),

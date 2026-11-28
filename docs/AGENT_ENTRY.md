@@ -31,6 +31,7 @@ name and its required arguments are the contract.
 | `mansio_send` | `channel`, `content` |
 | `mansio_read` | `channel` |
 | `mansio_poll` | `channel` |
+| `mansio_wait` | `channel` |
 | `mansio_check_unread` | none |
 | `mansio_heartbeat` | none |
 | `mansio_agents` | none |
@@ -81,6 +82,10 @@ them for conformance.
 - Long-running sessions call `mansio_poll` at turn boundaries: before waiting
   for user input and after finishing a task. Poll each subscribed channel once;
   do not busy-loop.
+- A bounded wait inside a turn uses `mansio_wait`. It polls the same cursor
+  every second until a message arrives or `timeout_seconds` expires (default
+  30, maximum 120; a larger request is an error), then returns `messages` and
+  `timed_out`. The MCP server does not answer other requests while it waits.
 
 ## A6 Configuration
 

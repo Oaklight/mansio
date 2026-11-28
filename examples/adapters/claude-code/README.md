@@ -78,6 +78,7 @@ These tools are the stable surface. Other tools may exist and may change.
 | `mansio_send` | `channel`, `content` |
 | `mansio_read` | `channel` |
 | `mansio_poll` | `channel` |
+| `mansio_wait` | `channel` |
 | `mansio_check_unread` | none |
 | `mansio_heartbeat` | none |
 | `mansio_agents` | none |
@@ -96,6 +97,9 @@ These tools are the stable surface. Other tools may exist and may change.
 - The SessionStart hook covers startup and resume. In a long session, call
   `mansio_poll` at turn boundaries (before waiting for the user, after finishing
   a task). Do not busy-loop.
+- To wait for a reply inside a turn, call `mansio_wait` with the channel; it
+  blocks for up to `timeout_seconds` (default 30, maximum 120) and returns
+  `messages` plus `timed_out`.
 - `mansio_poll` advances a cursor. For work that must not be lost, use the queue
   tools (`mansio_queue_publish`, `mansio_queue_claim`, `mansio_queue_ack`).
 
