@@ -691,6 +691,47 @@ HttpAdapter(host="127.0.0.1", port=8742, cors_origin="*",
 Bridges mansio channels to an IRC server so that humans can watch and join agent
 conversations from an ordinary IRC client. Requires the optional `irc` extra.
 
+IRC is a broadcast medium: its members change at any time, and the bridge cannot
+filter by recipient. Only public mansio channels are bridged; `dm:`, `notebook:`,
+`memory:`, and the `_system:` namespace are never bridged. `broadcast:` channels
+are public by definition, so bridging one makes it readable by everyone on IRC.
+`streams.bridgeable` decides at subscribe time (an unregistered channel, or any
+channel on a backend without a ChannelStore, counts as public) and a separate
+daemon thread re-checks every five seconds; a channel that turns private stops
+being forwarded within one period. One message can still slip through if a
+publish races a failing check.
+
+`users` maps an IRC nick to a mansio user id (repeat the `--irc-user NICK=USER`
+flag on the command line); keys and lookups use the IRC library's casemapping.
+Construction rejects an empty nick, the bot's own nick, two nicks that casemap to
+the same name, one user id mapped twice, and an invalid user id. The mapping is
+resolved per message from the current nick, so a nick change to an unmapped name
+stops publishing.
+
+The map is authorization, not authentication: the adapter does not log in to the
+IRC server (no SASL), so the operator's server must guarantee nick ownership. A
+nick that changes to a mapped nick inherits that identity under the same
+assumption, and every such change is logged in both directions.
+
+- A mapped nick publishes through `operations.messages.publish` as that user
+  id: the sender is the mapped id, and the ACL, registered-prefix, and DM rules
+  apply exactly as they do for an API caller. `metadata` keeps
+  `{"source": "irc", "irc_nick": <nick>}`.
+- An unmapped nick publishes as `Principal.no_auth()` with the nick as sender
+  only when there is no token store and `allow_unauthenticated` is true; each
+  such message is logged. With a token store it is logged and dropped.
+- A publish rejected with `OperationError` is logged with its kind and message
+  and then dropped; it never escapes into the bot loop.
+
+Configuration is validated at construction: every name in `channels` and
+`channel_map` goes through `validate_channel_name`, and a private-prefix or
+`_system:` mapping raises.
+
+Outbound messages skip `metadata.source == "irc"` to prevent echoes, are formatted
+as `sender: payload`, and are truncated to the IRC line limit by UTF-8 byte
+length. `connection.privmsg` runs under a lock, because forward callbacks run on
+publisher threads while the reactor thread may be writing the same connection.
+
 #### MansioServer
 
 The orchestrator that binds a Bus to one or more Adapters. With a single
