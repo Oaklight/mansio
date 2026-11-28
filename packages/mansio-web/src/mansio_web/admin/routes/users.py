@@ -6,10 +6,11 @@ from typing import Any
 
 from mansio_core.contracts import ContractError
 from mansio_core.contracts.admin import parse_user_create, parse_user_token_create
+from mansio_core.operations import OperationError
 
 from mansio_web._vendor.httpserver import App
 
-from . import RouteContext, json_body
+from . import RouteContext, json_body, operation_error
 
 
 def register(app: App, ctx: RouteContext) -> None:
@@ -23,8 +24,11 @@ def _register_user_routes(app: App, ctx: RouteContext) -> None:
     view = ctx.view
 
     @app.get("/api/users")
-    def list_users(request: Any) -> dict:
-        return view.users().to_dict()
+    def list_users(request: Any) -> dict | tuple:
+        try:
+            return view.users(request.state.principal).to_dict()
+        except OperationError as err:
+            return operation_error(err)
 
     @app.post("/api/users")
     def register_user(request: Any) -> dict | tuple:
@@ -49,7 +53,10 @@ def _register_user_routes(app: App, ctx: RouteContext) -> None:
     def get_user(request: Any, user_id: str) -> dict | tuple:
         if token_store is None:
             return {"error": "Service Unavailable"}, 503
-        detail = view.user_detail(user_id)
+        try:
+            detail = view.user_detail(request.state.principal, user_id)
+        except OperationError as err:
+            return operation_error(err)
         if detail is None:
             return {"error": "Not Found", "message": f"User '{user_id}' not found"}, 404
         return detail.to_dict()
