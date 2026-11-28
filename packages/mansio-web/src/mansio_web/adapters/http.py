@@ -53,6 +53,9 @@ import time
 from typing import TYPE_CHECKING
 
 from mansio_core.authz import ChannelAuthorizer
+from mansio_core.contracts import PresenceHeartbeatRequest
+from mansio_core.operations import OperationContext
+from mansio_core.operations.presence import touch
 from mansio_core.principal import Principal
 
 from mansio_web._vendor.httpserver import App, JSONResponse, Response, StreamingResponse
@@ -192,10 +195,21 @@ class HttpAdapter:
     async def _write_presence(self, user_id: str) -> None:
         """Persist *user_id*'s activity as presence."""
         bus = self._bus
-        if bus is None:
+        authz = self._authz
+        if bus is None or authz is None:
             return
         try:
-            await asyncio.to_thread(bus.heartbeat, user_id)
+            await asyncio.to_thread(
+                touch,
+                OperationContext(
+                    bus=bus,
+                    authz=authz,
+                    token_store=self._token_store,
+                    allow_unauthenticated=self._allow_unauthenticated,
+                ),
+                Principal.user(user_id),
+                PresenceHeartbeatRequest(user_id=user_id),
+            )
         except NotImplementedError:
             # This backend has no presence store and will not grow one while
             # running, so stop attempting the write rather than repeating it

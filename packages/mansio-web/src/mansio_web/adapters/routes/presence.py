@@ -13,44 +13,45 @@ from mansio_core.contracts import (
     parse_heartbeat,
     parse_presence_list,
 )
+from mansio_core.operations import OperationContext, OperationError
+from mansio_core.operations.presence import get as get_presence
+from mansio_core.operations.presence import list_presence, touch
 
 from mansio_web._vendor.httpserver import App
 
-from ._common import _bad_request, _error, _json_body
+from ._common import _bad_request, _error, _json_body, _operation_error
 
 if TYPE_CHECKING:
     from mansio_web._vendor.httpserver import Request
 
     from . import RouteContext
 
+_PRESENCE_UNSUPPORTED = "Backend does not support presence"
+
 
 def register(app: App, ctx: RouteContext) -> None:
     """Register presence routes."""
-    bus = ctx.bus
+    operations = OperationContext(
+        bus=ctx.bus,
+        authz=ctx.authz,
+        token_store=ctx.token_store,
+        allow_unauthenticated=ctx.allow_unauthenticated,
+    )
 
     @app.post("/v1/presence/heartbeat")
     async def presence_heartbeat(request: Request) -> dict | tuple:
-        principal = request.state.principal
         try:
             heartbeat = parse_heartbeat(_json_body(request, "JSON body required"))
         except ContractError as err:
             return _bad_request(err)
-        user_id = heartbeat.user_id
-        # A scoped token may only report its own user's presence.
-        # Supertokens and no-auth mode keep acting on behalf of any user,
-        # as they do elsewhere.
-        bound_user = principal.user_id
-        if bound_user is not None and user_id != bound_user:
-            return _error(
-                "Forbidden",
-                f"Token bound to '{bound_user}', cannot heartbeat as '{user_id}'",
-                403,
-            )
-        metadata = heartbeat.metadata
+
         try:
-            await asyncio.to_thread(bus.heartbeat, user_id, metadata)
+            await asyncio.to_thread(touch, operations, request.state.principal, heartbeat)
+        except OperationError as err:
+            return _operation_error(err)
         except NotImplementedError:
-            return _error("Not Implemented", "Backend does not support presence", 501)
+            return _error("Not Implemented", _PRESENCE_UNSUPPORTED, 501)
+
         return PresenceHeartbeatResult().to_dict()
 
     @app.get("/v1/presence")
@@ -59,10 +60,14 @@ def register(app: App, ctx: RouteContext) -> None:
             query = parse_presence_list(request.query_params)
         except ContractError as err:
             return _bad_request(err)
+
         try:
-            agents = await asyncio.to_thread(bus.users, query.timeout)
+            agents = await asyncio.to_thread(
+                list_presence, operations, request.state.principal, query
+            )
         except NotImplementedError:
-            return _error("Not Implemented", "Backend does not support presence", 501)
+            return _error("Not Implemented", _PRESENCE_UNSUPPORTED, 501)
+
         return PresenceResult(agents=agents).to_dict()
 
     @app.get("/v1/presence/<user_id>")
@@ -71,12 +76,16 @@ def register(app: App, ctx: RouteContext) -> None:
             query = parse_presence_list(request.query_params)
         except ContractError as err:
             return _bad_request(err)
+
         try:
-            result = await asyncio.to_thread(bus.user_status, user_id, query.timeout)
+            result = await asyncio.to_thread(
+                get_presence, operations, request.state.principal, user_id, query
+            )
+        except OperationError as err:
+            return _operation_error(err)
         except NotImplementedError:
-            return _error("Not Implemented", "Backend does not support presence", 501)
-        if result is None:
-            return _error("Not Found", "agent not found", 404)
+            return _error("Not Implemented", _PRESENCE_UNSUPPORTED, 501)
+
         return PresenceAgentResult(
             user_id=result.user_id,
             status=result.status,

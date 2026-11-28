@@ -7,18 +7,11 @@ remove its entry in the same change; the test then fails until it does.
 
 Planned replacements, per the target architecture:
 
-- ``adapters/http.py`` ``_write_presence``: ``bus.heartbeat`` becomes
-  ``operations.presence.touch``.
-- ``adapters/irc.py`` inbound: ``bus.publish`` becomes
-  ``operations.messages.publish``; outbound ``bus.subscribe`` /
-  ``bus.unsubscribe`` become ``operations.subscribe``.
-- ``adapters/routes/sse.py``: ``bus.subscribe`` / ``bus.unsubscribe`` /
-  ``bus.query`` become ``operations.subscribe``.
-- ``adapters/routes/queue.py`` and ``presence.py``: queue and presence
-  operations (M6c, second PR).
+- ``adapters/irc.py`` and ``adapters/routes/sse.py``: the subscribe path
+  (M6d).
 - ``admin/view.py`` and ``admin/routes/messages.py``: admin operations.
-- Channels, ACL, and messages already live in
-  ``mansio_core.operations.{channels,acl,messages}``.
+- Channels, ACL, messages, queue, and presence already live in
+  ``mansio_core.operations``.
 
 The scanner counts ``<bus>.<attr>`` loads, where ``<bus>`` is the name
 ``bus``, a local alias of it (``x = self._bus`` also counts), or an
@@ -39,15 +32,7 @@ ALLOWED_LIFECYCLE = {"close"}
 
 # file -> attribute -> number of accesses. Shrinks stage by stage.
 KNOWN_VIOLATIONS: dict[str, dict[str, int]] = {
-    "adapters/http.py": {"heartbeat": 1},
     "adapters/irc.py": {"publish": 1, "subscribe": 1, "unsubscribe": 2},
-    "adapters/routes/presence.py": {"heartbeat": 1, "user_status": 1, "users": 1},
-    "adapters/routes/queue.py": {
-        "get_message": 2,
-        "queue_ack": 1,
-        "queue_claim": 1,
-        "queue_status": 1,
-    },
     "adapters/routes/sse.py": {"query": 1, "subscribe": 1, "unsubscribe": 1},
     "admin/routes/messages.py": {"publish": 1},
     "admin/view.py": {
