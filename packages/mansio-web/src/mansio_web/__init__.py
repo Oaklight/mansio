@@ -11,7 +11,8 @@ from typing import Any
 
 __version__ = "0.3.0.dev1"
 
-from mansio_web.adapters.base import ServerAdapter
+from mansio_core.server import ServerAdapter
+
 from mansio_web.adapters.http import HttpAdapter
 from mansio_web.server import MansioServer
 

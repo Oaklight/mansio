@@ -23,8 +23,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from mansio_core.bus import Bus
-
-    from mansio_web.adapters.base import ServerAdapter
+    from mansio_core.server import ServerAdapter
 
 
 class MansioServer:

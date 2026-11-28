@@ -6,7 +6,8 @@ Multiple adapters can attach to the same Bus simultaneously.
 
 from typing import Any
 
-from mansio_web.adapters.base import ServerAdapter
+from mansio_core.server import ServerAdapter
+
 from mansio_web.adapters.http import HttpAdapter
 
 

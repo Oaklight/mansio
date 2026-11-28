@@ -1,9 +1,10 @@
-"""Base protocol for server-side adapters.
+"""Server-side adapter port.
 
-A server adapter exposes a Bus over a specific
-transport protocol (HTTP, WebSocket, IRC, etc.). Multiple adapters
-can attach to the same Bus, allowing different client types to
-coexist on one MansioServer.
+A server adapter exposes a Bus over a specific transport protocol (HTTP,
+WebSocket, IRC, etc.). Multiple adapters can attach to the same Bus,
+allowing different client types to coexist on one MansioServer.
+
+The protocol is a port: mansio-core declares it, mansio-web implements it.
 """
 
 from __future__ import annotations
