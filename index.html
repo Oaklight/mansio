@@ -237,7 +237,7 @@ flowchart TB
   end
   subgraph WEB["mansio-web（发布名 mansio）"]
     WH["adapters 2278&lt;br/&gt;http 组装根 360 + routes 1489&lt;br/&gt;24 条路由"]
-    WA["admin 1445 + 资产 4206"]
+    WA["admin 1445 + 资产 4151（19 文件）"]
     WC["cli 677"]
     WB["adapters/base 71&lt;br/&gt;ServerAdapter 协议（仅 web 使用）"]
   end
@@ -274,7 +274,7 @@ flowchart TB
 <pre class="mermaid">
 flowchart TB
   subgraph COREPKG["mansio-core"]
-    LEAF["types · contracts · protocols · authz&lt;br/&gt;叶子层：互不依赖，只依赖 types"]
+    LEAF["types · contracts · protocols · authz&lt;br/&gt;叶子层：互不导入彼此；只依赖 types&lt;br/&gt;（protocols 另用内置 _vendor 日志）"]
     BE["backends&lt;br/&gt;依赖 protocols / authz"]
     BUS["Bus&lt;br/&gt;编排；不承担鉴权"]
     TR["Transport 协议"]
@@ -285,7 +285,7 @@ flowchart TB
     DELIV["adapters · admin · cli&lt;br/&gt;解析 → 鉴权 → 调用 Bus"]
   end
   subgraph CLIENTPKG["mansio-client"]
-    SDK["SDK / CLI / MCP"]
+    SDK["SDK / CLI / MCP / mansio-agent"]
     IMPL["transport/http"]
   end
   DELIV -->|"adapters/admin：contracts / authz"| LEAF
@@ -437,14 +437,14 @@ flowchart LR
       <div class="scroll">
 <pre class="mermaid">
 flowchart LR
-  R["HTTP JSON / SSE"] --> K["contracts.parse&lt;br/&gt;PublishRequest · QueryRequest&lt;br/&gt;ChannelCreateRequest · ACLRequest"]
-  K -->|"非法输入 400"| E["错误响应"]
-  K --> A["ChannelAuthorizer"]
+  R["HTTP JSON / SSE"] --> K["contracts.parse_*（15 个）&lt;br/&gt;PublishRequest · QueryRequest …&lt;br/&gt;admin DTO 解析"]
+  K -->|"非法输入 400"| E["统一错误体&lt;br/&gt;ContractError → ErrorResult"]
+  K --> A["鉴权&lt;br/&gt;token scope + ChannelAuthorizer"]
   A --> B["Bus"]
-  B --> D["领域对象&lt;br/&gt;Message · ChannelMeta · ACLEntry"]
-  D --> Z["DTO.to_dict / 事件序列化&lt;br/&gt;*Result · StreamEvent · WarningEvent"]
+  B --> D["领域对象 types.py&lt;br/&gt;Message · ChannelMeta · ACLEntry"]
+  D --> Z["各 Result.to_dict() 构建响应&lt;br/&gt;SSE：StreamEvent · WarningEvent"]
   Z --> R
-  K -.->|"生成"| S["生成物：admin contracts.js&lt;br/&gt;未来 schema 同源生成（不手写）"]
+  K -.->|"生成"| S["生成物：admin contracts.js&lt;br/&gt;schema 仅在需要时由 DTO 生成"]
   class K,Z,D good
   classDef good fill:#e8f5e9,stroke:#1a8f3c,color:#14532d
 </pre>
@@ -455,14 +455,19 @@ flowchart LR
     <table>
       <thead><tr><th>契约</th><th>现状</th><th>目标</th></tr></thead>
       <tbody>
-        <tr><td>领域对象</td><td><code>mansio_core/types.py</code> 单一源（M1）；<code>mansio_client.types</code> 重导出已删除（M4d）</td><td><code>mansio_core.contracts</code> 单一来源</td></tr>
-        <tr><td>HTTP 入参</td><td>15 条路由走 <code>contracts.parse_*</code>（M2a）；频道名与授权策略仍在 web</td><td>每个路由一个 parse 函数，返回 DTO 或 400</td></tr>
-        <tr><td>HTTP 响应</td><td>成功体用 <code>*Result.to_dict()</code>（M3a）；错误体统一 <code>ErrorResult</code>（M3b）</td><td><code>contracts.serialize</code> 构建 Response</td></tr>
+        <tr><td>领域对象</td><td><code>mansio_core/types.py</code> 单一源（M1）；<code>mansio_client.types</code> 重导出已删除（M4d）</td><td><code>mansio_core/types.py</code> 是唯一领域源；<code>contracts</code> 只放 wire DTO 与解析</td></tr>
+        <tr><td>HTTP 入参</td><td>15 条路由走 <code>contracts.parse_*</code>（M2a）；频道名与授权策略仍在 web</td><td>有请求体的路由各一个 <code>parse_*</code>，返回 DTO 或 400</td></tr>
+        <tr><td>HTTP 响应</td><td>成功体用 <code>*Result.to_dict()</code>（M3a）；错误体统一 <code>ErrorResult</code>（M3b）</td><td>各 <code>*Result.to_dict()</code> 构建响应；不设独立 serialize 模块</td></tr>
         <tr><td>SSE</td><td>message 事件走 <code>StreamEvent</code>（M2b）；dropped/truncated 走命名事件 <code>event: warning</code> + <code>WarningEvent</code>；<code>connected</code>/<code>keepalive</code> 是注释</td><td>三类帧：message 事件 · warning 事件 · 注释</td></tr>
         <tr><td>管理端发布</td><td>admin <code>/api/messages</code> 已走 <code>parse_publish</code>（#385）；IRC 丢弃空 PRIVMSG</td><td>同一 <code>parse_publish</code> / 传输契约</td></tr>
-        <tr><td>管理面板 JSON</td><td><code>AdminView</code> 组装 <code>contracts/admin.py</code> DTO（M3b）</td><td><code>AdminView</code> 契约 + JSON Schema</td></tr>
+        <tr><td>管理面板 JSON</td><td><code>AdminView</code> 组装 <code>contracts/admin.py</code> DTO（M3b）</td><td><code>AdminView</code> 契约；JSON Schema 需要时由 DTO 生成，不手写</td></tr>
       </tbody>
     </table>
+  </div>
+  <div class="callout">
+    目标列此前写的是另一套设计：<code>contracts</code> 作为领域对象源、<code>contracts.serialize</code> 构建响应、
+    <code>AdminView</code> + 手写 JSON Schema。实现与决策采用 <code>types.py</code> 领域源、各 <code>*Result.to_dict()</code>、
+    schema 按需生成；该设计已从目标列移除，避免把未采纳的写法画成目标。
   </div>
 </section>
 
@@ -480,8 +485,8 @@ flowchart TB
   H["admin.html 55 行骨架"]
   AS["assets/ 4151 行 · 19 文件&lt;br/&gt;router · ui · models · contracts（生成）&lt;br/&gt;api/format/auth/state · views/*.js"]
   S["admin/server.py 332 行&lt;br/&gt;组装根：按固定顺序注册"]
-  R["admin/routes/ 10 模块 · 482 行&lt;br/&gt;auth · stats · channels · messages&lt;br/&gt;prefixes · subscriptions · system&lt;br/&gt;tokens · ui · users"]
-  VW["admin/view.py 228&lt;br/&gt;AdminView：唯一视图组装点（M3b）"]
+  R["admin/routes/ 10 模块 · 493 行&lt;br/&gt;auth · stats · channels · messages&lt;br/&gt;prefixes · subscriptions · system&lt;br/&gt;tokens · ui · users"]
+  VW["admin/view.py 232&lt;br/&gt;AdminView：唯一视图组装点（M3b）"]
   C["mansio_core/contracts/admin.py 335&lt;br/&gt;请求解析 + 响应 DTO"]
   A["admin/auth.py 303"]
   M["mansio_core/metrics.py 122&lt;br/&gt;M1 移出 admin"]
@@ -508,10 +513,10 @@ flowchart TB
       <div class="scroll">
 <pre class="mermaid">
 flowchart TB
-  H["admin.html&lt;br/&gt;页面骨架"]
-  CSS["css/base.css · components.css"]
-  JS["js/&lt;br/&gt;api client · views · state · components"]
-  R["routes/*.py&lt;br/&gt;auth · stats · channels · messages&lt;br/&gt;users · tokens · ACL"]
+  H["admin.html&lt;br/&gt;55 行页面骨架"]
+  CSS["assets/admin.css&lt;br/&gt;单一样式表（705 行）"]
+  JS["assets/*.js&lt;br/&gt;api · state · ui · views&lt;br/&gt;contracts（生成）"]
+  R["routes/*.py（10 模块）&lt;br/&gt;auth · stats · channels · messages · users&lt;br/&gt;tokens · prefixes · subscriptions · system · ui"]
   V["AdminView 契约&lt;br/&gt;类型化 JSON"]
   C["mansio-core&lt;br/&gt;Bus · authz · token store"]
   H --> CSS
@@ -526,8 +531,8 @@ flowchart TB
     </div>
   </div>
   <div class="callout">
-    参照 llm-rosetta 的 <code>admin/</code>：<code>admin.html</code> 骨架、<code>css/</code>、<code>js/</code>、
-    <code>routes/</code>、<code>static.py</code>、<code>themes.py</code>。运行时依赖仍然为零。
+    参照过 llm-rosetta 的 <code>admin/</code> 结构，但未采用其 <code>css/</code>、<code>js/</code> 子目录与 <code>themes.py</code>：
+    当前实现是扁平 <code>assets/</code>（19 文件、4151 行）加 <code>theme-init.js</code> 与 CSS 变量主题，运行时依赖为零。
   </div>
 </section>
 
