@@ -75,7 +75,9 @@ def write_if_changed(
     """Write *new* atomically when it differs from the current file.
 
     A ``.bak`` copy is made only when the file already existed and changed.
-    In dry-run mode nothing is written and the diff is returned.
+    An existing ``.bak`` is left untouched, so it always holds the file as it
+    was before the first write by this tool.  In dry-run mode nothing is
+    written and the diff is returned.
     """
     secrets = tuple(secret for secret in secrets if secret)
     old = path.read_text(encoding="utf-8") if path.exists() else None
@@ -90,7 +92,8 @@ def write_if_changed(
     backup: Path | None = None
     if old is not None:
         backup = path.with_name(path.name + ".bak")
-        shutil.copy2(path, backup)
+        if not backup.exists():
+            shutil.copy2(path, backup)
 
     mode = _target_mode(path, bool(secrets))
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")

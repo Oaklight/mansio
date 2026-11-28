@@ -357,3 +357,21 @@ def test_create_channel_403_is_reported(
         )
     assert exc.value.code == 1
     assert "permission denied" in capsys.readouterr().err
+
+
+def test_backup_keeps_the_pre_install_file_through_uninstall(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / ".claude" / "settings.json"
+    path.parent.mkdir()
+    original = json.dumps({"mcpServers": {"other": {"command": "x"}}}) + "\n"
+    path.write_text(original, encoding="utf-8")
+    backup = path.with_name("settings.json.bak")
+
+    _run(tmp_path, monkeypatch, "install", "claude-code", "--url", "http://x", "--id", "id-demo-1")
+    assert backup.read_text(encoding="utf-8") == original
+    assert f"backup: {backup}" in capsys.readouterr().out
+
+    _run(tmp_path, monkeypatch, "uninstall", "claude-code")
+    assert backup.read_text(encoding="utf-8") == original
+    assert f"backup: {backup}" in capsys.readouterr().out

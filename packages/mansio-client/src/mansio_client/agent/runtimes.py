@@ -123,15 +123,19 @@ def used_user_ids(spec: RuntimeSpec, *, cwd: Path | None = None) -> set[str]:
 
 
 def resolve_connection(
-    poll_format: str, *, cwd: Path | None = None
+    poll_format: str = "plain",
+    *,
+    cwd: Path | None = None,
+    url: str | None = None,
+    user_id: str | None = None,
 ) -> tuple[str | None, str | None]:
-    """Resolve the URL and user id for ``poll``.
+    """Resolve the URL and user id for ``poll`` and ``doctor``.
 
-    The environment wins; the installed project config is next, then the
-    user config.  ``plain`` searches both runtimes.
+    Explicit *url*/*user_id* win, then the environment, then the installed
+    project config, then the user config.  ``plain`` searches both runtimes.
     """
-    url = env_or("MANSIO_URL")
-    user_id = env_or("MANSIO_USER_ID")
+    url = url or env_or("MANSIO_URL")
+    user_id = user_id or env_or("MANSIO_USER_ID")
     if url and user_id:
         return url, user_id
 
