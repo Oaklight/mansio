@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 from collections.abc import Callable
 from typing import Any
 
@@ -29,15 +28,12 @@ from mansio_core.types import (
 )
 
 from mansio_client import MansioClient
+from mansio_client.delivery import DEFAULT_WAIT_SECONDS, AgentDelivery
 
 # ── Protocol Constants ────────────────────────────────────────────
 
 _JSONRPC = "2.0"
 _MCP_PROTOCOL_VERSION = "2024-11-05"
-
-_WAIT_DEFAULT_SECONDS = 30
-_WAIT_MAX_SECONDS = 120
-_WAIT_POLL_INTERVAL_SECONDS = 1.0
 
 _PERMISSION_VALUES: list[str] = sorted(ALLOWED_PERMISSIONS)
 _PERMISSION_DESCRIPTION = (
@@ -675,7 +671,7 @@ def _msg_to_dict(msg: Message) -> dict[str, Any]:
 
 
 def _tool_channels(client: MansioClient, args: dict[str, Any]) -> Any:
-    return client.channel_list(detail=args.get("detail", False))
+    return AgentDelivery(client).channels(detail=args.get("detail", False))
 
 
 def _tool_send(client: MansioClient, args: dict[str, Any]) -> Any:
@@ -691,7 +687,7 @@ def _tool_send(client: MansioClient, args: dict[str, Any]) -> Any:
 
 
 def _tool_read(client: MansioClient, args: dict[str, Any]) -> Any:
-    msgs = client.channel_read(
+    msgs = AgentDelivery(client).read(
         args["channel"],
         limit=args.get("limit", 10),
         after=args.get("after"),
@@ -704,30 +700,18 @@ def _tool_read(client: MansioClient, args: dict[str, Any]) -> Any:
 
 
 def _tool_poll(client: MansioClient, args: dict[str, Any]) -> Any:
-    msgs = client.channel_poll(args["channel"], include_own=args.get("include_own", False))
+    msgs = AgentDelivery(client).pull(args["channel"], include_own=args.get("include_own", False))
     return [_msg_to_dict(m) for m in msgs]
 
 
 def _tool_wait(client: MansioClient, args: dict[str, Any]) -> Any:
-    """Poll a channel until messages arrive or the timeout expires."""
-    timeout = args.get("timeout_seconds", _WAIT_DEFAULT_SECONDS)
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-        raise ValueError("timeout_seconds must be a number")
-    if timeout < 0:
-        raise ValueError("timeout_seconds must be non-negative")
-    if timeout > _WAIT_MAX_SECONDS:
-        raise ValueError(f"timeout_seconds must be at most {_WAIT_MAX_SECONDS}")
-
-    include_own = args.get("include_own", False)
-    deadline = time.monotonic() + timeout
-    while True:
-        msgs = client.channel_poll(args["channel"], include_own=include_own)
-        if msgs:
-            return {"messages": [_msg_to_dict(m) for m in msgs], "timed_out": False}
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return {"messages": [], "timed_out": True}
-        time.sleep(min(_WAIT_POLL_INTERVAL_SECONDS, remaining))
+    """Block on the delivery pull loop until messages arrive or time runs out."""
+    result = AgentDelivery(client).wait(
+        args["channel"],
+        args.get("timeout_seconds", DEFAULT_WAIT_SECONDS),
+        include_own=args.get("include_own", False),
+    )
+    return {"messages": [_msg_to_dict(m) for m in result.messages], "timed_out": result.timed_out}
 
 
 def _claim_result_to_dict(result: ClaimResult) -> dict[str, Any]:
@@ -743,7 +727,7 @@ def _claim_result_to_dict(result: ClaimResult) -> dict[str, Any]:
 
 
 def _tool_queue_publish(client: MansioClient, args: dict[str, Any]) -> Any:
-    msg_id = client.queue_publish(
+    msg_id = AgentDelivery(client).queue_publish(
         args["channel"],
         args["content"],
         msg_type=args.get("msg_type", "task"),
@@ -753,21 +737,23 @@ def _tool_queue_publish(client: MansioClient, args: dict[str, Any]) -> Any:
 
 
 def _tool_queue_claim(client: MansioClient, args: dict[str, Any]) -> Any:
-    result = client.queue_claim(args["channel"], lease_seconds=args.get("lease_seconds", 300))
+    result = AgentDelivery(client).queue_claim(
+        args["channel"], lease_seconds=args.get("lease_seconds", 300)
+    )
     if result is None:
         return None
     return _claim_result_to_dict(result)
 
 
 def _tool_queue_ack(client: MansioClient, args: dict[str, Any]) -> Any:
-    result = client.queue_ack(args["message_id"])
+    result = AgentDelivery(client).queue_ack(args["message_id"])
     if result is None:
         return None
     return _claim_result_to_dict(result)
 
 
 def _tool_queue_status(client: MansioClient, args: dict[str, Any]) -> Any:
-    return client.queue_status(args["message_id"])
+    return AgentDelivery(client).queue_status(args["message_id"])
 
 
 def _tool_dm_send(client: MansioClient, args: dict[str, Any]) -> Any:
@@ -822,7 +808,7 @@ def _tool_broadcast_read(client: MansioClient, args: dict[str, Any]) -> Any:
 
 
 def _tool_check_unread(client: MansioClient, args: dict[str, Any]) -> Any:
-    unread = client.check_unread(include_own=args.get("include_own", False))
+    unread = AgentDelivery(client).check_unread(include_own=args.get("include_own", False))
     return {"unread": unread, "total_unread": sum(unread.values())}
 
 

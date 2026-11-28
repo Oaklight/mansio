@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from mansio_client.client import MansioClient
+from mansio_client.delivery import AgentDelivery
 from mansio_client.env import env_or
 
 from . import runtimes
@@ -24,18 +25,18 @@ def parse_channels(value: str | None) -> list[str] | None:
 
 def collect(client: Any, channels: list[str] | None) -> tuple[list[str], list[tuple[str, Any]]]:
     """Poll *channels*, or all non-system channels when *channels* is None."""
+    delivery = AgentDelivery(client)
     if channels is None:
-        listed = client.channel_list()
         channels = [
             channel
-            for channel in listed
+            for channel in delivery.channels()
             if isinstance(channel, str) and not channel.startswith("_system:")
         ]
 
     found: list[tuple[str, Any]] = []
     for channel in channels:
         try:
-            messages = client.channel_poll(channel)
+            messages = delivery.pull(channel)
         except Exception as exc:
             print(f"mansio-agent poll: skipping {channel}: {exc}", file=sys.stderr)
             continue
