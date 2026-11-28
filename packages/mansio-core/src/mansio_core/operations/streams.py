@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from mansio_core.authz import DM_NAME_EXPECTED
+from mansio_core.authz import DM_NAME_EXPECTED, is_private_channel
 from mansio_core.authz import user_involved as _user_involved
 from mansio_core.operations import OperationContext, OperationError
 from mansio_core.operations.validation import invalid_dm_name
@@ -20,6 +20,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from mansio_core.types import Message
+
+# Cursor and presence channels; unregistered, so visibility metadata alone
+# would not keep them off a bridge.
+_SYSTEM_PREFIX = "_system:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +82,60 @@ def subscribe(
 
         sub_ids.append(ctx.bus.subscribe(channel, _callback))
     return sub_ids
+
+
+def bridgeable(ctx: OperationContext, channel: str) -> bool:
+    """Whether a channel may be bridged to a shared transport such as IRC.
+
+    A bridge writes to a broadcast medium: its members change at any time and
+    nobody can filter by recipient. Private-prefix channels (DMs, notebooks,
+    memory) and the ``_system:`` namespace are therefore never bridgeable.
+    Among the rest only a public channel is: an unregistered one counts as
+    public, while a registered private one stays closed no matter who may
+    read it, because the transport also holds people this server does not know.
+
+    A backend without a channel store has no visibility record, so every
+    channel is treated as public.
+    """
+    if is_private_channel(channel) or channel.startswith(_SYSTEM_PREFIX):
+        return False
+
+    try:
+        meta = ctx.bus.get_channel_meta(channel)
+    except NotImplementedError:
+        # Bus._require_channel_store raises this when the backend has no
+        # ChannelStore, and access_allowed(owner=None) then treats every
+        # channel as public.
+        return True
+
+    return meta is None or meta.visibility == "public"
+
+
+def subscribe_bridged(
+    ctx: OperationContext,
+    channels: list[str],
+    on_message: Callable[[str, Message], None],
+) -> tuple[dict[str, str], list[str]]:
+    """Subscribe the channels that :func:`bridgeable` accepts.
+
+    Returns ``(handles, skipped)``, where *handles* maps each bridged channel
+    to its subscription id and *skipped* lists the refused channels. There is
+    no per-message filter: once a channel is bridged, every message on it
+    reaches the transport. No :class:`Principal` is involved, so a privileged
+    caller cannot bypass the visibility rule.
+    """
+    handles: dict[str, str] = {}
+    skipped: list[str] = []
+    for channel in dict.fromkeys(channels):
+        if not bridgeable(ctx, channel):
+            skipped.append(channel)
+            continue
+
+        def _callback(message: Message, target: str = channel) -> None:
+            on_message(target, message)
+
+        handles[channel] = ctx.bus.subscribe(channel, _callback)
+    return handles, skipped
 
 
 def unsubscribe(ctx: OperationContext, sub_ids: list[str]) -> None:
