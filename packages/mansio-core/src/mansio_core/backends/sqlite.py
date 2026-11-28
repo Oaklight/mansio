@@ -380,7 +380,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             message: Message to store.
         """
         meta_json = json.dumps(message.metadata) if message.metadata else None
-        with self._lock:
+        with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO messages "
                 "(id, channel, sender, msg_type, payload, timestamp, metadata, status, "
@@ -400,7 +400,6 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                     message.intent,
                 ),
             )
-            self._conn.commit()
 
     def store_queue(self, message: Message) -> None:
         """Persist a message as a claimable queue item.
@@ -409,7 +408,7 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
             message: Message to store as a queue item.
         """
         meta_json = json.dumps(message.metadata) if message.metadata else None
-        with self._lock:
+        with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO messages "
                 "(id, channel, sender, msg_type, payload, timestamp, metadata, status, "
@@ -429,7 +428,6 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                     message.intent,
                 ),
             )
-            self._conn.commit()
 
     def get_message(self, message_id: str) -> Message | None:
         """Retrieve a single message by ID."""
@@ -874,7 +872,10 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
     # ── Channel metadata & ACL ────────────────────────────────
 
     def create_channel(self, meta: ChannelMeta, acl: list[ACLEntry] | None = None) -> None:
-        with self._lock:
+        # The connection context commits on success and rolls back on any
+        # exception, so a failed statement cannot leave its transaction open
+        # on the shared connection.
+        with self._lock, self._conn:
             try:
                 self._conn.execute(
                     "INSERT INTO channels (name, owner, visibility, created_at) "
@@ -882,6 +883,8 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                     (meta.name, meta.owner, meta.visibility, meta.created_at),
                 )
             except sqlite3.IntegrityError as exc:
+                # Only the channel INSERT means "already exists"; an ACL
+                # failure below propagates as itself.
                 raise ValueError(f"Channel '{meta.name}' already exists") from exc
             if acl:
                 self._conn.executemany(
@@ -890,7 +893,6 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                     "VALUES (?, ?, ?, ?, ?)",
                     [(e.channel, e.user_id, e.permission, e.granted_at, e.granted_by) for e in acl],
                 )
-            self._conn.commit()
 
     def get_channel(self, name: str) -> ChannelMeta | None:
         with self._lock:
@@ -924,7 +926,12 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                 sets.append("owner = ?")
                 params.append(owner)
             if not sets:
-                return self.get_channel(name) is not None
+                # A direct SELECT: calling get_channel() here would re-enter
+                # the non-reentrant self._lock and deadlock.
+                row = self._conn.execute(
+                    "SELECT 1 FROM channels WHERE name = ?", (name,)
+                ).fetchone()
+                return row is not None
             params.append(name)
             cursor = self._conn.execute(
                 f"UPDATE channels SET {', '.join(sets)} WHERE name = ?", params
@@ -1127,7 +1134,9 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
         """
         if max_messages is not None and max_messages < 1:
             raise ValueError("max_messages must be at least 1")
-        with self._lock:
+        # A DELETE opens a write transaction even when it removes no rows, so
+        # the connection context is what ends it on every path.
+        with self._lock, self._conn:
             total_removed = 0
 
             if keep_latest_per_sender:
@@ -1161,9 +1170,6 @@ class SQLiteBackend(Backend, Presenceable, Compactable, Deletable, ChannelStore)
                     (channel, channel, max_messages),
                 )
                 total_removed += cursor.rowcount
-
-            if total_removed:
-                self._conn.commit()
 
             return total_removed
 
