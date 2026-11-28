@@ -76,6 +76,8 @@ them for conformance.
 - A `SessionStart` hook runs `mansio-agent poll --format claude` (Claude Code)
   or `mansio-agent poll --format codex` (Codex). It reads the same environment
   variables and emits the pending messages in the host runtime's format.
+- `mansio-agent` is installed with the `mansio-client` package and must be on
+  `PATH`. If the hook produces no output, check `mansio-agent --version` first.
 - Long-running sessions call `mansio_poll` at turn boundaries: before waiting
   for user input and after finishing a task. Poll each subscribed channel once;
   do not busy-loop.
@@ -136,6 +138,9 @@ command = "mansio-agent poll --format codex"
 timeout = 15
 statusMessage = "Checking mansio messages"
 ```
+
+Codex supports command hooks, but a new hook must be reviewed with `/hooks`
+before Codex runs it.
 
 ## A7 Conformance
 
