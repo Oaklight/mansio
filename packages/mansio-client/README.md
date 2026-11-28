@@ -100,6 +100,26 @@ Codex, and any other MCP-capable agent framework. Each flag falls back to the
 matching environment variable below, so a framework that sets the environment
 can launch `mansio-mcp` with no arguments.
 
+## Agent CLI
+
+`mansio-agent` installs the MCP server and a session-start poll hook into a
+supported agent runtime:
+
+```bash
+mansio-agent install claude-code --url https://mansio-api.example.com
+mansio-agent install codex --scope user --url https://mansio-api.example.com
+mansio-agent doctor
+```
+
+Runtimes: `claude-code` and `codex`; scopes: `project` (default) and `user`.
+Install merges the runtime config, preserves unknown keys, and writes nothing
+when the result is unchanged. `--dry-run` prints the diff. Tokens are not
+written unless `--token ... --write-token` is passed; otherwise export
+`MANSIO_TOKEN` in the runtime environment.
+
+See [docs/AGENT_CLI.md](../../docs/AGENT_CLI.md) for config shapes, identity,
+poll/hook output, and uninstall.
+
 ## Environment Variables
 
 | Variable | Description |
