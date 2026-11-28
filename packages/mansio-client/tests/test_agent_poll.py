@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from mansio_client.agent import poll, runtimes
+from mansio_client.agent import cli, poll, runtimes
 
 _ENV_NAMES = (
     "MANSIO_URL",
@@ -138,3 +138,64 @@ def test_resolve_connection_prefers_environment(
         "http://env",
         "agent-env-1",
     )
+
+
+def _install_with_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    cli.main(
+        [
+            "install",
+            "claude-code",
+            "--url",
+            "http://config",
+            "--id",
+            "claude-code-demo-1",
+            "--token",
+            "config-token",
+            "--write-token",
+        ]
+    )
+
+
+def _recording_client(monkeypatch: pytest.MonkeyPatch) -> list[_FakeClient]:
+    made: list[_FakeClient] = []
+
+    class _RecordingClient(_FakeClient):
+        def __init__(self, url: str, user_id: str, token: str | None = None) -> None:
+            super().__init__(url, user_id, token)
+            made.append(self)
+
+    monkeypatch.setattr(poll, "MansioClient", _RecordingClient)
+    return made
+
+
+def test_token_falls_back_to_the_installed_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_with_token(tmp_path, monkeypatch)
+    made = _recording_client(monkeypatch)
+
+    assert poll.run(poll_format="claude", channels=None, token=None) == 0
+    assert made[-1].token == "config-token"
+
+
+def test_token_environment_wins_over_the_installed_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_with_token(tmp_path, monkeypatch)
+    monkeypatch.setenv("MANSIO_TOKEN", "env-token")
+    made = _recording_client(monkeypatch)
+
+    assert poll.run(poll_format="claude", channels=None, token=None) == 0
+    assert made[-1].token == "env-token"
+
+
+def test_token_flag_wins_over_environment_and_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_with_token(tmp_path, monkeypatch)
+    monkeypatch.setenv("MANSIO_TOKEN", "env-token")
+    made = _recording_client(monkeypatch)
+
+    assert poll.run(poll_format="claude", channels=None, token="flag-token") == 0
+    assert made[-1].token == "flag-token"

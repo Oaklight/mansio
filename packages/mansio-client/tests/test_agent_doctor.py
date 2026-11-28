@@ -256,3 +256,36 @@ def test_doctor_fails_when_nothing_supplies_the_connection(
     assert "export MANSIO_URL" in out
     assert "[FAIL] user-id" in out
     assert "export MANSIO_USER_ID" in out
+
+
+def test_doctor_reads_the_token_from_the_installed_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    server: _StubServer,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    server.auth_mode = "required"
+    server.expected_token = TOKEN
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    cli.main(
+        [
+            "install",
+            "claude-code",
+            "--url",
+            _url(server),
+            "--id",
+            "claude-code-demo-1",
+            "--token",
+            TOKEN,
+            "--write-token",
+        ]
+    )
+    capsys.readouterr()
+
+    cli.main(["doctor"])
+
+    out = capsys.readouterr().out
+    assert "[FAIL] token" not in out
+    assert "[ok] channels: 2 visible" in out
+    assert TOKEN not in out

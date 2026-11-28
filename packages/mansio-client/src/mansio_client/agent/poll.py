@@ -73,6 +73,7 @@ def run(
 ) -> int:
     """Run one poll. Returns a process exit code."""
     url, user_id = runtimes.resolve_connection(poll_format, cwd=cwd)
+    token = runtimes.resolve_token(poll_format, cwd=cwd, token=token)
     if not url or not user_id:
         print(
             "mansio-agent poll: MANSIO_URL and MANSIO_USER_ID are required "
