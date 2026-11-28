@@ -573,6 +573,14 @@ def _parse_irc_users(values: list[str] | None, logger: Any) -> dict[str, str]:
                 value=value,
             )
             sys.exit(1)
+        if nick in users:
+            logger.error(
+                "--irc-user repeats a nick",
+                nick=nick,
+                previous=users[nick],
+                value=user_id,
+            )
+            sys.exit(1)
         users[nick] = user_id
     return users
 
