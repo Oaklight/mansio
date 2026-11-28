@@ -94,12 +94,12 @@
   <div class="eyebrow">MANSIO · Architecture</div>
   <h1>现状与目标并列：问题在哪里</h1>
   <p class="lede">
-    左列是 <code>master @ 9bc618e</code> 的实际结构（M1–M4g 与 Agent 入口 v1 已合并），右列是 core/web/transport 重构与前端重设计的目标结构。
+    左列是 <code>master @ 2233c3c</code> 的实际结构（M1–M4g 与 Agent 入口 v1 已合并），右列是 core/web/transport 重构与前端重设计的目标结构。
     每个节点标出文件规模与职责，红色表示层次倒置或重复，橙色表示 god module，绿色表示目标态新增的接口与包。
     合并任一重构 PR 后，本页按迁移阶段更新“现状”一列。
   </p>
   <div class="meta">
-    <span>现状快照：<code>master @ 9bc618e</code>（M1–M4g 与 Agent 入口 v1 已合并）</span>
+    <span>现状快照：<code>master @ 2233c3c</code>（M1–M4g 与 Agent 入口 v1 已合并）</span>
     <span>目标：<code>core / web / client</code> 三包 + 契约层</span>
     <span>分支：<code>docs_arch</code></span>
     <button id="themeBtn" type="button">深色主题</button>
@@ -127,7 +127,7 @@
 <section id="problems">
   <h2><span class="num">00</span>问题总览</h2>
   <p class="sub">
-    自研 Python 19.0k 行（core 8.5k + web 4.5k + client 6.0k，含 agent 入口 1403 行）、admin UI 4.2k 行、测试 25.6k 行、1585 个测试函数；模块级 import 环为 0（已验证）。
+    自研 Python 19.0k 行（core 8.5k + web 4.5k + client 6.0k，含 agent 入口 1403 行）、admin UI 4.2k 行、测试 25.7k 行、1586 个测试函数；模块级 import 环为 0（已验证）。
     复杂度不在“层数”，而在下列具体位置。
   </p>
   <div class="panel">
@@ -638,7 +638,7 @@ flowchart LR
     每个 agent 实例用唯一身份接入中继，跨运行时只经服务器交换消息。
     契约 A1–A7 v1 在 <code>docs/AGENT_ENTRY.md</code>；安装器 <code>mansio-agent</code> 1403 行；
     验收是两身份互换测试 <code>test_agent_entry_conformance.py</code>（259 行）与
-    <code>mansio_wait</code> 行为测试 <code>test_agent_entry_wait.py</code>（305 行：阻塞、超时边界、错误码、游标共享）。
+    <code>mansio_wait</code> 行为测试 <code>test_agent_entry_wait.py</code>（363 行：阻塞、超时边界、错误码、游标共享、等待期间不响应其他请求）。
   </p>
   <div class="panel">
     <div class="scroll">
@@ -675,7 +675,7 @@ flowchart LR
         <tr><td>A2 接口</td><td>MCP stdio 服务器 <code>mansio-mcp</code>；14 个稳定工具，工具名与必填参数是契约，其余工具可变</td><td><code>mcp.py</code> · <code>test_mcp_tool_contract.py</code></td></tr>
         <tr><td>A3 寻址</td><td>一对一 <code>dm:&lt;a&gt;:&lt;b&gt;</code>；群聊默认频道 <code>agents</code>；不设共享 <code>inbox</code></td><td><code>AGENT_ENTRY.md</code></td></tr>
         <tr><td>A4 投递</td><td><code>mansio_poll</code> 游标至多一次；可靠任务走 queue（至少一次）；<code>read</code> / <code>check_unread</code> 不动游标</td><td><code>client.py</code> + mixins</td></tr>
-        <tr><td>A5 唤醒</td><td>MANSIO 不打断运行时；SessionStart hook 调 <code>mansio-agent poll</code>；回合边界 poll；回合内用 <code>mansio_wait</code>（默认 30 秒，上限 120 秒）</td><td><code>agent/poll.py</code> · <code>_tool_wait</code></td></tr>
+        <tr><td>A5 唤醒</td><td>MANSIO 不打断运行时；SessionStart hook 调 <code>mansio-agent poll</code>；回合边界 poll；回合内用 <code>mansio_wait</code>（默认 30 秒，上限 120 秒）；等待期间服务器不响应其他请求，测试钉住该串行性</td><td><code>agent/poll.py</code> · <code>_tool_wait</code></td></tr>
         <tr><td>A6 配置</td><td>只读环境变量 <code>MANSIO_URL</code> / <code>MANSIO_USER_ID</code> / <code>MANSIO_TOKEN</code>；token 仅在 <code>--write-token</code> 时写入 0600 文件，不进仓库；<code>poll</code> / <code>doctor</code> 按 参数 → 环境 → 已装配置 解析 token</td><td><code>agent/config.py</code> · <code>docs/AGENT_CLI.md</code></td></tr>
         <tr><td>A7 验收</td><td>两身份交换：两个 MCP 进程各发一条、各读对方一条；共享 id 或 token 的运行不算通过</td><td><code>test_agent_entry_conformance.py</code></td></tr>
       </tbody>
@@ -714,7 +714,7 @@ flowchart LR
 
 <footer>
   <span>MANSIO · 现状与目标并列（docs_arch）</span>
-  <span>数据来源：master 9bc618e 源码、README、docs/DESIGN_EN.md、docs/AGENT_ENTRY.md</span>
+  <span>数据来源：master 2233c3c 源码、README、docs/DESIGN_EN.md、docs/AGENT_ENTRY.md</span>
 </footer>
 
 </div>
