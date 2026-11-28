@@ -1124,3 +1124,7 @@ def main() -> None:
         )
 
     serve(args.url, args.user_id, token=args.token, display_name=args.display_name)
+
+
+if __name__ == "__main__":
+    main()
