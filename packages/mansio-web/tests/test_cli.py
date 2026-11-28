@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from mansio_client import MansioClient
@@ -26,6 +27,7 @@ from mansio_web.cli import (
     _check_network_exposure,
     _create_token_store,
     _parse_host_port,
+    _parse_irc_users,
     _redact_token,
     _resolve_admin_auth,
     _resolve_token_db_path,
@@ -109,6 +111,20 @@ class TestParseArgsServe:
         args = parse_args(["serve", "--irc", "host:6697", "--irc-ssl"])
         assert args.irc_ssl is True
 
+    def test_serve_irc_user_is_repeatable(self):
+        args = parse_args(
+            [
+                "serve",
+                "--irc",
+                "host:6667",
+                "--irc-user",
+                "alice=alice-agent-1",
+                "--irc-user",
+                "bob=bob-agent-2",
+            ]
+        )
+        assert args.irc_user == ["alice=alice-agent-1", "bob=bob-agent-2"]
+
     def test_serve_nats(self):
         args = parse_args(["serve", "--nats", "nats://localhost:4222"])
         assert args.nats == "nats://localhost:4222"
@@ -142,6 +158,7 @@ class TestParseArgsServe:
         assert args.irc is None
         assert args.irc_nick == "mansio-bot"
         assert args.irc_channels is None
+        assert args.irc_user is None
         assert args.irc_ssl is False
 
 
@@ -167,6 +184,34 @@ class TestParseHostPort:
     def test_invalid_host_port(self):
         with pytest.raises(argparse.ArgumentTypeError):
             _parse_host_port("host:abc")
+
+
+class TestParseIrcUsers:
+    """Tests for --irc-user parsing."""
+
+    def test_empty_values(self):
+        assert _parse_irc_users(None, MagicMock()) == {}
+
+    def test_repeated_pairs(self):
+        logger = MagicMock()
+        users = _parse_irc_users(["alice=alice-agent-1", "bob=bob-agent-2"], logger)
+        assert users == {"alice": "alice-agent-1", "bob": "bob-agent-2"}
+        logger.error.assert_not_called()
+
+    @pytest.mark.parametrize("value", ["alice", "=alice-agent-1", "alice=", ""])
+    def test_malformed_value_exits(self, value):
+        logger = MagicMock()
+        with pytest.raises(SystemExit) as exc:
+            _parse_irc_users([value], logger)
+        assert exc.value.code == 1
+        logger.error.assert_called_once()
+
+    def test_user_id_validation_is_deferred_to_the_adapter(self):
+        """A syntactically valid NICK=USER pair passes the CLI layer."""
+        logger = MagicMock()
+        users = _parse_irc_users(["alice=Bad ID"], logger)
+        assert users == {"alice": "Bad ID"}
+        logger.error.assert_not_called()
 
 
 class TestRedactToken:

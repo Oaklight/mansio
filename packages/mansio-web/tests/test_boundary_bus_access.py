@@ -1,15 +1,10 @@
 """R7 ratchet: wire adapters must not touch the Bus directly.
 
 The rule (docs_arch section 09, R7) is that a wire adapter reaches the Bus
-only through Operations. Until the operations exist, this test freezes the
-current set of direct accesses. Each stage that migrates a call site must
-remove its entry in the same change; the test then fails until it does.
-
-Planned replacements, per the target architecture:
-
-- ``adapters/irc.py``: the subscribe path and inbound publish (M6d-2).
-- Channels, ACL, messages, queue, presence, streams and admin already live
-  in ``mansio_core.operations``; the admin panel has no direct Bus access.
+only through Operations. Channels, ACL, messages, queue, presence, streams
+and the admin use cases all live in ``mansio_core.operations``, so neither
+``adapters/`` nor ``admin/`` has a direct Bus access left. The frozen set
+below stays empty: any new direct access fails this test.
 
 The scanner counts ``<bus>.<attr>`` loads, where ``<bus>`` is the name
 ``bus``, a local alias of it (``x = self._bus`` also counts), or an
@@ -28,10 +23,8 @@ SCAN_DIRS = ("adapters", "admin")
 BUS_BASE_ATTRS = {"bus", "_bus"}
 ALLOWED_LIFECYCLE = {"close"}
 
-# file -> attribute -> number of accesses. Shrinks stage by stage.
-KNOWN_VIOLATIONS: dict[str, dict[str, int]] = {
-    "adapters/irc.py": {"publish": 1, "subscribe": 1, "unsubscribe": 2},
-}
+# file -> attribute -> number of accesses. Empty: the ratchet has closed.
+KNOWN_VIOLATIONS: dict[str, dict[str, int]] = {}
 
 
 def _is_bus_ref(node: ast.expr, aliases: set[str]) -> bool:

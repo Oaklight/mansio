@@ -207,6 +207,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Mansio channels to bridge to IRC (auto-mapped to #<name>)",
     )
     serve.add_argument(
+        "--irc-user",
+        action="append",
+        metavar="NICK=USER",
+        default=None,
+        help=(
+            "Map an IRC nick to a mansio user id (repeatable). Mapped nicks "
+            "publish under that identity with the normal ACL checks"
+        ),
+    )
+    serve.add_argument(
         "--irc-ssl",
         action="store_true",
         help="Use SSL/TLS for IRC connection",
@@ -543,12 +553,38 @@ def _start_http_adapter(args: argparse.Namespace, bus: Any, token_store: Any, lo
     return http_adapter
 
 
-def _start_irc_adapter(args: argparse.Namespace, bus: Any, logger: Any) -> Any:
+def _parse_irc_users(values: list[str] | None, logger: Any) -> dict[str, str]:
+    """Parse repeated ``--irc-user NICK=USER`` values into a mapping.
+
+    Args:
+        values: Raw ``NICK=USER`` strings, or None.
+        logger: Structured logger.
+
+    Returns:
+        Mapping of IRC nick to mansio user id. Calls sys.exit(1) when a
+        value does not contain exactly one non-empty ``=`` pair.
+    """
+    users: dict[str, str] = {}
+    for value in values or []:
+        nick, sep, user_id = value.partition("=")
+        if not sep or not nick or not user_id:
+            logger.error(
+                "--irc-user requires NICK=USER format",
+                value=value,
+            )
+            sys.exit(1)
+        users[nick] = user_id
+    return users
+
+
+def _start_irc_adapter(args: argparse.Namespace, bus: Any, token_store: Any, logger: Any) -> Any:
     """Start IrcAdapter if --irc is set.
 
     Args:
         args: Parsed arguments namespace.
         bus: Message bus instance.
+        token_store: Token store or None. None means the adapter runs in
+            no-auth mode and accepts messages from unmapped nicks.
         logger: Structured logger.
 
     Returns:
@@ -563,13 +599,21 @@ def _start_irc_adapter(args: argparse.Namespace, bus: Any, logger: Any) -> Any:
         logger.error("--irc requires HOST:PORT format (e.g. irc.example.com:6667)")
         sys.exit(1)
     irc_host, irc_port = _parse_host_port(args.irc)
-    irc_adapter = IrcAdapter(
-        irc_host=irc_host,
-        irc_port=irc_port,
-        nickname=args.irc_nick,
-        channels=args.irc_channels or [],
-        use_ssl=args.irc_ssl,
-    )
+    users = _parse_irc_users(args.irc_user, logger)
+    try:
+        irc_adapter = IrcAdapter(
+            irc_host=irc_host,
+            irc_port=irc_port,
+            nickname=args.irc_nick,
+            channels=args.irc_channels or [],
+            users=users,
+            token_store=token_store,
+            allow_unauthenticated=(token_store is None),
+            use_ssl=args.irc_ssl,
+        )
+    except ValueError as exc:
+        logger.error("Invalid IRC adapter configuration", error=str(exc))
+        sys.exit(1)
     irc_adapter.attach(bus)
     irc_thread = threading.Thread(
         target=irc_adapter.serve_forever,
@@ -583,6 +627,8 @@ def _start_irc_adapter(args: argparse.Namespace, bus: Any, logger: Any) -> Any:
         port=irc_port,
         nick=args.irc_nick,
         channels=args.irc_channels or [],
+        mapped_users=len(users),
+        authenticated=token_store is not None,
     )
     return irc_adapter
 
@@ -610,7 +656,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     token_store = _create_token_store(args, logger)
 
     http_adapter = _start_http_adapter(args, bus, token_store, logger)
-    irc_adapter = _start_irc_adapter(args, bus, logger)
+    irc_adapter = _start_irc_adapter(args, bus, token_store, logger)
 
     # Start AdminServer as an Adapter
     from mansio_web.admin import AdminServer
