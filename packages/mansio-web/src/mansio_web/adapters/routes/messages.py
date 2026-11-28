@@ -13,6 +13,7 @@ from mansio_core.contracts import (
     parse_admin_compact,
 )
 from mansio_core.operations import OperationContext, OperationError
+from mansio_core.operations.channels import delete_channel as delete_channel_operation
 from mansio_core.operations.messages import DeleteMessageRequest, require_privileged
 from mansio_core.operations.messages import cleanup as cleanup_channels
 from mansio_core.operations.messages import compact as compact_channel
@@ -35,11 +36,9 @@ def register(app: App, ctx: RouteContext) -> None:
 
 
 def _register_delete_routes(app: App, ctx: RouteContext) -> None:
-    bus = ctx.bus
-    authz = ctx.authz
     operations = OperationContext(
-        bus=bus,
-        authz=authz,
+        bus=ctx.bus,
+        authz=ctx.authz,
         token_store=ctx.token_store,
         allow_unauthenticated=ctx.allow_unauthenticated,
     )
@@ -49,19 +48,14 @@ def _register_delete_routes(app: App, ctx: RouteContext) -> None:
         if not channel_name:
             return _error("Bad Request", "Channel name required", 400)
 
-        user_id = request.state.principal.user_id
-        if user_id is not None:
-            denial = authz.delete_channel_denial(user_id, channel_name)
-            if denial:
-                return _error("Forbidden", denial, 403)
-
         try:
-            count = await asyncio.to_thread(bus.delete_channel, channel_name)
+            count = await asyncio.to_thread(
+                delete_channel_operation, operations, request.state.principal, channel_name
+            )
+        except OperationError as err:
+            return _operation_error(err)
         except NotImplementedError:
             return _error("Not Implemented", "Backend does not support deletion", 501)
-
-        if count == 0:
-            return _error("Not Found", f"Channel '{channel_name}' not found or already empty", 404)
 
         return DeleteChannelResult(deleted=count, channel=channel_name).to_dict()
 

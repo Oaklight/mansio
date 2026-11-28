@@ -1,21 +1,17 @@
-"""Response and channel-validation helpers shared by route modules.
+"""Response helpers shared by route modules.
 
 Only helpers used by more than one route group live here; module-specific
-helpers stay with their group. Channel-name rules live in
-:mod:`mansio_core.operations.validation`; the wrapper below only turns an
-operation error into the HTTP error document.
+helpers stay with their group. Policy lives in ``mansio_core.operations``;
+the mapper below only turns an operation error into the HTTP error
+document.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mansio_core.contracts import ContractError, ErrorResult
 from mansio_core.operations import OperationError
-from mansio_core.operations.validation import validate_channel_name
-
-if TYPE_CHECKING:
-    from mansio_core.token_store import TokenStore
 
 _OPERATION_STATUS = {
     "bad_request": 400,
@@ -32,17 +28,6 @@ _OPERATION_LABEL = {
     "not_found": "Not Found",
     "conflict": "Conflict",
 }
-
-
-def _validate_channel_name(
-    channel: str, token_store: TokenStore | None = None
-) -> tuple[dict, int] | None:
-    """Validate channel name. Returns error tuple or None if OK."""
-    try:
-        validate_channel_name(channel, token_store=token_store)
-    except OperationError as err:
-        return _operation_error(err)
-    return None
 
 
 def _operation_error(err: OperationError) -> tuple[dict, int]:

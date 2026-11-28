@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import re
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from mansio_web.adapters.routes._common import _validate_channel_name
+from mansio_core.operations import OperationError
+from mansio_core.operations.validation import validate_channel_name
 
 # Plain channel names: 3-64 chars, lowercase, first char a letter, last char
 # alphanumeric, no colon, no consecutive separators.
@@ -46,7 +48,7 @@ def _spec_plain_channel(name: str) -> bool:
 @given(valid_plain_channels)
 def test_generated_plain_channel_names_are_accepted(name: str) -> None:
     assert _spec_plain_channel(name)
-    assert _validate_channel_name(name) is None
+    validate_channel_name(name)
 
 
 @given(valid_plain_channels)
@@ -64,8 +66,10 @@ def test_plain_channel_name_mutations_are_rejected(name: str) -> None:
         "x:" + name,
     ]
     for mutated in mutations:
-        assert _validate_channel_name(mutated) is not None, mutated
+        with pytest.raises(OperationError):
+            validate_channel_name(mutated)
 
 
 def test_plain_channel_name_with_trailing_newline_is_rejected() -> None:
-    assert _validate_channel_name("abc\n") is not None
+    with pytest.raises(OperationError):
+        validate_channel_name("abc\n")

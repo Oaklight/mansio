@@ -6,6 +6,8 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from mansio_core.contracts import ContractError, RegistryLookupResult, parse_registry_lookup
+from mansio_core.operations import OperationContext
+from mansio_core.operations.channels import registry_lookup as registry_lookup_operation
 
 from mansio_web._vendor.httpserver import App
 
@@ -19,7 +21,12 @@ if TYPE_CHECKING:
 
 def register(app: App, ctx: RouteContext) -> None:
     """Register GET /v1/registry/lookup."""
-    token_store = ctx.token_store
+    operations = OperationContext(
+        bus=ctx.bus,
+        authz=ctx.authz,
+        token_store=ctx.token_store,
+        allow_unauthenticated=ctx.allow_unauthenticated,
+    )
 
     @app.get("/v1/registry/lookup")
     async def registry_lookup(request: Request) -> dict | tuple:
@@ -27,7 +34,8 @@ def register(app: App, ctx: RouteContext) -> None:
             query = parse_registry_lookup(request.query_params)
         except ContractError as err:
             return _bad_request(err)
-        user_id = query.user_id
-        if token_store is not None and await asyncio.to_thread(token_store.user_exists, user_id):
-            return RegistryLookupResult(found=True, user_id=user_id).to_dict()
-        return RegistryLookupResult(found=False, user_id=user_id).to_dict()
+
+        found = await asyncio.to_thread(
+            registry_lookup_operation, operations, request.state.principal, query
+        )
+        return RegistryLookupResult(found=found, user_id=query.user_id).to_dict()
