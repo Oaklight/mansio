@@ -32,6 +32,7 @@ Issues = "https://github.com/Oaklight/mansio/issues"
 [project.scripts]
 mansio-client = "mansio_client.cli:main"
 mansio-mcp = "mansio_client.mcp:main"
+mansio-agent = "mansio_client.agent.cli:main"
 
 [project.optional-dependencies]
 test = [
