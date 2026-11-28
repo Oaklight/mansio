@@ -124,8 +124,9 @@ def _register_acl_set(app: App, ctx: RouteContext) -> None:
         principal = request.state.principal
         # The manage gate runs before body parsing so a denied caller still
         # gets 403 for a malformed body, as it did when the check lived here.
+        # It may reach the backend, so it runs off the event loop.
         try:
-            require_manage(operations, principal, channel)
+            await asyncio.to_thread(require_manage, operations, principal, channel)
         except OperationError as err:
             return _operation_error(err)
 
@@ -153,7 +154,7 @@ def _register_acl_add(app: App, ctx: RouteContext) -> None:
     async def add_acl_entry(request: Request, channel: str = "") -> dict | tuple:
         principal = request.state.principal
         try:
-            require_manage(operations, principal, channel)
+            await asyncio.to_thread(require_manage, operations, principal, channel)
         except OperationError as err:
             return _operation_error(err)
 
