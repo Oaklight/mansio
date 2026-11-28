@@ -9,8 +9,8 @@ is optional.
 ## A1 Identity
 
 - Every running agent instance has its own user id:
-  `<runtime>-<project>-<instance>`, for example `claude-code-mansio-01` or
-  `codex-mansio-02`.
+  `<runtime>-<project>-<instance>`, for example `claude-code-mansio-1` or
+  `codex-mansio-2`.
 - The id is lowercase, 3-64 characters, and matches
   `^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`.
 - Connection settings are read from the environment only: `MANSIO_URL`,
@@ -84,12 +84,13 @@ them for conformance.
 
 ## A6 Configuration
 
-Set the environment in the shell profile or the runtime's secret store. Do not
-commit tokens.
+`mansio-agent install` writes the blocks below. Set the environment in the
+shell profile or the runtime's secret store; the token is only written when
+`--write-token` is passed. Do not commit tokens.
 
 ```bash
 export MANSIO_URL=http://localhost:8742
-export MANSIO_USER_ID=claude-code-mansio-01
+export MANSIO_USER_ID=claude-code-mansio-1
 export MANSIO_TOKEN=mst-...   # from the secret store, never the repository
 ```
 
@@ -100,7 +101,11 @@ Claude Code `.claude/settings.json`:
   "mcpServers": {
     "mansio": {
       "command": "mansio-mcp",
-      "args": []
+      "args": [],
+      "env": {
+        "MANSIO_URL": "http://localhost:8742",
+        "MANSIO_USER_ID": "claude-code-mansio-1"
+      }
     }
   },
   "hooks": {
@@ -110,10 +115,8 @@ Claude Code `.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "mansio-agent",
-            "args": ["poll", "--format", "claude"],
-            "timeout": 15,
-            "statusMessage": "Checking mansio messages"
+            "command": "mansio-agent poll --format claude",
+            "timeout": 15
           }
         ]
       }
@@ -122,25 +125,44 @@ Claude Code `.claude/settings.json`:
 }
 ```
 
-Codex `.codex/config.toml`:
+Codex `.codex/config.toml` (MCP server only):
 
 ```toml
 [mcp_servers.mansio]
 command = "mansio-mcp"
 args = []
 
-[[hooks.SessionStart]]
-matcher = "startup|resume"
-
-[[hooks.SessionStart.hooks]]
-type = "command"
-command = "mansio-agent poll --format codex"
-timeout = 15
-statusMessage = "Checking mansio messages"
+[mcp_servers.mansio.env]
+MANSIO_URL = "http://localhost:8742"
+MANSIO_USER_ID = "codex-mansio-2"
 ```
 
-Codex supports command hooks, but a new hook must be reviewed with `/hooks`
-before Codex runs it.
+Codex `.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mansio-agent poll --format codex",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The runtime must pass the `env` block through to `mansio-mcp`; otherwise export
+the variables before launching it. Codex also accepts
+`[[hooks.SessionStart]]` in `config.toml`, but `mansio-agent install` writes
+`hooks.json`. A new Codex hook must be reviewed with `/hooks` before Codex runs
+it.
 
 ## A7 Conformance
 
@@ -149,9 +171,8 @@ identities, each with its own environment and MCP stdio process, exchange one
 message in each direction and read what the other sent. A run that shares an id
 or a token does not conform.
 
-The acceptance test is `test_agent_entry_conformance` in the client test
-suite. Its path will be linked once the test-writer's PR lands; this contract
-is not verified in CI until then.
+The acceptance test is
+[`test_agent_entry_conformance`](../packages/mansio-web/tests/test_agent_entry_conformance.py).
 
 ## Legacy examples
 

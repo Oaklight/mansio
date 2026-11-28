@@ -2,7 +2,11 @@
   "mcpServers": {
     "mansio": {
       "command": "mansio-mcp",
-      "args": []
+      "args": [],
+      "env": {
+        "MANSIO_URL": "http://localhost:8742",
+        "MANSIO_USER_ID": "claude-code-mansio-1"
+      }
     }
   },
   "hooks": {
@@ -12,10 +16,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "mansio-agent",
-            "args": ["poll", "--format", "claude"],
-            "timeout": 15,
-            "statusMessage": "Checking mansio messages"
+            "command": "mansio-agent poll --format claude",
+            "timeout": 15
           }
         ]
       }

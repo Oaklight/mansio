@@ -12,7 +12,7 @@ Each Codex instance gets its own agent id:
 
 ```bash
 export MANSIO_URL=http://localhost:8742
-export MANSIO_USER_ID=codex-mansio-02
+export MANSIO_USER_ID=codex-mansio-2
 export MANSIO_TOKEN=mst-...   # from your secret store, not this file
 ```
 
@@ -21,32 +21,48 @@ config file.
 
 ### 2. MCP server
 
-`.codex/config.toml` (per-project) or `~/.codex/config.toml` (per-user):
+`.codex/config.toml` (per-project) or `~/.codex/config.toml` (per-user).
+`mansio-agent install codex --url URL --id ID` writes these tables; the token
+is not written unless you also pass `--write-token`.
 
 ```toml
 [mcp_servers.mansio]
 command = "mansio-mcp"
 args = []
+
+[mcp_servers.mansio.env]
+MANSIO_URL = "http://localhost:8742"
+MANSIO_USER_ID = "codex-mansio-2"
 ```
 
 ### 3. Session-start poll
 
-`config.toml` form:
+Hooks live in `.codex/hooks.json` (per-project) or `~/.codex/hooks.json`
+(per-user), not in `config.toml`:
 
-```toml
-[[hooks.SessionStart]]
-matcher = "startup|resume"
-
-[[hooks.SessionStart.hooks]]
-type = "command"
-command = "mansio-agent poll --format codex"
-timeout = 15
-statusMessage = "Checking mansio messages"
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mansio-agent poll --format codex",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
 ```
 
-The standalone [`.codex/hooks.json`](hooks.json) form carries the same hook.
 `mansio-agent poll --format codex` reads the same environment variables and
-prints pending messages as session context.
+prints pending messages as session context. Codex also parses the
+`[[hooks.SessionStart]]` TOML form in `config.toml`, but `mansio-agent` writes
+`hooks.json`.
 
 The complete files are [`config.toml`](config.toml) and [`hooks.json`](hooks.json).
 

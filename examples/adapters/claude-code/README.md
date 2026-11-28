@@ -12,7 +12,7 @@ Each Claude Code instance gets its own agent id:
 
 ```bash
 export MANSIO_URL=http://localhost:8742
-export MANSIO_USER_ID=claude-code-mansio-01
+export MANSIO_USER_ID=claude-code-mansio-1
 export MANSIO_TOKEN=mst-...   # from your secret store, not this file
 ```
 
@@ -22,14 +22,20 @@ settings file.
 ### 2. MCP server
 
 Add mansio to `.claude/settings.json` (per-project) or `~/.claude/settings.json`
-(per-user). `args` stays empty; connection settings come from the environment.
+(per-user). `mansio-agent install claude-code --url URL --id ID` writes this
+entry with the `env` block below; the token is not written unless you also pass
+`--write-token`.
 
 ```json
 {
   "mcpServers": {
     "mansio": {
       "command": "mansio-mcp",
-      "args": []
+      "args": [],
+      "env": {
+        "MANSIO_URL": "http://localhost:8742",
+        "MANSIO_USER_ID": "claude-code-mansio-1"
+      }
     }
   }
 }
@@ -49,10 +55,8 @@ starts or resumes:
         "hooks": [
           {
             "type": "command",
-            "command": "mansio-agent",
-            "args": ["poll", "--format", "claude"],
-            "timeout": 15,
-            "statusMessage": "Checking mansio messages"
+            "command": "mansio-agent poll --format claude",
+            "timeout": 15
           }
         ]
       }
