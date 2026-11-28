@@ -19,6 +19,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "mansio-client", "src"))
 
 from mansio_core import Bus, MemoryBackend
+from mansio_core.authz import ChannelAuthorizer
+from mansio_core.operations import OperationContext
 from mansio_core.principal import Principal
 from mansio_web.adapters.routes.sse import (
     _SSE_REPLAY_LIMIT,
@@ -29,6 +31,16 @@ from mansio_web.adapters.routes.sse import (
     _sse_event_generator,
     _SSESession,
 )
+
+
+def _operations(bus: Bus) -> OperationContext:
+    """Operation context for a test bus."""
+    return OperationContext(
+        bus=bus,
+        authz=ChannelAuthorizer(bus),
+        token_store=None,
+        allow_unauthenticated=False,
+    )
 
 
 async def _collect_replay(session: _SSESession) -> list[str]:
@@ -59,7 +71,7 @@ class TestDropCounter(unittest.TestCase):
 
         async def _run():
             q, sub_ids, drop_lock, drop_counter = _setup_sse_subscriptions(
-                bus, ["test-ch"], Principal.supertoken()
+                _operations(bus), ["test-ch"], Principal.supertoken()
             )
             # Fill the queue to capacity (256)
             for i in range(256):
@@ -121,7 +133,7 @@ class TestDropWarningInGenerator(unittest.TestCase):
                 _SSESession(
                     queue=q,
                     sub_ids=[],
-                    bus=bus,
+                    operations=_operations(bus),
                     channels=["test-ch"],
                     principal=Principal.supertoken(),
                     last_event_id=None,
@@ -179,7 +191,7 @@ class TestDropWarningInGenerator(unittest.TestCase):
                 _SSESession(
                     queue=q,
                     sub_ids=[],
-                    bus=bus,
+                    operations=_operations(bus),
                     channels=["test-ch"],
                     principal=Principal.supertoken(),
                     last_event_id=None,
@@ -246,7 +258,7 @@ class TestQuietStreamDropWarning(unittest.TestCase):
             session = _SSESession(
                 queue=_TimeoutThenStopQueue(),
                 sub_ids=[],
-                bus=bus,
+                operations=_operations(bus),
                 channels=["quiet-ch"],
                 principal=Principal.supertoken(),
                 drop_lock=drop_lock,
@@ -276,7 +288,7 @@ class TestQuietStreamDropWarning(unittest.TestCase):
             session = _SSESession(
                 queue=_TimeoutThenStopQueue(),
                 sub_ids=[],
-                bus=bus,
+                operations=_operations(bus),
                 channels=["quiet-ch"],
                 principal=Principal.supertoken(),
                 drop_lock=drop_lock,
@@ -302,7 +314,7 @@ class TestReplayTruncationWarning(unittest.TestCase):
         session = _SSESession(
             queue=asyncio.Queue(),
             sub_ids=[],
-            bus=bus,
+            operations=_operations(bus),
             channels=[channel],
             principal=Principal.supertoken(),
             last_event_id=last_event_id,
