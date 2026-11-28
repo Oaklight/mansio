@@ -14,10 +14,11 @@ Planned replacements, per the target architecture:
   ``bus.unsubscribe`` become ``operations.subscribe``.
 - ``adapters/routes/sse.py``: ``bus.subscribe`` / ``bus.unsubscribe`` /
   ``bus.query`` become ``operations.subscribe``.
-- ``adapters/routes/*`` and ``admin/view.py``: the remaining calls become
-  channel, queue, presence, and admin operations (M6c). Message publish,
-  query, delete, cleanup, and compact already live in
-  ``mansio_core.operations.messages``.
+- ``adapters/routes/queue.py`` and ``presence.py``: queue and presence
+  operations (M6c, second PR).
+- ``admin/view.py`` and ``admin/routes/messages.py``: admin operations.
+- Channels, ACL, and messages already live in
+  ``mansio_core.operations.{channels,acl,messages}``.
 
 The scanner counts ``<bus>.<attr>`` loads, where ``<bus>`` is the name
 ``bus``, a local alias of it (``x = self._bus`` also counts), or an
@@ -40,16 +41,6 @@ ALLOWED_LIFECYCLE = {"close"}
 KNOWN_VIOLATIONS: dict[str, dict[str, int]] = {
     "adapters/http.py": {"heartbeat": 1},
     "adapters/irc.py": {"publish": 1, "subscribe": 1, "unsubscribe": 2},
-    "adapters/routes/channel_admin.py": {
-        "add_acl_entry": 1,
-        "create_channel": 1,
-        "get_acl": 1,
-        "get_channel_meta": 3,
-        "remove_acl_entry": 1,
-        "set_acl": 1,
-    },
-    "adapters/routes/channels.py": {"channels": 2, "channels_detail": 2},
-    "adapters/routes/messages.py": {"delete_channel": 1},
     "adapters/routes/presence.py": {"heartbeat": 1, "user_status": 1, "users": 1},
     "adapters/routes/queue.py": {
         "get_message": 2,

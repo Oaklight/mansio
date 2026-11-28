@@ -1,4 +1,4 @@
-"""Tests for channel name validation in HttpAdapter.
+"""Tests for channel name validation in ``mansio_core.operations.validation``.
 
 Verifies:
 - User channel naming rules (length, start/end chars, specials)
@@ -11,11 +11,18 @@ Verifies:
 from __future__ import annotations
 
 import pytest
-from mansio_web.adapters.routes._common import _validate_channel_name
+from mansio_core.operations import OperationError
+from mansio_core.operations.validation import validate_channel_name
+
+
+def _assert_rejected(name: str) -> None:
+    with pytest.raises(OperationError) as exc:
+        validate_channel_name(name)
+    assert exc.value.kind == "bad_request"
 
 
 class TestValidateChannelName:
-    """Unit tests for _validate_channel_name."""
+    """Unit tests for validate_channel_name."""
 
     # --- Valid user channels ---
 
@@ -38,7 +45,7 @@ class TestValidateChannelName:
         ],
     )
     def test_valid_user_channel(self, name: str) -> None:
-        assert _validate_channel_name(name) is None
+        validate_channel_name(name)
 
     # --- Invalid: length ---
 
@@ -53,9 +60,7 @@ class TestValidateChannelName:
         ],
     )
     def test_reject_bad_length(self, name: str) -> None:
-        result = _validate_channel_name(name)
-        assert result is not None
-        assert result[1] == 400
+        _assert_rejected(name)
 
     # --- Invalid: start character ---
 
@@ -69,9 +74,7 @@ class TestValidateChannelName:
         ],
     )
     def test_reject_bad_start(self, name: str) -> None:
-        result = _validate_channel_name(name)
-        assert result is not None
-        assert result[1] == 400
+        _assert_rejected(name)
 
     # --- Invalid: trailing special characters ---
 
@@ -84,9 +87,7 @@ class TestValidateChannelName:
         ],
     )
     def test_reject_trailing_special(self, name: str) -> None:
-        result = _validate_channel_name(name)
-        assert result is not None
-        assert result[1] == 400
+        _assert_rejected(name)
 
     # --- Invalid: format ---
 
@@ -104,16 +105,16 @@ class TestValidateChannelName:
         ],
     )
     def test_reject_bad_format(self, name: str) -> None:
-        result = _validate_channel_name(name)
-        assert result is not None
-        assert result[1] == 400
+        _assert_rejected(name)
 
     # --- Reserved prefixes pass name validation (auth enforced elsewhere) ---
 
     def test_reserved_prefix_passes_name_validation(self) -> None:
-        """broadcast: is admin-only, but _validate_channel_name only checks format.
-        Auth enforcement happens in _validate_and_auth_publish."""
-        assert _validate_channel_name("broadcast:test") is None
+        """broadcast: is admin-only, but validate_channel_name only checks format.
+
+        The publish operation enforces the ACL rule.
+        """
+        validate_channel_name("broadcast:test")
 
     # --- Valid system channels ---
 
@@ -128,7 +129,7 @@ class TestValidateChannelName:
         ],
     )
     def test_valid_system_channel(self, name: str) -> None:
-        assert _validate_channel_name(name) is None
+        validate_channel_name(name)
 
     # --- Invalid: trailing newline ---
 
@@ -145,18 +146,14 @@ class TestValidateChannelName:
     )
     def test_reject_trailing_newline(self, name: str) -> None:
         """#384: a ``$`` anchor also matches before a trailing newline."""
-        result = _validate_channel_name(name)
-        assert result is not None
-        assert result[1] == 400
+        _assert_rejected(name)
 
     # --- Boundary: exactly 64 chars ---
 
     def test_64_char_boundary(self) -> None:
         """64 chars should be accepted (stated max), 65 rejected."""
-        assert _validate_channel_name("a" * 64) is None
-        result = _validate_channel_name("a" * 65)
-        assert result is not None
-        assert result[1] == 400
+        validate_channel_name("a" * 64)
+        _assert_rejected("a" * 65)
 
     # --- Trailing underscore consistency ---
 
@@ -164,6 +161,5 @@ class TestValidateChannelName:
         """All trailing specials (hyphen, dot, underscore) should be rejected."""
         for suffix in ["-", ".", "_"]:
             name = "test" + suffix
-            result = _validate_channel_name(name)
-            assert result is not None, f"trailing '{suffix}' should be rejected"
-            assert result[1] == 400
+            with pytest.raises(OperationError):
+                validate_channel_name(name)
