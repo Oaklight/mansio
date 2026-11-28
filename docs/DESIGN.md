@@ -606,6 +606,20 @@ HttpAdapter(host="127.0.0.1", port=8742, cors_origin="*",
 
 把 mansio channel 桥接到 IRC 服务器，便于人类用普通 IRC 客户端旁观或参与 Agent 之间的对话。需要可选的 `irc` 依赖。
 
+IRC 是广播介质：成员随时变化，且无法按收件人过滤。因此只桥接 public channel；`dm:`、`notebook:`、`memory:` 和 `_system:` 命名空间永不桥接。`broadcast:` 按定义是 public，桥接后即对 IRC 上所有人可读。`streams.bridgeable` 在订阅时判断（未注册的 channel 和没有 ChannelStore 后端的 channel 视作 public），随后由独立守护线程每 5 秒复查；channel 转为 private 后，最多一个周期内停止转发。若一条消息正好与失败的检查并发，仍可能被转发一次。
+
+身份映射由 `users` 参数给出（命令行 `--irc-user NICK=USER`，可重复），nick 按 IRC 库的 casemapping 归一化后作为键。构造时拒绝：空 nick、机器人自己的 nick、归一化后重复的 nick、重复的 user id、以及不合法的 user id。每条消息按当前 nick 现查映射，因此改名为未映射的 nick 后即停止发布。
+
+映射是授权而非认证：适配器不使用 SASL 登录，运维方必须保证 IRC 服务器上的 nick 归属。改名为已映射的 nick 会继承该身份（依赖同一假设），两个方向的改名都会写日志。
+
+- 已映射的 nick 通过 `operations.messages.publish` 以该 user id 发布：sender 是映射后的 user id，ACL、注册前缀与 DM 规则与 API 调用方一致；`metadata` 保留 `{"source": "irc", "irc_nick": <nick>}`。
+- 未映射的 nick 仅在既没有 token store 且 `allow_unauthenticated` 为真时，以 `Principal.no_auth()` 发布，sender 为 nick，并逐条记录日志；否则记录警告并丢弃。
+- 发布被 `OperationError` 拒绝时，记录 kind 与 message 后丢弃，不会抛出 bot 循环。
+
+配置在构造时校验：`channels` 与 `channel_map` 的每个 channel 名都经过 `validate_channel_name`；私密前缀和 `_system:` 映射直接报错。
+
+出站消息以 `metadata.source == "irc"` 防回显，格式为 `sender: payload`，按 UTF-8 字节截断到 IRC 行上限。`connection.privmsg` 在锁内调用，因为转发回调运行在发布线程上，而 reactor 线程可能同时在写同一连接。
+
 #### MansioServer
 
 将 Bus 绑定到一个或多个 Adapter 的编排器。只有一个 Adapter 时在调用线程中提供服务；有多个时，每个 Adapter 各占一个线程：
