@@ -10,13 +10,15 @@ from mansio_core.operations import OperationContext, OperationError
 from mansio_core.operations.streams import (
     StreamRequest,
     allows,
+    bridgeable,
     replay,
     subscribe,
+    subscribe_bridged,
     unsubscribe,
     validate,
 )
 from mansio_core.principal import Principal
-from mansio_core.types import Message
+from mansio_core.types import ChannelMeta, Message
 
 
 def _message(message_id: str, channel: str, sender: str) -> Message:
@@ -46,6 +48,9 @@ class _FakeBus:
         self.unsubscribed: list[str] = []
         self.query_result: dict[str, list[Message]] = {}
         self.query_calls: list[tuple] = []
+        self.channel_meta: dict[str, ChannelMeta | None] = {}
+        self.meta_not_supported = False
+        self.meta_calls: list[str] = []
 
     def subscribe(self, channel: str, callback: Any) -> str:
         sub_id = f"sub-{len(self.subscriptions) + 1}"
@@ -58,6 +63,12 @@ class _FakeBus:
     def query(self, channel: str, after: str, limit: int) -> list[Message]:
         self.query_calls.append((channel, after, limit))
         return self.query_result.get(channel, [])
+
+    def get_channel_meta(self, channel: str) -> ChannelMeta | None:
+        self.meta_calls.append(channel)
+        if self.meta_not_supported:
+            raise NotImplementedError
+        return self.channel_meta.get(channel)
 
     def publish_to(self, channel: str, message: Message) -> None:
         """Deliver *message* to the callbacks of *channel*."""
@@ -180,6 +191,94 @@ class TestUnsubscribe:
     def test_drops_every_subscription(self, ctx, bus) -> None:
         unsubscribe(ctx, ["sub-1", "sub-2"])
         assert bus.unsubscribed == ["sub-1", "sub-2"]
+
+
+def _meta(channel: str, visibility: str) -> ChannelMeta:
+    return ChannelMeta(
+        name=channel,
+        owner="owner-1",
+        visibility=visibility,
+        created_at="2026-01-01T00:00:00Z",
+    )
+
+
+class TestBridgeable:
+    """The shared-transport visibility rule (M6d-2)."""
+
+    @pytest.mark.parametrize(
+        "channel",
+        ["dm:agent-1:agent-2", "notebook:agent-1", "memory:agent-1"],
+    )
+    def test_private_prefix_channels_are_never_bridgeable(self, ctx, bus, channel) -> None:
+        bus.channel_meta[channel] = _meta(channel, "public")
+        assert bridgeable(ctx, channel) is False
+        assert bus.meta_calls == []
+
+    @pytest.mark.parametrize("channel", ["_system:presence:agent-1", "_system:cursors"])
+    def test_system_channels_are_never_bridgeable(self, ctx, bus, channel) -> None:
+        assert bridgeable(ctx, channel) is False
+        assert bus.meta_calls == []
+
+    def test_an_unregistered_channel_is_bridgeable(self, ctx, bus) -> None:
+        assert bridgeable(ctx, "tasks") is True
+        assert bus.meta_calls == ["tasks"]
+
+    def test_a_backend_without_channel_metadata_is_treated_as_public(self, ctx, bus) -> None:
+        bus.meta_not_supported = True
+        assert bridgeable(ctx, "tasks") is True
+
+    def test_a_public_channel_is_bridgeable(self, ctx, bus) -> None:
+        bus.channel_meta["tasks"] = _meta("tasks", "public")
+        assert bridgeable(ctx, "tasks") is True
+
+    def test_a_private_channel_is_never_bridgeable(self, ctx, bus) -> None:
+        """No reader can be accounted for: the transport has unknown members."""
+        bus.channel_meta["tasks"] = _meta("tasks", "private")
+        assert bridgeable(ctx, "tasks") is False
+
+    def test_a_broadcast_channel_is_bridgeable(self, ctx, bus) -> None:
+        bus.channel_meta["broadcast:all"] = _meta("broadcast:all", "public")
+        assert bridgeable(ctx, "broadcast:all") is True
+
+
+class TestSubscribeBridged:
+    """Subscriptions handed to a transport that cannot filter recipients."""
+
+    def test_returns_handles_and_skipped_channels(self, ctx, bus) -> None:
+        bus.channel_meta["locked"] = _meta("locked", "private")
+        handles, skipped = subscribe_bridged(
+            ctx,
+            ["tasks", "dm:agent-1:agent-2", "locked", "sync"],
+            lambda channel, message: None,
+        )
+        assert handles == {"tasks": "sub-1", "sync": "sub-2"}
+        assert skipped == ["dm:agent-1:agent-2", "locked"]
+
+    def test_subscribes_every_bridgeable_channel_without_a_filter(self, ctx, bus) -> None:
+        delivered: list[tuple[str, str]] = []
+        subscribe_bridged(
+            ctx,
+            ["tasks", "sync"],
+            lambda channel, message: delivered.append((channel, message.id)),
+        )
+        assert {channel for channel, _ in bus.subscriptions.values()} == {"tasks", "sync"}
+
+        # No principal is involved: the bridgeable check is the gate, so
+        # every message on a bridged channel reaches the transport.
+        bus.publish_to("tasks", _message("m1", "tasks", "agent-1"))
+        bus.publish_to("sync", _message("m2", "sync", "agent-3"))
+
+        assert delivered == [("tasks", "m1"), ("sync", "m2")]
+
+    def test_duplicate_channels_subscribe_once(self, ctx, bus) -> None:
+        handles, _ = subscribe_bridged(ctx, ["tasks", "tasks"], lambda channel, message: None)
+        assert handles == {"tasks": "sub-1"}
+        assert len(bus.subscriptions) == 1
+
+    def test_no_channels_subscribes_nothing(self, ctx, bus) -> None:
+        handles, skipped = subscribe_bridged(ctx, [], lambda channel, message: None)
+        assert (handles, skipped) == ({}, [])
+        assert bus.subscriptions == {}
 
 
 class TestReplay:
