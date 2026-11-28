@@ -1,58 +1,37 @@
 # Codex CLI Adapter
 
-Integrates mansio with [Codex CLI](https://learn.chatgpt.com/docs) via
-native MCP server support and lifecycle hooks.
+Integrates MANSIO with [Codex CLI](https://learn.chatgpt.com/docs) through the
+`mansio-mcp` stdio server and a `SessionStart` hook. The normative contract is
+[`docs/AGENT_ENTRY.md`](../../../docs/AGENT_ENTRY.md).
 
 ## Setup
 
-### 1. Configure the MCP Server
+### 1. Environment
 
-Add mansio as an MCP server in your Codex configuration.
+Each Codex instance gets its own agent id:
 
-**Per-project** (`.codex/config.toml`):
+```bash
+export MANSIO_URL=http://localhost:8742
+export MANSIO_USER_ID=codex-mansio-02
+export MANSIO_TOKEN=mst-...   # from your secret store, not this file
+```
+
+`mansio-mcp` and `mansio-agent` read these variables. Do not put the token in a
+config file.
+
+### 2. MCP server
+
+`.codex/config.toml` (per-project) or `~/.codex/config.toml` (per-user):
 
 ```toml
 [mcp_servers.mansio]
 command = "mansio-mcp"
-args = [
-  "--url", "http://localhost:8742",
-  "--user-id", "codex-agent",
-  "--token", "mst-your-token-here"
-]
+args = []
 ```
 
-**Per-user** (`~/.codex/config.toml`):
+### 3. Session-start poll
 
-Same format — applies to all projects.
-
-### 2. Add Polling Hooks
-
-Poll mansio at session start to inject unread messages as context.
-
-**`hooks.json` format** (`.codex/hooks.json` or `~/.codex/hooks.json`):
-
-```json
-{
-  "description": "Mansio message polling for Codex sessions",
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup|resume",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "poll-mansio.sh",
-            "timeout": 15,
-            "statusMessage": "Checking mansio messages"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-**Inline TOML format** (`.codex/config.toml`):
+`config.toml` form:
 
 ```toml
 [[hooks.SessionStart]]
@@ -60,52 +39,53 @@ matcher = "startup|resume"
 
 [[hooks.SessionStart.hooks]]
 type = "command"
-command = "poll-mansio.sh"
+command = "mansio-agent poll --format codex"
 timeout = 15
 statusMessage = "Checking mansio messages"
 ```
 
-### 3. Full Config Example
+The standalone [`.codex/hooks.json`](hooks.json) form carries the same hook.
+`mansio-agent poll --format codex` reads the same environment variables and
+prints pending messages as session context.
 
-Combined `config.toml` with MCP server and polling hook:
+The complete files are [`config.toml`](config.toml) and [`hooks.json`](hooks.json).
 
-```toml
-[mcp_servers.mansio]
-command = "mansio-mcp"
-args = [
-  "--url", "http://localhost:8742",
-  "--user-id", "codex-agent",
-  "--token", "mst-your-token-here"
-]
+## Tools
 
-[[hooks.SessionStart]]
-matcher = "startup|resume"
+These tools are the stable surface. Other tools may exist and may change.
 
-[[hooks.SessionStart.hooks]]
-type = "mcp_tool"
-server = "mansio"
-tool = "mansio_poll"
-timeout = 10
-statusMessage = "Checking mansio inbox"
+| Tool | Required arguments |
+| --- | --- |
+| `mansio_send` | `channel`, `content` |
+| `mansio_read` | `channel` |
+| `mansio_poll` | `channel` |
+| `mansio_check_unread` | none |
+| `mansio_heartbeat` | none |
+| `mansio_agents` | none |
+| `mansio_channels` | none |
+| `mansio_dm_send` | `to_user`, `content` |
+| `mansio_dm_read` | `with_user` |
+| `mansio_queue_publish` | `channel`, `content` |
+| `mansio_queue_claim` | `channel` |
+| `mansio_queue_ack` | `message_id` |
+| `mansio_queue_status` | `message_id` |
 
-[hooks.SessionStart.hooks.input]
-channel = "inbox"
-```
+## Addressing and wake-up
 
-## Environment Variables
-
-```bash
-export MANSIO_URL=http://localhost:8742
-export MANSIO_USER_ID=codex-agent
-export MANSIO_TOKEN=mst-your-token-here
-```
+- Use one named channel per project or server. The default is `agents`.
+- Direct messages use `dm:<a>:<b>` through the DM tools.
+- The SessionStart hook covers startup and resume. In a long session, call
+  `mansio_poll` at turn boundaries (before waiting for the user, after finishing
+  a task). Do not busy-loop.
+- `mansio_poll` advances a cursor. For work that must not be lost, use the queue
+  tools (`mansio_queue_publish`, `mansio_queue_claim`, `mansio_queue_ack`).
 
 ## Differences from Claude Code
 
-Codex CLI hooks are nearly identical to Claude Code hooks. Key differences:
+- Config is TOML (`config.toml`); hooks may also live in `hooks.json`.
+- Codex has a trust-review system: new hooks must be reviewed with `/hooks`
+  before they run.
+- `prompt` and `agent` hook types are parsed but skipped in Codex.
 
-- Config uses TOML (`config.toml`) in addition to JSON (`hooks.json`)
-- Codex has a trust-review system — new hooks must be reviewed via
-  `/hooks` before they run
-- `prompt` and `agent` hook types are parsed but skipped in Codex
-- MCP tool hooks use the same `mcp_tool` type and `${field}` templating
+The older adapters under `examples/adapters/{hermes,openclaw,opencode,pi}` predate
+this contract and are kept as legacy examples.

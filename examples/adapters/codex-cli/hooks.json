@@ -6,12 +6,10 @@
         "matcher": "startup|resume",
         "hooks": [
           {
-            "type": "mcp_tool",
-            "server": "mansio",
-            "tool": "mansio_poll",
-            "input": { "channel": "inbox" },
-            "timeout": 10,
-            "statusMessage": "Checking mansio inbox"
+            "type": "command",
+            "command": "mansio-agent poll --format codex",
+            "timeout": 15,
+            "statusMessage": "Checking mansio messages"
           }
         ]
       }
