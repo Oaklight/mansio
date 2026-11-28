@@ -16,17 +16,11 @@ covered here.
 
 from __future__ import annotations
 
-import contextlib
-import json
-import os
-import queue
-import subprocess
-import sys
 import threading
 import time
-from typing import Any, NoReturn
 
 import pytest
+from _mcp_child import McpChild
 from mansio_client import MansioClient
 from mansio_core.types import Message
 
@@ -42,109 +36,6 @@ REQUEST_TIMEOUT = 10.0
 # Lease is 1 s; wait a little past it without a long sleep.
 LEASE_SECONDS = 1
 LEASE_EXPIRY_WAIT_SECONDS = 1.3
-
-
-class McpChild:
-    """A ``python -m mansio_client.mcp`` child driven with line JSON-RPC."""
-
-    def __init__(self, url: str, user_id: str, token: str) -> None:
-        env = {
-            **os.environ,
-            "MANSIO_URL": url,
-            "MANSIO_USER_ID": user_id,
-            "MANSIO_TOKEN": token,
-        }
-        self.proc = subprocess.Popen(
-            [sys.executable, "-m", "mansio_client.mcp"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            env=env,
-        )
-        self._lines: queue.Queue[str | None] = queue.Queue()
-        self._next_id = 0
-        threading.Thread(target=self._pump, daemon=True).start()
-
-    def _pump(self) -> None:
-        stream = self.proc.stdout
-        if stream is None:
-            self._lines.put(None)
-            return
-        try:
-            for line in stream:
-                self._lines.put(line)
-        except (OSError, ValueError):
-            pass
-        finally:
-            self._lines.put(None)
-
-    def _fail(self, message: str) -> NoReturn:
-        if self.proc.poll() is None:
-            self.proc.kill()
-        self.proc.wait(timeout=5)
-        stderr = self.proc.stderr.read() if self.proc.stderr is not None else ""
-        raise AssertionError(f"{message}\nstderr tail:\n{stderr[-2000:]}")
-
-    def _read(self, request_id: int, timeout: float = REQUEST_TIMEOUT) -> dict[str, Any]:
-        try:
-            line = self._lines.get(timeout=timeout)
-        except queue.Empty:
-            self._fail(f"no response to id {request_id} within {timeout}s")
-        if line is None:
-            self._fail(f"stdout closed before id {request_id}")
-        return json.loads(line)
-
-    def _send(self, message: dict[str, Any]) -> None:
-        assert self.proc.stdin is not None
-        self.proc.stdin.write(json.dumps(message) + "\n")
-        self.proc.stdin.flush()
-
-    def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        self._next_id += 1
-        request_id = self._next_id
-        self._send({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params or {}})
-        response = self._read(request_id)
-        assert response.get("jsonrpc") == "2.0", response
-        assert response.get("id") == request_id, response
-        return response
-
-    def initialize(self) -> None:
-        response = self.request(
-            "initialize",
-            {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "delivery-semantics", "version": "1"},
-            },
-        )
-        assert response["result"]["serverInfo"]["name"] == "mansio-mcp", response
-        self._send({"jsonrpc": "2.0", "method": "notifications/initialized"})
-
-    def tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        response = self.request("tools/call", {"name": name, "arguments": arguments})
-        assert "error" not in response, response
-        result = response["result"]
-        assert set(result) == {"content"}, result
-        block = result["content"][0]
-        assert block["type"] == "text"
-        return json.loads(block["text"])
-
-    def close(self) -> None:
-        proc = self.proc
-        if proc.stdin is not None:
-            with contextlib.suppress(OSError):
-                proc.stdin.close()
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
-        for stream in (proc.stdout, proc.stderr):
-            if stream is not None:
-                stream.close()
 
 
 @pytest.fixture()
