@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -33,6 +34,10 @@ from mansio_client import MansioClient
 
 _JSONRPC = "2.0"
 _MCP_PROTOCOL_VERSION = "2024-11-05"
+
+_WAIT_DEFAULT_SECONDS = 30
+_WAIT_MAX_SECONDS = 120
+_WAIT_POLL_INTERVAL_SECONDS = 1.0
 
 _PERMISSION_VALUES: list[str] = sorted(ALLOWED_PERMISSIONS)
 _PERMISSION_DESCRIPTION = (
@@ -146,6 +151,33 @@ _TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "channel": {"type": "string", "description": "Channel to poll."},
+                "include_own": {
+                    "type": "boolean",
+                    "description": "Include messages this agent sent (default: false).",
+                    "default": False,
+                },
+            },
+            "required": ["channel"],
+        },
+    },
+    {
+        "name": "mansio_wait",
+        "description": (
+            "Wait for new messages on a channel until they arrive or the timeout "
+            "expires. Uses the same cursor as mansio_poll. Blocks the MCP server "
+            "for up to timeout_seconds (default: 30; maximum: 120); a larger "
+            "request is rejected."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "channel": {"type": "string", "description": "Channel to wait on."},
+                "timeout_seconds": {
+                    "type": "integer",
+                    "description": "Maximum seconds to wait (default: 30; maximum: 120).",
+                    "default": 30,
+                    "maximum": 120,
+                },
                 "include_own": {
                     "type": "boolean",
                     "description": "Include messages this agent sent (default: false).",
@@ -676,6 +708,28 @@ def _tool_poll(client: MansioClient, args: dict[str, Any]) -> Any:
     return [_msg_to_dict(m) for m in msgs]
 
 
+def _tool_wait(client: MansioClient, args: dict[str, Any]) -> Any:
+    """Poll a channel until messages arrive or the timeout expires."""
+    timeout = args.get("timeout_seconds", _WAIT_DEFAULT_SECONDS)
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        raise ValueError("timeout_seconds must be a number")
+    if timeout < 0:
+        raise ValueError("timeout_seconds must be non-negative")
+    if timeout > _WAIT_MAX_SECONDS:
+        raise ValueError(f"timeout_seconds must be at most {_WAIT_MAX_SECONDS}")
+
+    include_own = args.get("include_own", False)
+    deadline = time.monotonic() + timeout
+    while True:
+        msgs = client.channel_poll(args["channel"], include_own=include_own)
+        if msgs:
+            return {"messages": [_msg_to_dict(m) for m in msgs], "timed_out": False}
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {"messages": [], "timed_out": True}
+        time.sleep(min(_WAIT_POLL_INTERVAL_SECONDS, remaining))
+
+
 def _claim_result_to_dict(result: ClaimResult) -> dict[str, Any]:
     d: dict[str, Any] = {
         "message": _msg_to_dict(result.message),
@@ -885,6 +939,7 @@ _DISPATCH: dict[str, Callable[[MansioClient, dict[str, Any]], Any]] = {
     "mansio_send": _tool_send,
     "mansio_read": _tool_read,
     "mansio_poll": _tool_poll,
+    "mansio_wait": _tool_wait,
     "mansio_queue_publish": _tool_queue_publish,
     "mansio_queue_claim": _tool_queue_claim,
     "mansio_queue_ack": _tool_queue_ack,
