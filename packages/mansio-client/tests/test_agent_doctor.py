@@ -10,9 +10,26 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from mansio_client.agent import doctor
+from mansio_client.agent import cli, doctor
 
 TOKEN = "secret-token-value"
+
+_ENV_NAMES = (
+    "MANSIO_URL",
+    "MANSIO_USER_ID",
+    "MANSIO_TOKEN",
+    "MANSIO_CHANNELS",
+    "MANSIO_AGENT_ID",
+    "PIAZZA_URL",
+    "PIAZZA_AGENT_ID",
+    "PIAZZA_TOKEN",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in _ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -201,3 +218,41 @@ def test_doctor_notes_codex_hook_review(tmp_path: Path, server: _StubServer) -> 
     )
     assert code == 0
     assert "[note] Codex: review the installed hook with /hooks" in "\n".join(lines)
+
+
+def test_doctor_reads_connection_from_the_installed_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    server: _StubServer,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    server.auth_mode = "disabled"
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    cli.main(["install", "claude-code", "--url", _url(server), "--id", "claude-code-demo-1"])
+    capsys.readouterr()
+
+    cli.main(["doctor"])
+
+    out = capsys.readouterr().out
+    assert f"[ok] url: {_url(server)}" in out
+    assert "[ok] user-id: claude-code-demo-1" in out
+    assert "[ok] reachable" in out
+    assert "[ok] heartbeat" in out
+
+
+def test_doctor_fails_when_nothing_supplies_the_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["doctor"])
+
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "[FAIL] url" in out
+    assert "export MANSIO_URL" in out
+    assert "[FAIL] user-id" in out
+    assert "export MANSIO_USER_ID" in out

@@ -204,9 +204,10 @@ def _poll(args: argparse.Namespace) -> int:
 
 
 def _doctor(args: argparse.Namespace) -> int:
+    url, user_id = runtimes.resolve_connection("plain", url=args.url, user_id=args.user_id)
     return doctor.run(
-        url=args.url or env_or("MANSIO_URL"),
-        user_id=args.user_id or env_or("MANSIO_USER_ID"),
+        url=url,
+        user_id=user_id,
         token=args.token or env_or("MANSIO_TOKEN"),
     )
 

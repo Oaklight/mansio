@@ -113,6 +113,21 @@ def test_write_if_changed_backup_only_on_change(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == '{"a": 1}\n'
 
 
+def test_write_if_changed_keeps_the_first_backup(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text("{}\n", encoding="utf-8")
+
+    first = config.write_if_changed(path, '{"a": 1}\n')
+    assert first.backup is not None
+    assert first.backup.read_text(encoding="utf-8") == "{}\n"
+
+    second = config.write_if_changed(path, '{"a": 2}\n')
+    assert second.changed is True
+    assert second.backup == first.backup
+    assert first.backup.read_text(encoding="utf-8") == "{}\n"
+    assert path.read_text(encoding="utf-8") == '{"a": 2}\n'
+
+
 def test_write_with_secret_sets_private_mode(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
     config.write_if_changed(path, '{"MANSIO_TOKEN": "secret"}\n', secrets=("secret",))

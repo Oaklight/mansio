@@ -55,8 +55,10 @@ Other behavior:
 - JSON files are re-serialized with two-space indentation. Existing key order
   and whitespace are not preserved, but every key is kept. TOML edits are
   line-based and keep comments and unrelated tables.
-- Writes use an atomic replace. A `.bak` copy of the previous file is created
-  alongside an existing file only when that file changed.
+- Writes use an atomic replace. The first change to an existing file creates a
+  `.bak` copy of the original alongside it. Later writes leave that copy
+  untouched, so it always holds the file as it was before `mansio-agent` first
+  modified it. Its path is printed when a file changes.
 - `--dry-run` prints the exact diff and writes nothing.
 
 ### Identity
@@ -119,11 +121,16 @@ mansio-agent doctor
 Checks, one line each, with a fix hint on failure:
 
 1. `mansio-mcp` and `mansio-agent` are on `PATH`.
-2. `MANSIO_URL` is set and the server is reachable.
+2. The connection is known — from `--url`/`--id`, the environment, or the
+   installed config (project, then user) — and the server is reachable.
 3. `/v1/auth/check` reports the auth mode; a required server needs a token.
 4. The channel list is readable with the current token.
 5. A heartbeat is accepted.
 6. The presence roster (`mansio_agents`) is readable.
+
+Like `poll`, doctor takes `--url`/`--id` first, then the environment, then the
+installed config, so it works right after `install` without exporting anything.
+The token comes only from `--token` or `MANSIO_TOKEN`.
 
 The exit code is non-zero if any check fails. The token is never printed. If a
 Codex hook is installed, doctor reminds you to review it with `/hooks`; Codex
@@ -137,7 +144,8 @@ mansio-agent uninstall codex --dry-run
 ```
 
 Uninstall removes only the `mansio` MCP entry and hooks whose command starts
-with `mansio-agent poll`. Everything else in the file is preserved.
+with `mansio-agent poll`. Everything else in the file is preserved. It does not
+restore or overwrite the `.bak` copy.
 
 ## Generated config shapes
 
