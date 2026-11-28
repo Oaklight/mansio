@@ -21,6 +21,7 @@ from mansio_core.principal import PrincipalKind
 from mansio_core.token_store import TokenStore
 from mansio_web import MansioServer
 from mansio_web.adapters import HttpAdapter
+from mansio_web.adapters.http import _principal_from_validation
 from mansio_web.admin import AdminServer
 from mansio_web.admin.auth import SessionAuth
 
@@ -185,6 +186,22 @@ class TestAuthMatrix:
                 "No API tokens configured. Create a token via the admin panel before connecting."
             ),
         }
+
+
+class TestValidationMapping:
+    def test_scoped_id_maps_to_user(self) -> None:
+        principal = _principal_from_validation("agent-1")
+        assert principal.kind is PrincipalKind.USER
+        assert principal.user_id == "agent-1"
+
+    def test_none_maps_to_supertoken(self) -> None:
+        principal = _principal_from_validation(None)
+        assert principal.kind is PrincipalKind.SUPERTOKEN
+
+    @pytest.mark.parametrize("value", [True, False, object()])
+    def test_unexpected_result_never_becomes_privileged(self, value: object) -> None:
+        with pytest.raises(TypeError, match="unexpected token validation result"):
+            _principal_from_validation(value)  # type: ignore[arg-type]
 
 
 class TestPublicPaths:
