@@ -123,18 +123,26 @@ def subscribe_bridged(
     no per-message filter: once a channel is bridged, every message on it
     reaches the transport. No :class:`Principal` is involved, so a privileged
     caller cannot bypass the visibility rule.
+
+    If a subscribe fails partway, the handles built so far are released
+    before the error propagates: a caller that never received them could not
+    release them, and a reconnect would otherwise duplicate delivery.
     """
     handles: dict[str, str] = {}
     skipped: list[str] = []
-    for channel in dict.fromkeys(channels):
-        if not bridgeable(ctx, channel):
-            skipped.append(channel)
-            continue
+    try:
+        for channel in dict.fromkeys(channels):
+            if not bridgeable(ctx, channel):
+                skipped.append(channel)
+                continue
 
-        def _callback(message: Message, target: str = channel) -> None:
-            on_message(target, message)
+            def _callback(message: Message, target: str = channel) -> None:
+                on_message(target, message)
 
-        handles[channel] = ctx.bus.subscribe(channel, _callback)
+            handles[channel] = ctx.bus.subscribe(channel, _callback)
+    except Exception:
+        unsubscribe(ctx, list(handles.values()))
+        raise
     return handles, skipped
 
 

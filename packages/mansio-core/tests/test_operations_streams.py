@@ -51,8 +51,11 @@ class _FakeBus:
         self.channel_meta: dict[str, ChannelMeta | None] = {}
         self.meta_not_supported = False
         self.meta_calls: list[str] = []
+        self.subscribe_failures: set[str] = set()
 
     def subscribe(self, channel: str, callback: Any) -> str:
+        if channel in self.subscribe_failures:
+            raise RuntimeError(f"cannot subscribe {channel}")
         sub_id = f"sub-{len(self.subscriptions) + 1}"
         self.subscriptions[sub_id] = (channel, callback)
         return sub_id
@@ -274,6 +277,13 @@ class TestSubscribeBridged:
         handles, _ = subscribe_bridged(ctx, ["tasks", "tasks"], lambda channel, message: None)
         assert handles == {"tasks": "sub-1"}
         assert len(bus.subscriptions) == 1
+
+    def test_a_failed_subscribe_releases_the_earlier_handles(self, ctx, bus) -> None:
+        """The caller never receives the handles, so they must not leak."""
+        bus.subscribe_failures = {"sync"}
+        with pytest.raises(RuntimeError, match="cannot subscribe sync"):
+            subscribe_bridged(ctx, ["tasks", "sync"], lambda channel, message: None)
+        assert bus.unsubscribed == ["sub-1"]
 
     def test_no_channels_subscribes_nothing(self, ctx, bus) -> None:
         handles, skipped = subscribe_bridged(ctx, [], lambda channel, message: None)
