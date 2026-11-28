@@ -94,7 +94,7 @@
   <div class="eyebrow">MANSIO · Architecture</div>
   <h1>现状与目标并列：问题在哪里</h1>
   <p class="lede">
-    左列是 <code>master @ 2233c3c</code> 的实际结构（M1–M4g 与 Agent 入口 v1 已合并），右列是 core/web/transport 重构与前端重设计的目标结构。
+    左列是 <code>master @ 2233c3c</code> 的实际结构（M1–M4g 与 Agent 入口 v1 已合并）；右列是已落地的决策结构；09 节是据此重新划定的目标架构 v2（入口 / 中间件 / 出口，尚未实现）。
     每个节点标出文件规模与职责，红色表示层次倒置或重复，橙色表示 god module，绿色表示目标态新增的接口与包。
     合并任一重构 PR 后，本页按迁移阶段更新“现状”一列。
   </p>
@@ -122,6 +122,7 @@
   <a href="#details">06 现状细节</a>
   <a href="#migration">07 迁移阶段</a>
   <a href="#agents">08 Agent 入口</a>
+  <a href="#target-v2">09 目标架构 v2</a>
 </nav>
 
 <section id="problems">
@@ -714,6 +715,96 @@ flowchart LR
     <strong>方向</strong>：先把入口固定，再把各运行时的原生通信逐步替换为中继通信。判断标准是 A7 的两身份测试，
     而不是“有没有 MCP”。现状：契约、安装器、<code>mansio_wait</code> 与验收测试都在 <code>master</code>，CI 每次运行验收测试。
     未覆盖：WS / in-process 传输仍是 03 节的未来项；旧 <code>examples/adapters/{hermes,openclaw,opencode,pi}</code> 不属契约。
+  </div>
+</section>
+
+<section id="target-v2">
+  <h2><span class="num">09</span>目标架构 v2：入口 / 中间件 / 出口</h2>
+  <p class="sub">
+    v1 的目标列（02/04/05）已按实际实现收敛；本节是下一阶段的目标，不改既有行为（唯一例外是 IRC 的 ACL 缺口，见 M6d）。
+    三条横带：入口适配器只做 wire 映射；中间件承载身份、策略、调度与存储；出口按投递语义划分，格式只是最后一层。
+    目标是让每条入口走同一条鉴权路径、每种出口声明同一种投递保证。
+  </p>
+  <div class="panel">
+    <div class="scroll">
+<pre class="mermaid">
+flowchart LR
+  subgraph AGENT["Agent 运行时"]
+    R["Claude Code · Codex&lt;br/&gt;其他 MCP 运行时"]
+  end
+  subgraph CLIENT["mansio-client"]
+    MCP["MCP 表面&lt;br/&gt;14 个稳定工具"]
+    DEL["Delivery&lt;br/&gt;Pull · Queue · Stream · Format"]
+    TR["Transport&lt;br/&gt;http + sse&lt;br/&gt;（未来 ws / in-process）"]
+  end
+  subgraph SERVER["mansio-web"]
+    IN["Ingress 适配器&lt;br/&gt;HTTP REST + SSE · IRC · Admin"]
+    OPS["Operations&lt;br/&gt;Principal → AuthZ → execute → DTO"]
+  end
+  subgraph CORE["mansio-core"]
+    PRIN["Principal&lt;br/&gt;user · supertoken · admin · service"]
+    AZ["AuthZ&lt;br/&gt;ChannelAuthorizer"]
+    BUS["Dispatch：Bus&lt;br/&gt;路由 · 队列租约 · 通知"]
+    BE["Backends&lt;br/&gt;SQLite · Memory · Maildir · NATS"]
+    CT["Contracts · types&lt;br/&gt;token_store"]
+  end
+  R -->|"MCP stdio"| MCP --> DEL --> TR -->|"HTTP + SSE"| IN --> OPS
+  OPS --> PRIN
+  OPS --> AZ
+  OPS --> BUS --> BE
+  OPS --> CT
+  OPS -.->|"Feed / Result DTO"| IN
+  class OPS,PRIN,DEL good
+  classDef good fill:#e8f5e9,stroke:#1a8f3c,color:#14532d
+</pre>
+    </div>
+  </div>
+  <h3>抽象与落点</h3>
+  <div class="panel">
+    <table>
+      <thead><tr><th>抽象</th><th>契约</th><th>当前问题</th><th>目标</th></tr></thead>
+      <tbody>
+        <tr><td>Principal</td><td>身份种类 + user id；core 类型</td><td><code>auth_result</code> 用 <code>str / None / True</code> 三态表达身份，语义靠调用方约定</td><td><code>Principal</code> 显式区分 user / supertoken / admin / service / anonymous</td></tr>
+        <tr><td>Operations</td><td>用例函数：publish · query · read · subscribe · channels · acl · queue · presence · admin</td><td>解析、身份、策略、序列化分散在 24 条 HTTP 路由与 admin/IRC 各自的实现里</td><td>core 内的 use-case 层；适配器只做 wire 映射</td></tr>
+        <tr><td>Dispatch</td><td><code>Bus</code>：路由、队列租约、通知、压缩</td><td>已收拢；鉴权由 <code>ChannelAuthorizer</code> 承担，Bus 不实现策略</td><td>保持；Operations 是唯一调用方</td></tr>
+        <tr><td>Storage</td><td><code>Backend</code> + 能力 Protocol</td><td>已收拢；NATS/Maildir 缺频道元数据/删除</td><td>保持，能力差异在文档标注</td></tr>
+        <tr><td>Transport（客户端）</td><td><code>mansio_core.transport.Transport</code></td><td>已收拢；HTTP+SSE 唯一实现</td><td>保持；新传输按工厂注册</td></tr>
+        <tr><td>ServerAdapter（服务端）</td><td>生命周期：attach · serve_forever · shutdown</td><td>协议在 <code>mansio_web/adapters/base.py</code>，只有 web 使用</td><td>移到 core 作为端口；实现仍在 web</td></tr>
+        <tr><td>Delivery</td><td>Pull（游标，至多一次）· Queue（租约，至少一次）· Stream（推送，建议性）</td><td>语义散落在 client mixins、SSE 处理和 MCP 工具里，靠文档约定</td><td>client 内三个实现 + 统一 Format；MCP 与 hook 只调用 Delivery</td></tr>
+        <tr><td>Format</td><td>MCP tool result · hook text · SSE frame · IRC PRIVMSG</td><td>每种出口各自拼装</td><td>只做呈现，不改变投递语义</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>边界规则（新增 R7–R9）</h3>
+  <div class="panel">
+    <table>
+      <thead><tr><th>规则</th><th>内容</th><th>检查</th></tr></thead>
+      <tbody>
+        <tr><td>R7</td><td>适配器只通过 Operations 读写 Bus；不得直接调用 <code>bus.publish / set_acl / delete_*</code>，也不得自行判断 ACL</td><td>AST 扫描测试：适配器内禁止出现 Bus 写方法与 <code>*_denial / can_*</code> 调用</td></tr>
+        <tr><td>R8</td><td>MCP 工具只调用 Delivery / SDK；不得内嵌 wire 解析、身份规则或 HTTP 细节</td><td>同上，扫描 <code>mcp.py</code> 的调用面</td></tr>
+        <tr><td>R9</td><td>每种 wire 适配器必须显式产生 <code>Principal</code>；禁止用裸字符串/哨兵表达身份</td><td>类型检查 + 中间件测试覆盖 supertoken / scoped / no-auth / admin / IRC</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>迁移阶段</h3>
+  <div class="panel">
+    <table>
+      <thead><tr><th>阶段</th><th>内容</th><th>gate</th></tr></thead>
+      <tbody>
+        <tr><td>M6a</td><td><code>Principal</code> + <code>OperationError</code> + <code>OperationContext</code> 进入 core；HTTP 中间件产出 Principal，替换 <code>auth_result</code> 三态</td><td>tester + ARCH</td></tr>
+        <tr><td>M6b</td><td><code>operations.messages</code>：publish / query / read；24 条 HTTP 路由中消息相关部分改为调用用例，golden 字节不变</td><td>tester + ARCH</td></tr>
+        <tr><td>M6c</td><td>channels / acl / queue / presence 用例；剩余总线路由迁移</td><td>tester + ARCH</td></tr>
+        <tr><td>M6d</td><td><code>subscribe</code> 用例：HTTP SSE 与 IRC 共用；IRC 开始强制 ACL（行为变更，写入 AGENT_ENTRY 与设计文档）</td><td>tester3 安全审计</td></tr>
+        <tr><td>M6e</td><td><code>ServerAdapter</code> 协议迁入 core；web 内实现改为导入新路径</td><td>CI + ARCH</td></tr>
+        <tr><td>M6f</td><td>client <code>Delivery</code>：Pull / Queue / Stream + Format；MCP 工具与 <code>mansio-agent poll</code> 改用</td><td>tester + ARCH</td></tr>
+        <tr><td>M6g</td><td>转发抽象 <code>Forwarder</code>：federation 作为实现；保持客户端组件并标注 experimental</td><td>暂缓</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout">
+    <strong>不做</strong>：不新增 ports 层（Transport 与 ServerAdapter 两个端口已足够）；不手写 JSON Schema；不拆 <code>mcp.py</code>；不把 admin 的扁平 <code>assets/</code> 改成 css/js 子目录；WS / in-process 传输按需再做。
+    <br>
+    <strong>不变</strong>：wire 字节、游标语义、队列租约、14 个稳定 MCP 工具、Admin 视图；M6a–M6f 只搬移边界与调用点。
   </div>
 </section>
 
