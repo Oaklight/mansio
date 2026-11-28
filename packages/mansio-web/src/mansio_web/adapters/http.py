@@ -95,10 +95,16 @@ _NO_TOKENS_MESSAGE = (
 
 
 def _principal_from_validation(result: str | None) -> Principal:
-    """Map ``TokenStore.validate()`` to the caller principal."""
+    """Map ``TokenStore.validate()`` to the caller principal.
+
+    The mapping is closed on purpose: an unexpected value raises instead of
+    falling back to a privileged principal.
+    """
     if isinstance(result, str):
         return Principal.user(result)
-    return Principal.supertoken()
+    if result is None:
+        return Principal.supertoken()
+    raise TypeError(f"unexpected token validation result: {result!r}")
 
 
 # Shortest interval between two presence writes for the same user. last_seen
