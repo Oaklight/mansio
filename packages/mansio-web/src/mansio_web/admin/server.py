@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from mansio_core.principal import Principal
+
 from mansio_web._vendor.httpserver import App, JSONResponse, Response
 from mansio_web._vendor.structlog import get_logger
 
@@ -275,8 +277,9 @@ class AdminServer:
             if request.method == "OPTIONS":
                 return Response(status_code=204, headers=cors_headers.copy())
 
-            # No auth configured → pass through
+            # No auth configured → pass through as an unauthenticated caller
             if auth is None:
+                request.state.principal = Principal.no_auth()
                 return None
 
             path = request.path.split("?")[0]
@@ -287,6 +290,7 @@ class AdminServer:
 
             session_token = request.cookies.get(SessionAuth.COOKIE_NAME)
             if session_token and auth.validate_session(session_token):
+                request.state.principal = Principal.admin()
                 return None
 
             return JSONResponse(

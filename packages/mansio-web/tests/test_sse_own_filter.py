@@ -2,7 +2,7 @@
 
 ``GET /v1/subscribe`` gains an opt-in ``exclude_own=true`` query flag for
 consumers that do not use the SDK.  Filtering uses the authenticated
-identity (``request.state.auth_result``), never a client-supplied user id,
+identity (``request.state.principal``), never a client-supplied user id,
 and applies to live delivery and Last-Event-ID replay alike.  A supertoken
 or a no-auth connection has no bound user, so the flag has no effect there.
 

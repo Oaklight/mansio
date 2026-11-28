@@ -19,6 +19,7 @@ from mansio_core.contracts import (
     stream_event_to_json,
     warning_event_to_json,
 )
+from mansio_core.principal import Principal
 
 from mansio_web._vendor.httpserver import App, StreamingResponse
 
@@ -43,7 +44,7 @@ class _SSESession:
     sub_ids: list[str]
     bus: Any
     channels: list[str]
-    auth_result: Any
+    principal: Principal
     last_event_id: str | None = None
     drop_lock: threading.Lock | None = None
     drop_counter: list[int] | None = None
@@ -57,7 +58,7 @@ class _SSESession:
 
 
 def _setup_sse_subscriptions(
-    bus: Bus, ch_list: list[str], auth_result: Any, exclude_own: bool = False
+    bus: Bus, ch_list: list[str], principal: Principal, exclude_own: bool = False
 ) -> tuple[asyncio.Queue[str | None], list[str], threading.Lock, list[int]]:
     """Subscribe to bus channels and return (queue, subscription_ids, drop_lock, drop_counter).
 
@@ -91,11 +92,10 @@ def _setup_sse_subscriptions(
                         drop_counter[0] += 1
 
             def _cb(msg: Message) -> None:
-                if isinstance(auth_result, str) and not _user_involved(
-                    auth_result, msg.channel, msg.sender
-                ):
+                user_id = principal.user_id
+                if user_id is not None and not _user_involved(user_id, msg.channel, msg.sender):
                     return
-                if exclude_own and msg.sender == auth_result:
+                if exclude_own and msg.sender == user_id:
                     return
                 data = stream_event_to_json(StreamEvent(channel=target_ch, message=msg))
                 loop.call_soon_threadsafe(_safe_enqueue, data)
@@ -173,10 +173,11 @@ async def _replay_missed_events(session: _SSESession) -> Any:
             yield _format_sse_warning(
                 WarningEvent(kind="truncated", count=_SSE_REPLAY_LIMIT, channel=ch)
             )
-        if isinstance(session.auth_result, str):
-            missed = [m for m in missed if _user_involved(session.auth_result, m.channel, m.sender)]
+        user_id = session.principal.user_id
+        if user_id is not None:
+            missed = [m for m in missed if _user_involved(user_id, m.channel, m.sender)]
             if session.exclude_own:
-                missed = [m for m in missed if m.sender != session.auth_result]
+                missed = [m for m in missed if m.sender != user_id]
         for m in missed:
             yield _format_sse_event(stream_event_to_json(StreamEvent(channel=ch, message=m)), m.id)
 
@@ -257,13 +258,14 @@ def register(app: App, ctx: RouteContext) -> None:
             if _invalid_dm_name(ch):
                 return _error("Bad Request", f"{DM_NAME_EXPECTED} (got '{ch}')", 400)
 
-        auth_result = request.state.auth_result
-        if isinstance(auth_result, str):
-            forbidden = [ch for ch in ch_list if not authz.can_read(auth_result, ch)]
+        principal = request.state.principal
+        user_id = principal.user_id
+        if user_id is not None:
+            forbidden = [ch for ch in ch_list if not authz.can_read(user_id, ch)]
             if forbidden:
                 return _error(
                     "Forbidden",
-                    f"Token for '{auth_result}' cannot subscribe to: {', '.join(forbidden)}",
+                    f"Token for '{user_id}' cannot subscribe to: {', '.join(forbidden)}",
                     403,
                 )
 
@@ -277,12 +279,10 @@ def register(app: App, ctx: RouteContext) -> None:
         exclude_own = exclude_own_param.strip().lower() == "true"
 
         q, sub_ids, drop_lock, drop_counter = _setup_sse_subscriptions(
-            bus, ch_list, auth_result, exclude_own
+            bus, ch_list, principal, exclude_own
         )
 
-        on_activity = (
-            partial(ctx.note_activity, auth_result) if isinstance(auth_result, str) else None
-        )
+        on_activity = partial(ctx.note_activity, user_id) if user_id is not None else None
 
         return StreamingResponse(
             _sse_event_generator(
@@ -291,7 +291,7 @@ def register(app: App, ctx: RouteContext) -> None:
                     sub_ids=sub_ids,
                     bus=bus,
                     channels=ch_list,
-                    auth_result=auth_result,
+                    principal=principal,
                     last_event_id=last_event_id,
                     drop_lock=drop_lock,
                     drop_counter=drop_counter,

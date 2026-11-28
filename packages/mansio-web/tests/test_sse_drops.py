@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "mansio-client", "src"))
 
 from mansio_core import Bus, MemoryBackend
+from mansio_core.principal import Principal
 from mansio_web.adapters.routes.sse import (
     _SSE_REPLAY_LIMIT,
     _drain_drop_counter,
@@ -57,7 +58,9 @@ class TestDropCounter(unittest.TestCase):
         loop = asyncio.new_event_loop()
 
         async def _run():
-            q, sub_ids, drop_lock, drop_counter = _setup_sse_subscriptions(bus, ["test-ch"], None)
+            q, sub_ids, drop_lock, drop_counter = _setup_sse_subscriptions(
+                bus, ["test-ch"], Principal.supertoken()
+            )
             # Fill the queue to capacity (256)
             for i in range(256):
                 q.put_nowait(f"event-{i}")
@@ -120,7 +123,7 @@ class TestDropWarningInGenerator(unittest.TestCase):
                     sub_ids=[],
                     bus=bus,
                     channels=["test-ch"],
-                    auth_result=None,
+                    principal=Principal.supertoken(),
                     last_event_id=None,
                     drop_lock=drop_lock,
                     drop_counter=drop_counter,
@@ -178,7 +181,7 @@ class TestDropWarningInGenerator(unittest.TestCase):
                     sub_ids=[],
                     bus=bus,
                     channels=["test-ch"],
-                    auth_result=None,
+                    principal=Principal.supertoken(),
                     last_event_id=None,
                     drop_lock=drop_lock,
                     drop_counter=drop_counter,
@@ -245,7 +248,7 @@ class TestQuietStreamDropWarning(unittest.TestCase):
                 sub_ids=[],
                 bus=bus,
                 channels=["quiet-ch"],
-                auth_result=None,
+                principal=Principal.supertoken(),
                 drop_lock=drop_lock,
                 drop_counter=drop_counter,
             )
@@ -275,7 +278,7 @@ class TestQuietStreamDropWarning(unittest.TestCase):
                 sub_ids=[],
                 bus=bus,
                 channels=["quiet-ch"],
-                auth_result=None,
+                principal=Principal.supertoken(),
                 drop_lock=drop_lock,
                 drop_counter=drop_counter,
             )
@@ -301,7 +304,7 @@ class TestReplayTruncationWarning(unittest.TestCase):
             sub_ids=[],
             bus=bus,
             channels=[channel],
-            auth_result=None,
+            principal=Principal.supertoken(),
             last_event_id=last_event_id,
         )
         try:

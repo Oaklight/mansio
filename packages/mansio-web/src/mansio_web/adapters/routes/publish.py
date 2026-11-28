@@ -14,6 +14,7 @@ from mansio_core.contracts import (
     parse_publish,
     parse_query,
 )
+from mansio_core.principal import Principal
 
 from mansio_web._vendor.httpserver import App
 
@@ -54,15 +55,16 @@ async def _dm_unregistered_warning(bus: Any, channel: str, sender: str) -> str |
     return None
 
 
-def _filter_visible_messages(auth_result: Any, msgs: list[Message]) -> list[Message]:
+def _filter_visible_messages(principal: Principal, msgs: list[Message]) -> list[Message]:
     """Filter messages to only those visible to the authenticated agent.
 
     Supertokens and no-auth mode see all messages.  Scoped tokens
     only see messages where ``_user_involved`` returns True.
     """
-    if not isinstance(auth_result, str):
+    user_id = principal.user_id
+    if user_id is None:
         return msgs
-    return [m for m in msgs if _user_involved(auth_result, m.channel, m.sender)]
+    return [m for m in msgs if _user_involved(user_id, m.channel, m.sender)]
 
 
 def register(app: App, ctx: RouteContext) -> None:
@@ -78,9 +80,9 @@ def register(app: App, ctx: RouteContext) -> None:
         except ContractError as err:
             return _bad_request(err)
 
-        auth_result = request.state.auth_result
+        principal = request.state.principal
         auth_error = _validate_and_auth_publish(
-            auth_result,
+            principal,
             payload.sender,
             payload.channel,
             msg_type=payload.msg_type,
@@ -123,11 +125,12 @@ def register(app: App, ctx: RouteContext) -> None:
         # Early access check: scoped tokens cannot query private
         # channels they don't belong to.  This also prevents leaking
         # the total message count (issue #251).
-        auth_result = request.state.auth_result
-        if isinstance(auth_result, str) and not authz.can_read(auth_result, qp.channel):
+        principal = request.state.principal
+        user_id = principal.user_id
+        if user_id is not None and not authz.can_read(user_id, qp.channel):
             return _error(
                 "Forbidden",
-                f"Token for '{auth_result}' cannot query channel '{qp.channel}'",
+                f"Token for '{user_id}' cannot query channel '{qp.channel}'",
                 403,
             )
 
@@ -143,7 +146,7 @@ def register(app: App, ctx: RouteContext) -> None:
             offset=qp.offset,
         )
 
-        msgs = _filter_visible_messages(auth_result, msgs)
+        msgs = _filter_visible_messages(principal, msgs)
 
         total = await asyncio.to_thread(bus.message_count, qp.channel)
         has_more = len(msgs) == qp.limit
