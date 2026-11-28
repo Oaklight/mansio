@@ -250,7 +250,7 @@ class TestIrcToMansio:
 
     def test_pubmsg_publishes_to_bus(self) -> None:
         """Public IRC message is published to the mapped mansio channel."""
-        adapter = IrcAdapter(channels=["tasks"])
+        adapter = IrcAdapter(channels=["tasks"], allow_unauthenticated=True)
         bus = Bus(backend=MemoryBackend())
         adapter.attach(bus)
 
@@ -385,8 +385,8 @@ class TestInboundIdentity:
     def test_unmapped_nick_without_token_store_publishes_as_itself(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """No token store means the adapter keeps its no-auth behaviour."""
-        adapter = IrcAdapter(channels=["tasks"])
+        """The no-auth fallback is opt-in even without a token store."""
+        adapter = IrcAdapter(channels=["tasks"], allow_unauthenticated=True)
         bus = Bus(backend=MemoryBackend())
         adapter.attach(bus)
 
@@ -466,10 +466,15 @@ class TestInboundIdentity:
         with pytest.raises(ValueError, match="alice"):
             IrcAdapter(channels=["tasks"], users={"alice": user_id})
 
-    def test_allow_unauthenticated_follows_the_token_store(self, tmp_path) -> None:
+    def test_allow_unauthenticated_is_opt_in_and_needs_no_token_store(self, tmp_path) -> None:
         store = TokenStore(str(tmp_path / "tokens.db"))
-        assert IrcAdapter(channels=["tasks"])._allow_unauthenticated is True
-        assert IrcAdapter(channels=["tasks"], token_store=store)._allow_unauthenticated is False
+        assert IrcAdapter(channels=["tasks"])._allow_unauthenticated is False
+        assert (
+            IrcAdapter(channels=["tasks"], allow_unauthenticated=True)._allow_unauthenticated
+            is True
+        )
+        with pytest.raises(ValueError, match="cannot be combined"):
+            IrcAdapter(channels=["tasks"], token_store=store, allow_unauthenticated=True)
 
     def test_nick_lookup_uses_irc_casemapping(self) -> None:
         adapter = IrcAdapter(channels=["tasks"], users={"Alice": "alice-agent-1"})
@@ -504,7 +509,7 @@ class TestInboundIdentity:
         assert "dropping message from unmapped nick bob" in caplog.text
 
     def test_no_auth_fallback_is_logged_per_message(self, caplog: pytest.LogCaptureFixture) -> None:
-        adapter = IrcAdapter(channels=["tasks"])
+        adapter = IrcAdapter(channels=["tasks"], allow_unauthenticated=True)
         bus = Bus(backend=MemoryBackend())
         adapter.attach(bus)
 
@@ -787,6 +792,39 @@ class TestOutboundVisibility:
 
         assert list(adapter._sub_ids) == ["tasks"]
         assert "keeping it" in caplog.text
+
+    def test_revalidation_survives_an_unsubscribe_error(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A failed unsubscribe keeps the handle and does not stop the tick."""
+        adapter = IrcAdapter(channels=["tasks", "sync"])
+        bus = Bus(backend=MemoryBackend())
+        adapter.attach(bus)
+
+        connection = MagicMock()
+        adapter._setup_bus_subscriptions(connection)
+        adapter._stop_revalidation()
+        assert list(adapter._sub_ids) == ["tasks", "sync"]
+
+        bus.create_channel("tasks", owner="agent-a", visibility="private")
+        bus.create_channel("sync", owner="agent-a", visibility="private")
+
+        real_unsubscribe = irc_module.streams.unsubscribe
+        calls = {"n": 0}
+
+        def flaky(ctx, sub_ids):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("backend unwatch failed")
+            real_unsubscribe(ctx, sub_ids)
+
+        monkeypatch.setattr(irc_module.streams, "unsubscribe", flaky)
+        with caplog.at_level(logging.ERROR, logger=_LOGGER):
+            adapter._revalidate_channels()
+
+        # The first channel kept its handle; the loop still processed the next.
+        assert list(adapter._sub_ids) == ["tasks"]
+        assert "could not unsubscribe 'tasks'" in caplog.text
 
     def test_long_payload_is_truncated_within_the_irc_limit(self) -> None:
         adapter = IrcAdapter(channels=["tasks"])

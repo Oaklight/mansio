@@ -699,14 +699,19 @@ are public by definition, so bridging one makes it readable by everyone on IRC.
 channel on a backend without a ChannelStore, counts as public) and a separate
 daemon thread re-checks every five seconds; a channel that turns private stops
 being forwarded within one period. One message can still slip through if a
-publish races a failing check.
+publish races a failing check. A channel skipped at connect is retried only on
+reconnect, not by the revalidation loop.
+
+Prefix checks are case-sensitive because channel names are lowercase by
+contract; a mixed-case `DM:` name is an ordinary public channel to the bus, so
+the bridge treats it the same way.
 
 `users` maps an IRC nick to a mansio user id (repeat the `--irc-user NICK=USER`
-flag on the command line); keys and lookups use the IRC library's casemapping.
-Construction rejects an empty nick, the bot's own nick, two nicks that casemap to
-the same name, one user id mapped twice, and an invalid user id. The mapping is
-resolved per message from the current nick, so a nick change to an unmapped name
-stops publishing.
+flag on the command line); keys and lookups fold with RFC1459 casemapping,
+whatever CASEMAPPING the server announces. Construction rejects an empty nick,
+the bot's own nick, two nicks that casemap to the same name, one user id mapped
+twice, and an invalid user id. The mapping is resolved per message from the
+current nick, so a nick change to an unmapped name stops publishing.
 
 The map is authorization, not authentication: the adapter does not log in to the
 IRC server (no SASL), so the operator's server must guarantee nick ownership. A
@@ -718,8 +723,9 @@ assumption, and every such change is logged in both directions.
   apply exactly as they do for an API caller. `metadata` keeps
   `{"source": "irc", "irc_nick": <nick>}`.
 - An unmapped nick publishes as `Principal.no_auth()` with the nick as sender
-  only when there is no token store and `allow_unauthenticated` is true; each
-  such message is logged. With a token store it is logged and dropped.
+  only when there is no token store and `allow_unauthenticated=True` (off by
+  default; combining it with a token store raises); each such message is
+  logged. With a token store it is logged and dropped.
 - A publish rejected with `OperationError` is logged with its kind and message
   and then dropped; it never escapes into the bot loop.
 
