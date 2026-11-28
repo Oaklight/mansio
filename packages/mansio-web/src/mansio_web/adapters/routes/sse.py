@@ -9,8 +9,6 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from mansio_core.authz import DM_NAME_EXPECTED
-from mansio_core.authz import user_involved as _user_involved
 from mansio_core.contracts import (
     ContractError,
     StreamEvent,
@@ -19,17 +17,17 @@ from mansio_core.contracts import (
     stream_event_to_json,
     warning_event_to_json,
 )
-from mansio_core.operations.validation import invalid_dm_name
+from mansio_core.operations import OperationContext, OperationError, streams
+from mansio_core.operations.streams import StreamRequest
 from mansio_core.principal import Principal
 
 from mansio_web._vendor.httpserver import App, StreamingResponse
 
-from ._common import _error
+from ._common import _error, _operation_error
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from mansio_core.bus import Bus
     from mansio_core.types import Message
 
     from mansio_web._vendor.httpserver import Request
@@ -43,7 +41,7 @@ class _SSESession:
 
     queue: asyncio.Queue[str | None]
     sub_ids: list[str]
-    bus: Any
+    operations: OperationContext
     channels: list[str]
     principal: Principal
     last_event_id: str | None = None
@@ -59,7 +57,10 @@ class _SSESession:
 
 
 def _setup_sse_subscriptions(
-    bus: Bus, ch_list: list[str], principal: Principal, exclude_own: bool = False
+    operations: OperationContext,
+    ch_list: list[str],
+    principal: Principal,
+    exclude_own: bool = False,
 ) -> tuple[asyncio.Queue[str | None], list[str], threading.Lock, list[int]]:
     """Subscribe to bus channels and return (queue, subscription_ids, drop_lock, drop_counter).
 
@@ -73,38 +74,31 @@ def _setup_sse_subscriptions(
     """
     loop = asyncio.get_running_loop()
     q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=256)
-    sub_ids: list[str] = []
     drop_lock = threading.Lock()
     drop_counter: list[int] = [0]  # mutable single-element for cross-thread access
 
-    for ch in ch_list:
+    def _safe_enqueue(data: str) -> None:
+        try:
+            q.put_nowait(data)
+        except asyncio.QueueFull:
+            # Backpressure: drop oldest, enqueue new event
+            with contextlib.suppress(asyncio.QueueEmpty):
+                q.get_nowait()
+            with contextlib.suppress(asyncio.QueueFull):
+                q.put_nowait(data)
+            with drop_lock:
+                drop_counter[0] += 1
 
-        def _make_callback(target_ch: str) -> Any:
-            def _safe_enqueue(data: str) -> None:
-                try:
-                    q.put_nowait(data)
-                except asyncio.QueueFull:
-                    # Backpressure: drop oldest, enqueue new event
-                    with contextlib.suppress(asyncio.QueueEmpty):
-                        q.get_nowait()
-                    with contextlib.suppress(asyncio.QueueFull):
-                        q.put_nowait(data)
-                    with drop_lock:
-                        drop_counter[0] += 1
+    def _on_message(target_ch: str, message: Message) -> None:
+        data = stream_event_to_json(StreamEvent(channel=target_ch, message=message))
+        loop.call_soon_threadsafe(_safe_enqueue, data)
 
-            def _cb(msg: Message) -> None:
-                user_id = principal.user_id
-                if user_id is not None and not _user_involved(user_id, msg.channel, msg.sender):
-                    return
-                if exclude_own and msg.sender == user_id:
-                    return
-                data = stream_event_to_json(StreamEvent(channel=target_ch, message=msg))
-                loop.call_soon_threadsafe(_safe_enqueue, data)
-
-            return _cb
-
-        sid = bus.subscribe(ch, _make_callback(ch))
-        sub_ids.append(sid)
+    sub_ids = streams.subscribe(
+        operations,
+        principal,
+        StreamRequest(channels=list(ch_list), exclude_own=exclude_own),
+        _on_message,
+    )
 
     return q, sub_ids, drop_lock, drop_counter
 
@@ -166,21 +160,23 @@ async def _replay_missed_events(session: _SSESession) -> Any:
     exactly the limit is waiting. Unlike ``dropped``, this warning names
     one channel.
     """
-    for ch in session.channels:
-        missed = await asyncio.to_thread(
-            session.bus.query, ch, after=session.last_event_id, limit=_SSE_REPLAY_LIMIT
-        )
-        if len(missed) >= _SSE_REPLAY_LIMIT:
+    replayed = await asyncio.to_thread(
+        streams.replay,
+        session.operations,
+        session.principal,
+        StreamRequest(channels=session.channels, exclude_own=session.exclude_own),
+        session.last_event_id or "",
+        _SSE_REPLAY_LIMIT,
+    )
+    for channel, missed, truncated in replayed:
+        if truncated:
             yield _format_sse_warning(
-                WarningEvent(kind="truncated", count=_SSE_REPLAY_LIMIT, channel=ch)
+                WarningEvent(kind="truncated", count=_SSE_REPLAY_LIMIT, channel=channel)
             )
-        user_id = session.principal.user_id
-        if user_id is not None:
-            missed = [m for m in missed if _user_involved(user_id, m.channel, m.sender)]
-            if session.exclude_own:
-                missed = [m for m in missed if m.sender != user_id]
-        for m in missed:
-            yield _format_sse_event(stream_event_to_json(StreamEvent(channel=ch, message=m)), m.id)
+        for message in missed:
+            yield _format_sse_event(
+                stream_event_to_json(StreamEvent(channel=channel, message=message)), message.id
+            )
 
 
 async def _sse_event_generator(session: _SSESession) -> Any:
@@ -240,35 +236,23 @@ async def _sse_event_generator(session: _SSESession) -> Any:
             if warning:
                 yield warning
     finally:
-        for sid in session.sub_ids:
-            session.bus.unsubscribe(sid)
+        streams.unsubscribe(session.operations, session.sub_ids)
 
 
 def register(app: App, ctx: RouteContext) -> None:
     """Register the SSE subscribe routes."""
-    bus = ctx.bus
-    authz = ctx.authz
+    operations = OperationContext(
+        bus=ctx.bus,
+        authz=ctx.authz,
+        token_store=ctx.token_store,
+        allow_unauthenticated=ctx.allow_unauthenticated,
+    )
     cors = ctx.cors_origin
 
     async def _handle_subscribe(request: Request, ch_list: list[str]) -> StreamingResponse | tuple:
         """Shared SSE handler for all subscribe endpoints."""
         if not ch_list:
             return _error("Bad Request", "At least one channel required", 400)
-
-        for ch in ch_list:
-            if invalid_dm_name(ch):
-                return _error("Bad Request", f"{DM_NAME_EXPECTED} (got '{ch}')", 400)
-
-        principal = request.state.principal
-        user_id = principal.user_id
-        if user_id is not None:
-            forbidden = [ch for ch in ch_list if not authz.can_read(user_id, ch)]
-            if forbidden:
-                return _error(
-                    "Forbidden",
-                    f"Token for '{user_id}' cannot subscribe to: {', '.join(forbidden)}",
-                    403,
-                )
 
         # Parse Last-Event-ID for cursor-based resume
         last_event_id = request.headers.get("last-event-id", "").strip() or None
@@ -279,8 +263,20 @@ def register(app: App, ctx: RouteContext) -> None:
         exclude_own_param = (request.query_params.get("exclude_own") or ["false"])[0]
         exclude_own = exclude_own_param.strip().lower() == "true"
 
+        principal = request.state.principal
+        user_id = principal.user_id
+        try:
+            await asyncio.to_thread(
+                streams.validate,
+                operations,
+                principal,
+                StreamRequest(channels=ch_list, exclude_own=exclude_own),
+            )
+        except OperationError as err:
+            return _operation_error(err)
+
         q, sub_ids, drop_lock, drop_counter = _setup_sse_subscriptions(
-            bus, ch_list, principal, exclude_own
+            operations, ch_list, principal, exclude_own
         )
 
         on_activity = partial(ctx.note_activity, user_id) if user_id is not None else None
@@ -290,7 +286,7 @@ def register(app: App, ctx: RouteContext) -> None:
                 _SSESession(
                     queue=q,
                     sub_ids=sub_ids,
-                    bus=bus,
+                    operations=operations,
                     channels=ch_list,
                     principal=principal,
                     last_event_id=last_event_id,

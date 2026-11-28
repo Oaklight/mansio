@@ -7,10 +7,9 @@ remove its entry in the same change; the test then fails until it does.
 
 Planned replacements, per the target architecture:
 
-- ``adapters/irc.py`` and ``adapters/routes/sse.py``: the subscribe path
-  (M6d).
+- ``adapters/irc.py``: the subscribe path and inbound publish (M6d-2).
 - ``admin/view.py`` and ``admin/routes/messages.py``: admin operations.
-- Channels, ACL, messages, queue, and presence already live in
+- Channels, ACL, messages, queue, presence, and streams already live in
   ``mansio_core.operations``.
 
 The scanner counts ``<bus>.<attr>`` loads, where ``<bus>`` is the name
@@ -33,7 +32,6 @@ ALLOWED_LIFECYCLE = {"close"}
 # file -> attribute -> number of accesses. Shrinks stage by stage.
 KNOWN_VIOLATIONS: dict[str, dict[str, int]] = {
     "adapters/irc.py": {"publish": 1, "subscribe": 1, "unsubscribe": 2},
-    "adapters/routes/sse.py": {"query": 1, "subscribe": 1, "unsubscribe": 1},
     "admin/routes/messages.py": {"publish": 1},
     "admin/view.py": {
         "channels": 1,
