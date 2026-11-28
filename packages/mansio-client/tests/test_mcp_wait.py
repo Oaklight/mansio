@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from mansio_client import mcp
+from mansio_client.delivery import agent as delivery_agent
 from mansio_client.mcp import _DISPATCH, _TOOLS, _call_tool, _tool_wait
 from mansio_core.types import Message
 
@@ -51,7 +51,7 @@ def _message(payload: str = "hello") -> Message:
 @pytest.fixture()
 def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
     replacement = _Clock()
-    monkeypatch.setattr(mcp, "time", replacement)
+    monkeypatch.setattr(delivery_agent, "time", replacement)
     return replacement
 
 

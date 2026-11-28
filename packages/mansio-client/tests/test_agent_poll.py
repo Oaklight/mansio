@@ -40,10 +40,10 @@ class _FakeClient:
     def __exit__(self, *args: object) -> None:
         pass
 
-    def channel_list(self) -> list[str]:
+    def channel_list(self, *, detail: bool = False) -> list[str]:
         return ["general", "_system:agents"]
 
-    def channel_poll(self, channel: str) -> list:
+    def channel_poll(self, channel: str, *, include_own: bool = False) -> list:
         self.polled.append(channel)
         if channel == "general":
             return [SimpleNamespace(sender="alice", payload="hello")]
