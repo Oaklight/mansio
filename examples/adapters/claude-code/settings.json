@@ -2,11 +2,7 @@
   "mcpServers": {
     "mansio": {
       "command": "mansio-mcp",
-      "args": [
-        "--url", "http://localhost:8742",
-        "--user-id", "claude-code",
-        "--token", "mst-your-token-here"
-      ]
+      "args": []
     }
   },
   "hooks": {
@@ -15,12 +11,11 @@
         "matcher": "startup|resume",
         "hooks": [
           {
-            "type": "mcp_tool",
-            "server": "mansio",
-            "tool": "mansio_poll",
-            "input": { "channel": "inbox" },
-            "timeout": 10,
-            "statusMessage": "Checking mansio inbox"
+            "type": "command",
+            "command": "mansio-agent",
+            "args": ["poll", "--format", "claude"],
+            "timeout": 15,
+            "statusMessage": "Checking mansio messages"
           }
         ]
       }
