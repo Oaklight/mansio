@@ -206,6 +206,17 @@ class TestParseIrcUsers:
         assert exc.value.code == 1
         logger.error.assert_called_once()
 
+    def test_repeated_nick_exits(self):
+        """An exact duplicate nick must not be overwritten silently."""
+        logger = MagicMock()
+        with pytest.raises(SystemExit) as exc:
+            _parse_irc_users(["alice=alice-agent-1", "alice=alice-agent-2"], logger)
+        assert exc.value.code == 1
+        logger.error.assert_called_once()
+        assert logger.error.call_args.kwargs["nick"] == "alice"
+        assert logger.error.call_args.kwargs["previous"] == "alice-agent-1"
+        assert logger.error.call_args.kwargs["value"] == "alice-agent-2"
+
     def test_user_id_validation_is_deferred_to_the_adapter(self):
         """A syntactically valid NICK=USER pair passes the CLI layer."""
         logger = MagicMock()
