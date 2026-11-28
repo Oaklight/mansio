@@ -16,6 +16,7 @@ from mansio_core.authz import (
     dm_channel_error,
 )
 from mansio_core.contracts import ContractError, ErrorResult
+from mansio_core.principal import Principal
 
 if TYPE_CHECKING:
     from mansio_core.token_store import TokenStore
@@ -94,7 +95,7 @@ def _validate_channel_name(
 
 
 def _validate_and_auth_publish(
-    auth_result: Any,
+    principal: Principal,
     sender: str,
     channel: str,
     msg_type: str = "",
@@ -109,16 +110,15 @@ def _validate_and_auth_publish(
     if err:
         return err
 
-    if not isinstance(auth_result, str):
+    user_id = principal.user_id
+    if user_id is None:
         return None
 
     # Sender identity: token must match the declared sender
-    if sender != auth_result:
-        return _error(
-            "Forbidden", f"Token bound to '{auth_result}', cannot publish as '{sender}'", 403
-        )
+    if sender != user_id:
+        return _error("Forbidden", f"Token bound to '{user_id}', cannot publish as '{sender}'", 403)
 
-    denial = authz.publish_denial(auth_result, channel, msg_type) if authz else None
+    denial = authz.publish_denial(user_id, channel, msg_type) if authz else None
     if denial:
         return _error("Forbidden", denial, 403)
 

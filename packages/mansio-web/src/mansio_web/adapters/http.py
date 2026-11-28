@@ -53,6 +53,7 @@ import time
 from typing import TYPE_CHECKING
 
 from mansio_core.authz import ChannelAuthorizer
+from mansio_core.principal import Principal
 
 from mansio_web._vendor.httpserver import App, JSONResponse, Response, StreamingResponse
 from mansio_web._vendor.structlog import get_logger
@@ -91,6 +92,14 @@ _NO_TOKEN_STORE_MESSAGE = (
 _NO_TOKENS_MESSAGE = (
     "No API tokens configured. Create a token via the admin panel before connecting."
 )
+
+
+def _principal_from_validation(result: str | None) -> Principal:
+    """Map ``TokenStore.validate()`` to the caller principal."""
+    if isinstance(result, str):
+        return Principal.user(result)
+    return Principal.supertoken()
+
 
 # Shortest interval between two presence writes for the same user. last_seen
 # only has to stay fresh enough that users() still counts the user as online,
@@ -308,7 +317,7 @@ class HttpAdapter:
 
             if token_store is None:
                 if allow_unauthenticated:
-                    request.state.auth_result = True
+                    request.state.principal = Principal.no_auth()
                     return None
                 return JSONResponse(
                     _error_body("Forbidden", _NO_TOKEN_STORE_MESSAGE),
@@ -345,8 +354,8 @@ class HttpAdapter:
                     headers={"WWW-Authenticate": 'Bearer realm="mansio"'},
                 )
 
-            # result is str (user_id) or None (supertoken)
-            request.state.auth_result = result
+            # validate() returns a scoped user id or None (supertoken).
+            request.state.principal = _principal_from_validation(result)
             if isinstance(result, str):
                 self._note_activity(result)
             return None

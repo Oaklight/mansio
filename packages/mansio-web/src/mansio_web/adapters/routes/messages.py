@@ -58,9 +58,9 @@ def _register_delete_routes(app: App, ctx: RouteContext) -> None:
         if not channel_name:
             return _error("Bad Request", "Channel name required", 400)
 
-        auth_result = request.state.auth_result
-        if isinstance(auth_result, str):
-            denial = authz.delete_channel_denial(auth_result, channel_name)
+        user_id = request.state.principal.user_id
+        if user_id is not None:
+            denial = authz.delete_channel_denial(user_id, channel_name)
             if denial:
                 return _error("Forbidden", denial, 403)
 
@@ -79,19 +79,19 @@ def _register_delete_routes(app: App, ctx: RouteContext) -> None:
         if not message_id:
             return _error("Bad Request", "Message ID required", 400)
 
-        auth_result = request.state.auth_result
+        user_id = request.state.principal.user_id
 
         # For scoped tokens, verify the message belongs to the agent
-        if isinstance(auth_result, str):
+        if user_id is not None:
             found_msg = await asyncio.to_thread(bus.get_message, message_id)
 
             if found_msg is None:
                 return _error("Not Found", f"Message '{message_id}' not found", 404)
 
-            if not authz.can_delete_message(auth_result, found_msg):
+            if not authz.can_delete_message(user_id, found_msg):
                 return _error(
                     "Forbidden",
-                    f"Token for '{auth_result}' cannot delete messages "
+                    f"Token for '{user_id}' cannot delete messages "
                     f"from sender '{found_msg.sender}'",
                     403,
                 )
@@ -117,10 +117,8 @@ def _register_admin_cleanup(app: App, ctx: RouteContext) -> None:
 
     @app.post("/v1/admin/channels/cleanup")
     async def admin_cleanup(request: Request) -> dict | tuple:
-        auth_result = request.state.auth_result
-
-        # Admin only: supertoken (None) or no-auth mode (True)
-        if isinstance(auth_result, str):
+        # Admin only: a privileged principal (supertoken or no-auth).
+        if not request.state.principal.is_privileged:
             return _error("Forbidden", "Admin endpoints require a supertoken", 403)
 
         try:
@@ -173,10 +171,8 @@ def _register_admin_compact(app: App, ctx: RouteContext) -> None:
 
     @app.post("/v1/admin/compact")
     async def admin_compact(request: Request) -> dict | tuple:
-        auth_result = request.state.auth_result
-
-        # Admin only: supertoken (None) or no-auth mode (True)
-        if isinstance(auth_result, str):
+        # Admin only: a privileged principal (supertoken or no-auth).
+        if not request.state.principal.is_privileged:
             return _error("Forbidden", "Admin endpoints require a supertoken", 403)
 
         try:

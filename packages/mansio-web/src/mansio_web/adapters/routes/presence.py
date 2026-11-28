@@ -30,19 +30,20 @@ def register(app: App, ctx: RouteContext) -> None:
 
     @app.post("/v1/presence/heartbeat")
     async def presence_heartbeat(request: Request) -> dict | tuple:
-        auth_result = request.state.auth_result
+        principal = request.state.principal
         try:
             heartbeat = parse_heartbeat(_json_body(request, "JSON body required"))
         except ContractError as err:
             return _bad_request(err)
         user_id = heartbeat.user_id
         # A scoped token may only report its own user's presence.
-        # Supertokens (auth_result is None) and no-auth mode (True)
-        # keep acting on behalf of any user, as they do elsewhere.
-        if isinstance(auth_result, str) and user_id != auth_result:
+        # Supertokens and no-auth mode keep acting on behalf of any user,
+        # as they do elsewhere.
+        bound_user = principal.user_id
+        if bound_user is not None and user_id != bound_user:
             return _error(
                 "Forbidden",
-                f"Token bound to '{auth_result}', cannot heartbeat as '{user_id}'",
+                f"Token bound to '{bound_user}', cannot heartbeat as '{user_id}'",
                 403,
             )
         metadata = heartbeat.metadata

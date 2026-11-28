@@ -36,17 +36,17 @@ def register(app: App, ctx: RouteContext) -> None:
     async def channels(request: Request) -> dict | tuple:
         want_detail = parse_channels(request.query_params).detail
 
-        auth_result = request.state.auth_result
+        user_id = request.state.principal.user_id
 
         if want_detail:
-            if isinstance(auth_result, str):
-                all_detail = await asyncio.to_thread(_visible_channels_detail, auth_result)
+            if user_id is not None:
+                all_detail = await asyncio.to_thread(_visible_channels_detail, user_id)
             else:
                 all_detail = await asyncio.to_thread(bus.channels_detail)
             return ChannelsResult(channels=all_detail).to_dict()
 
-        if isinstance(auth_result, str):
-            all_channels = await asyncio.to_thread(_visible_channel_names, auth_result)
+        if user_id is not None:
+            all_channels = await asyncio.to_thread(_visible_channel_names, user_id)
         else:
             all_channels = cast(list[str], await asyncio.to_thread(bus.channels, detail=False))
         return ChannelsResult(channels=all_channels).to_dict()

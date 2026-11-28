@@ -14,6 +14,7 @@ from mansio_core.contracts import (
     parse_queue_claim,
     parse_queue_status,
 )
+from mansio_core.principal import Principal
 
 from mansio_web._vendor.httpserver import App
 
@@ -35,10 +36,10 @@ async def _handle_queue_status(request: Any, bus: Any, authz: ChannelAuthorizer)
         return _bad_request(err)
     message_id = status.message_id
 
-    auth_result = request.state.auth_result
-    if isinstance(auth_result, str):
+    user_id = request.state.principal.user_id
+    if user_id is not None:
         message = await asyncio.to_thread(bus.get_message, message_id)
-        if message is not None and not authz.can_read(auth_result, message.channel):
+        if message is not None and not authz.can_read(user_id, message.channel):
             # Same body as a message without queue state, so the answer does
             # not confirm that a private message exists.
             return _error("Not Found", "No queue status for this message", 404)
@@ -49,12 +50,11 @@ async def _handle_queue_status(request: Any, bus: Any, authz: ChannelAuthorizer)
     return QueueStatusResult(found=True, status=result).to_dict()
 
 
-def _resolve_claimed_by(auth_result: Any, claimed_by: str | None) -> tuple[str, tuple | None]:
-    """Resolve claimed_by from the auth context or the parsed request body."""
-    if auth_result is False:
-        return "", (_error("Unauthorized", "Valid token required", 401))
-    if isinstance(auth_result, str):
-        return auth_result, None
+def _resolve_claimed_by(principal: Principal, claimed_by: str | None) -> tuple[str, tuple | None]:
+    """Resolve claimed_by from the authenticated identity or the request body."""
+    user_id = principal.user_id
+    if user_id is not None:
+        return user_id, None
     if not claimed_by:
         return "", (_error("Bad Request", "Missing 'claimed_by'", 400))
     return claimed_by, None
@@ -72,13 +72,14 @@ def register(app: App, ctx: RouteContext) -> None:
             claim = parse_queue_claim(_json_body(request, "Invalid JSON"))
         except ContractError as err:
             return _bad_request(err)
-        auth_result = request.state.auth_result
-        claimed_by, err = _resolve_claimed_by(auth_result, claim.claimed_by)
+        principal = request.state.principal
+        claimed_by, err = _resolve_claimed_by(principal, claim.claimed_by)
         if err:
             return err
 
-        if isinstance(auth_result, str):
-            denial = await asyncio.to_thread(authz.claim_denial, auth_result, claim.channel)
+        user_id = principal.user_id
+        if user_id is not None:
+            denial = await asyncio.to_thread(authz.claim_denial, user_id, claim.channel)
             if denial:
                 return _error("Forbidden", denial, 403)
 
@@ -94,14 +95,15 @@ def register(app: App, ctx: RouteContext) -> None:
             ack = parse_queue_ack(_json_body(request, "Invalid JSON"))
         except ContractError as err:
             return _bad_request(err)
-        auth_result = request.state.auth_result
-        claimed_by, err = _resolve_claimed_by(auth_result, ack.claimed_by)
+        principal = request.state.principal
+        claimed_by, err = _resolve_claimed_by(principal, ack.claimed_by)
         if err:
             return err
 
-        if isinstance(auth_result, str):
+        user_id = principal.user_id
+        if user_id is not None:
             message = await asyncio.to_thread(bus.get_message, ack.message_id)
-            if message is not None and not authz.can_read(auth_result, message.channel):
+            if message is not None and not authz.can_read(user_id, message.channel):
                 # Same answer as "not claimed by you": an unauthorized
                 # caller learns nothing about the message's existence.
                 return QueueAckResult(acked=False).to_dict()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from mansio_core.authz import DM_PREFIX, ChannelAuthorizer
 from mansio_core.contracts import (
@@ -19,6 +19,7 @@ from mansio_core.contracts import (
     parse_acl_set,
     parse_channel_create,
 )
+from mansio_core.principal import Principal
 from mansio_core.types import ACLEntry
 
 from mansio_web._vendor.httpserver import App
@@ -37,19 +38,16 @@ def _now_iso() -> str:
 
 
 async def _require_acl_manage(
-    auth_result: Any, authz: ChannelAuthorizer, channel: str
+    principal: Principal, authz: ChannelAuthorizer, channel: str
 ) -> tuple[dict, int] | None:
     """Check that the current user may manage *channel*.
 
     Returns an error tuple (dict, status) if denied, or None if allowed.
     Supertokens and no-auth mode always pass.
     """
-    if isinstance(auth_result, str) and not await asyncio.to_thread(
-        authz.can_manage_acl, auth_result, channel
-    ):
-        return _error(
-            "Forbidden", f"Agent '{auth_result}' lacks manage permission on '{channel}'", 403
-        )
+    user_id = principal.user_id
+    if user_id is not None and not await asyncio.to_thread(authz.can_manage_acl, user_id, channel):
+        return _error("Forbidden", f"Agent '{user_id}' lacks manage permission on '{channel}'", 403)
     return None
 
 
@@ -77,13 +75,14 @@ def _register_channel_routes(app: App, ctx: RouteContext) -> None:
             if error:
                 return error
 
-        auth_result = request.state.auth_result
+        principal = request.state.principal
         owner = payload.owner or ""
-        if isinstance(auth_result, str):
-            denial = authz.create_denial(auth_result, name)
+        user_id = principal.user_id
+        if user_id is not None:
+            denial = authz.create_denial(user_id, name)
             if denial:
                 return _error("Forbidden", denial, 403)
-            owner = auth_result  # scoped tokens own what they create
+            owner = user_id  # scoped tokens own what they create
         elif not owner:
             return _error("Bad Request", "'owner' is required for supertoken/no-auth", 400)
 
@@ -100,8 +99,8 @@ def _register_channel_routes(app: App, ctx: RouteContext) -> None:
 
     @app.get("/v1/channels/<channel>/meta")
     async def get_channel_meta(request: Request, channel: str = "") -> dict | tuple:
-        auth_result = request.state.auth_result
-        if isinstance(auth_result, str) and not authz.can_read(auth_result, channel):
+        user_id = request.state.principal.user_id
+        if user_id is not None and not authz.can_read(user_id, channel):
             # 404, not 403: a denied caller must not learn from the
             # status code that a private channel exists.  The message is
             # the same one an unknown channel returns.
@@ -129,8 +128,8 @@ def _register_acl_read(app: App, ctx: RouteContext) -> None:
 
     @app.get("/v1/channels/<channel>/acl")
     async def get_acl(request: Request, channel: str = "") -> dict | tuple:
-        auth_result = request.state.auth_result
-        denied = await _require_acl_manage(auth_result, authz, channel)
+        principal = request.state.principal
+        denied = await _require_acl_manage(principal, authz, channel)
         if denied:
             return denied
 
@@ -154,8 +153,8 @@ def _register_acl_set(app: App, ctx: RouteContext) -> None:
 
     @app.put("/v1/channels/<channel>/acl")
     async def set_acl(request: Request, channel: str = "") -> dict | tuple:
-        auth_result = request.state.auth_result
-        denied = await _require_acl_manage(auth_result, authz, channel)
+        principal = request.state.principal
+        denied = await _require_acl_manage(principal, authz, channel)
         if denied:
             return denied
 
@@ -164,9 +163,8 @@ def _register_acl_set(app: App, ctx: RouteContext) -> None:
         except ContractError as err:
             return _bad_request(err)
 
-        auth_result = request.state.auth_result
         now = _now_iso()
-        granted_by = auth_result if isinstance(auth_result, str) else None
+        granted_by = principal.user_id
         entries = [
             ACLEntry(
                 channel=channel,
@@ -194,8 +192,8 @@ def _register_acl_add(app: App, ctx: RouteContext) -> None:
 
     @app.post("/v1/channels/<channel>/acl")
     async def add_acl_entry(request: Request, channel: str = "") -> dict | tuple:
-        auth_result = request.state.auth_result
-        denied = await _require_acl_manage(auth_result, authz, channel)
+        principal = request.state.principal
+        denied = await _require_acl_manage(principal, authz, channel)
         if denied:
             return denied
 
@@ -206,9 +204,8 @@ def _register_acl_add(app: App, ctx: RouteContext) -> None:
         user_id = payload.user_id
         permission = payload.permission
 
-        auth_result = request.state.auth_result
         now = _now_iso()
-        granted_by = auth_result if isinstance(auth_result, str) else None
+        granted_by = principal.user_id
         entry = ACLEntry(
             channel=channel,
             user_id=user_id,
@@ -242,8 +239,8 @@ def _register_acl_remove(app: App, ctx: RouteContext) -> None:
     async def remove_acl_entry(
         request: Request, channel: str = "", user_id: str = ""
     ) -> dict | tuple:
-        auth_result = request.state.auth_result
-        denied = await _require_acl_manage(auth_result, authz, channel)
+        principal = request.state.principal
+        denied = await _require_acl_manage(principal, authz, channel)
         if denied:
             return denied
 
